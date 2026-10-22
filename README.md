@@ -62,9 +62,15 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.example' http://127.0.0.
 
 The stream shows `job.queued`, `job.started` and `job.succeeded` for the job. Like the ping, `/dev/jobs/test-prompt` exists only in debug builds and needs the `X-Waypoint-Dev: 1` header.
 
+## Google account
+
+Gmail and Calendar access goes through one Google account that you connect with your own Google Cloud OAuth client. [docs/google-oauth.md](docs/google-oauth.md) walks through creating the client, the three `.env` settings (`WAYPOINT_GOOGLE_CLIENT_ID`, `WAYPOINT_GOOGLE_CLIENT_SECRET`, `WAYPOINT_TOKEN_KEY`) and connecting. Waypoint asks only for read-only Gmail and Calendar events, and stores the tokens encrypted.
+
+Once it's set up, open <http://127.0.0.1:8000/auth/google/connect> to connect, check `curl -s http://127.0.0.1:8000/auth/google`, and disconnect with `curl -s -X DELETE http://127.0.0.1:8000/auth/google`. Without the settings, everything else works and Google reports "not configured".
+
 ## API contract
 
-The API's OpenAPI 3.1 document is generated from the `#[utoipa::path]` annotations on the Rocket handlers (listed in `api/src/openapi.rs`) and committed at `api/openapi.json`. The web app's types are generated from that document into `web/src/lib/api/schema.d.ts` with openapi-typescript, and `#lib/api` exports a typed client (`createApiClient()`, built on openapi-fetch) plus the `Health`, `Job` and `Event` types. The debug-only `/dev` routes are not part of the contract.
+The API's OpenAPI 3.1 document is generated from the `#[utoipa::path]` annotations on the Rocket handlers (listed in `api/src/openapi.rs`) and committed at `api/openapi.json`. The web app's types are generated from that document into `web/src/lib/api/schema.d.ts` with openapi-typescript, and `#lib/api` exports a typed client (`createApiClient()`, built on openapi-fetch) plus the `Health`, `Job`, `Event` and `GoogleStatus` types. The debug-only `/dev` routes are not part of the contract.
 
 After changing any route or response type, regenerate both files and commit them:
 
