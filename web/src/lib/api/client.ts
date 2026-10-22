@@ -36,6 +36,20 @@ export type ApplicationEvent = components['schemas']['ApplicationEvent'];
 export type EventKind = components['schemas']['EventKind'];
 /** The kinds of timeline entry the user writes directly. */
 export type EntryKind = components['schemas']['EntryKind'];
+/** The `POST /captures` body. */
+export type CaptureRequest = components['schemas']['CaptureRequest'];
+/** A job posting's fields: the 200 body of `POST /captures` and a `capture_extract` job's result. */
+export type Capture = components['schemas']['Capture'];
+/** The fields of a {@link Capture}, ready to prefill the add form. */
+export type CapturedFields = components['schemas']['CapturedFields'];
+/** How a {@link Capture} was found. */
+export type CaptureMethod = components['schemas']['CaptureMethod'];
+/** The 202 body of `POST /captures`: Claude reads the page in this job. */
+export type CaptureQueued = components['schemas']['CaptureQueued'];
+/** The 502 body of `POST /captures`: why the page couldn't be read. */
+export type CaptureFailure = components['schemas']['CaptureFailure'];
+/** Why a page couldn't be read. */
+export type CaptureFailureReason = components['schemas']['CaptureFailureReason'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 

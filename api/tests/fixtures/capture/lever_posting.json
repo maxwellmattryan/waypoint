@@ -1,0 +1,26 @@
+{
+  "id": "5ac21346-8e0c-4494-8e7a-3eb92ff77902",
+  "text": "Product Designer",
+  "categories": {
+    "commitment": "Full-time",
+    "department": "Design",
+    "location": "",
+    "team": "Product",
+    "allLocations": []
+  },
+  "country": "US",
+  "workplaceType": "remote",
+  "createdAt": 1790000000000,
+  "descriptionPlain": "Design the product.",
+  "description": "<div>Design the product.</div>",
+  "lists": [],
+  "additional": "",
+  "hostedUrl": "https://jobs.lever.co/example-design-co/5ac21346-8e0c-4494-8e7a-3eb92ff77902",
+  "applyUrl": "https://jobs.lever.co/example-design-co/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply",
+  "salaryRange": {
+    "currency": "USD",
+    "interval": "per-year-salary",
+    "min": 140000,
+    "max": 165000
+  }
+}

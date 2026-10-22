@@ -12,6 +12,8 @@
 		open?: boolean;
 		/** Prefilled values; the current application when editing. */
 		initial?: Partial<NewApplication>;
+		/** Optional text under the title, e.g. where prefilled values came from. */
+		description?: string;
 		/** Called with the stored application after a successful save; the dialog is closed by then. */
 		onsaved?: (application: Application) => void;
 	} & (
@@ -67,7 +69,13 @@
 	}
 </script>
 
-<Dialog bind:open {title} size="lg" onclose={() => (errors = [])}>
+<Dialog
+	bind:open
+	{title}
+	description={props.description}
+	size="lg"
+	onclose={() => (errors = [])}
+>
 	{#if props.mode === 'create'}
 		{@const save = props.save}
 		<ApplicationForm

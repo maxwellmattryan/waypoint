@@ -148,6 +148,10 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.example' http://127.0.0.
 
 The stream shows `job.queued`, `job.started` and `job.succeeded` for the job. Like the ping, `/dev/jobs/test-prompt` exists only in debug builds and needs the `X-Waypoint-Dev: 1` header.
 
+## Capture from URL
+
+On the Applications page, **Capture from URL** reads a job posting's link and opens the add form prefilled for you to check. It uses the page's JSON-LD first, then the Greenhouse, Lever or Ashby posting API, and asks Claude to read the page text only when neither has the details. [docs/capture.md](docs/capture.md) covers the tiers, the limits, the redirect guard and what is sent to Claude.
+
 ## Google account
 
 Gmail and Calendar access goes through one Google account that you connect with your own Google Cloud OAuth client. [docs/google-oauth.md](docs/google-oauth.md) walks through creating the client, the three `.env` settings (`WAYPOINT_GOOGLE_CLIENT_ID`, `WAYPOINT_GOOGLE_CLIENT_SECRET`, `WAYPOINT_TOKEN_KEY`) and connecting. Waypoint asks only for read-only Gmail and Calendar events, and stores the tokens encrypted.

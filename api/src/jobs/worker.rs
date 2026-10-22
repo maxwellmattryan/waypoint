@@ -11,7 +11,8 @@ use sqlx::PgPool;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
-use super::{Config, Job, TEST_PROMPT};
+use super::{CAPTURE_EXTRACT, Config, Job, TEST_PROMPT};
+use crate::capture::{self, llm::LlmError};
 use crate::claude::{ClaudeError, ClaudeRequest, ClaudeRunner};
 use crate::events::{Event, EventBus};
 
@@ -218,6 +219,7 @@ async fn run_job(ctx: Context, job: Job, _permit: OwnedSemaphorePermit) {
 async fn dispatch(ctx: &Context, job: &Job) -> JobOutcome {
     match job.kind.as_str() {
         TEST_PROMPT => test_prompt(ctx, &job.payload).await,
+        CAPTURE_EXTRACT => capture_extract(ctx, &job.payload).await,
         other => JobOutcome::Fail(format!("unknown job kind {other:?}")),
     }
 }
@@ -247,6 +249,20 @@ async fn test_prompt(ctx: &Context, payload: &Value) -> JobOutcome {
             "log_id": res.log_id,
         })),
         Err(err) => claude_failure(&err),
+    }
+}
+
+/// `capture_extract`: Claude reads a page's text; the result is a `Capture`.
+async fn capture_extract(ctx: &Context, payload: &Value) -> JobOutcome {
+    match capture::llm::extract(&ctx.runner, &ctx.pool, payload).await {
+        Ok(capture) => match serde_json::to_value(capture) {
+            Ok(result) => JobOutcome::Done(result),
+            Err(err) => JobOutcome::Fail(format!("cannot serialize the capture: {err}")),
+        },
+        Err(LlmError::Payload(err)) => {
+            JobOutcome::Fail(format!("invalid {CAPTURE_EXTRACT} payload: {err}"))
+        }
+        Err(LlmError::Claude(err)) => claude_failure(&err),
     }
 }
 

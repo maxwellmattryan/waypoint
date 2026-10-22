@@ -219,6 +219,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/captures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reads a job posting URL and returns its fields for the add form, or queues Claude to
+         *     read the page.
+         */
+        post: operations["capture_url"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events": {
         parameters: {
             query?: never;
@@ -394,6 +414,49 @@ export interface components {
          * @enum {string}
          */
         ApplicationStatus: "sourced" | "applied" | "interviewing" | "offer" | "rejected";
+        /** @description A capture: the 200 body, and a succeeded `capture_extract` job's `result`. */
+        Capture: {
+            fields: components["schemas"]["CapturedFields"];
+            method: components["schemas"]["CaptureMethod"];
+        };
+        /** @description The 502 body. It never includes page content. */
+        CaptureFailure: {
+            /** @description A sentence for the user. */
+            message: string;
+            reason: components["schemas"]["CaptureFailureReason"];
+        };
+        /**
+         * @description Why the page couldn't be read.
+         * @enum {string}
+         */
+        CaptureFailureReason: "timeout" | "unreachable" | "http_status" | "not_html" | "too_large" | "empty_page";
+        /**
+         * @description How the fields were found.
+         * @enum {string}
+         */
+        CaptureMethod: "json_ld" | "greenhouse" | "lever" | "ashby" | "llm";
+        /** @description The 202 body: Claude will read the page in this job. */
+        CaptureQueued: {
+            /** Format: int64 */
+            job_id: number;
+        };
+        /** @description The `POST /captures` body. */
+        CaptureRequest: {
+            /** @description The job posting's absolute http or https URL. Required. */
+            url: string | null;
+        };
+        /**
+         * @description The fields for the add form, normalised: trimmed, blank as `null`, at most 200
+         *     characters each.
+         */
+        CapturedFields: {
+            comp: string | null;
+            company: string | null;
+            location: string | null;
+            title: string | null;
+            /** @description The trimmed URL the user submitted. */
+            url: string;
+        };
         /**
          * @description Whether a Google account is connected.
          * @enum {string}
@@ -1640,6 +1703,87 @@ export interface operations {
                 };
                 content: {
                     "text/plain": string;
+                };
+            };
+        };
+    };
+    capture_url: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptureRequest"];
+            };
+        };
+        responses: {
+            /** @description The fields, found in the page's JSON-LD or a job board's API */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Capture"];
+                };
+            };
+            /** @description No structured data; Claude reads the page in this job, whose `result` is a `Capture` */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureQueued"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The URL is invalid, or it redirects from a public address to a private one */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The extraction job could not be queued */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The page could not be read */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureFailure"];
                 };
             };
         };

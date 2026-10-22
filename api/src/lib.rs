@@ -1,6 +1,7 @@
 //! Waypoint's HTTP API.
 
 pub mod applications;
+pub mod capture;
 pub mod claude;
 pub mod config;
 pub mod crypto;
@@ -28,14 +29,16 @@ use crate::jobs::{Wake, Worker};
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
 /// Builds the Rocket instance with the given configuration, database pool, Claude runner,
-/// queue settings and Google OAuth settings. The job worker starts at liftoff and stops at shutdown. Debug
-/// builds also mount the `/dev` routes. Every route takes [`host::LocalHost`].
+/// queue settings, Google OAuth settings and capture settings. The job worker starts at
+/// liftoff and stops at shutdown. Debug builds also mount the `/dev` routes. Every route
+/// takes [`host::LocalHost`].
 pub fn rocket(
     figment: Figment,
     pool: PgPool,
     claude: ClaudeRunner,
     jobs: jobs::Config,
     google: google::Config,
+    capture: capture::Config,
 ) -> Rocket<Build> {
     let bus = EventBus::new();
     let wake = Wake::default();
@@ -54,6 +57,7 @@ pub fn rocket(
         .manage(bus)
         .manage(wake)
         .manage(google::Google::new(google))
+        .manage(capture::Capturer::new(capture))
         .mount(
             "/",
             rocket::routes![
@@ -78,6 +82,7 @@ pub fn rocket(
                 applications::stages::remove,
                 applications::timeline::list_events,
                 applications::timeline::add_entry,
+                capture::capture,
                 jobs::show,
                 google::connect,
                 google::callback,

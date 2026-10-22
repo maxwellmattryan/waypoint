@@ -54,12 +54,28 @@ pub fn fake(mode: &str, timeout: Duration) -> Fake {
 
 /// The API with Rocket's default test config.
 pub fn app(pool: PgPool, runner: ClaudeRunner, config: jobs::Config) -> Rocket<Build> {
+    app_with_capture(
+        pool,
+        runner,
+        config,
+        waypoint_api::capture::Config::default(),
+    )
+}
+
+/// The API with Rocket's default test config and the given capture settings.
+pub fn app_with_capture(
+    pool: PgPool,
+    runner: ClaudeRunner,
+    config: jobs::Config,
+    capture: waypoint_api::capture::Config,
+) -> Rocket<Build> {
     waypoint_api::rocket(
         rocket::Config::figment(),
         pool,
         runner,
         config,
         waypoint_api::google::Config::default(),
+        capture,
     )
 }
 
