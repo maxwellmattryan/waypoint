@@ -918,6 +918,63 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "An application was created; `application` is the `POST /applications` body.",
+            "required": [
+              "application",
+              "type"
+            ],
+            "properties": {
+              "application": {
+                "$ref": "#/components/schemas/Application"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "application.created"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An application's text or status changed; `application` is the route's body.",
+            "required": [
+              "application",
+              "type"
+            ],
+            "properties": {
+              "application": {
+                "$ref": "#/components/schemas/Application"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "application.updated"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "application.deleted"
+                ]
+              }
+            }
           }
         ],
         "description": "One event on the bus. It serializes with its name in `\"type\"`."

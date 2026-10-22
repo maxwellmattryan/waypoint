@@ -141,6 +141,8 @@ fn document_matches_wire_shapes() {
             n if n.starts_with("job.") => ["job"].into(),
             "queue.paused" => ["until"].into(),
             "app.lagged" => ["skipped"].into(),
+            "application.created" | "application.updated" => ["application"].into(),
+            "application.deleted" => ["id"].into(),
             _ => BTreeSet::new(),
         };
         assert_eq!(payload, want, "{name} payload");
@@ -157,6 +159,9 @@ fn document_matches_wire_shapes() {
         "queue.resumed",
         "app.connected",
         "app.lagged",
+        "application.created",
+        "application.updated",
+        "application.deleted",
     ]
     .iter()
     .map(|n| n.to_string())

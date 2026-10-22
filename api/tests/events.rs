@@ -9,7 +9,9 @@ use rocket::http::{ContentType, Header, Status};
 use rocket::local::asynchronous::{Client, LocalResponse};
 use serde_json::Value;
 use sqlx::PgPool;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
+use tokio::io::BufReader;
+
+use common::next_message;
 
 async fn client(pool: PgPool, mode: &str) -> (Client, common::Fake) {
     let fake = common::fake(mode, Duration::from_secs(10));
@@ -19,27 +21,6 @@ async fn client(pool: PgPool, mode: &str) -> (Client, common::Fake) {
 
 fn host() -> Header<'static> {
     Header::new("Host", common::HOST)
-}
-
-/// The next SSE message as `(event, data)`, skipping heartbeat comments.
-async fn next_message(reader: &mut (impl AsyncBufRead + Unpin)) -> (String, Value) {
-    let mut event = None;
-    let mut data = None;
-    loop {
-        let mut line = String::new();
-        let read = reader.read_line(&mut line).await.expect("read the stream");
-        assert!(read > 0, "the stream ended");
-        let line = line.trim_end_matches(['\r', '\n']);
-        if line.is_empty() {
-            if let (Some(event), Some(data)) = (event.take(), data.take()) {
-                return (event, data);
-            }
-        } else if let Some(name) = line.strip_prefix("event:") {
-            event = Some(name.trim().to_owned());
-        } else if let Some(json) = line.strip_prefix("data:") {
-            data = Some(serde_json::from_str(json.trim()).expect("data is JSON"));
-        }
-    }
 }
 
 async fn job_count(pool: &PgPool) -> i64 {
