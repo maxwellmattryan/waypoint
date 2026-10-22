@@ -164,10 +164,24 @@ impl Workflow for TwoStep {
             }
             "second" => {
                 self.second_calls.fetch_add(1, Ordering::SeqCst);
-                let failing = self
-                    .second_failures
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-                    .is_ok();
+                // Decrement the remaining failures if any are left. A plain
+                // compare_exchange loop, since `fetch_update` is deprecated on
+                // newer toolchains and its replacement is missing on older ones.
+                let mut left = self.second_failures.load(Ordering::SeqCst);
+                let failing = loop {
+                    if left == 0 {
+                        break false;
+                    }
+                    match self.second_failures.compare_exchange(
+                        left,
+                        left - 1,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    ) {
+                        Ok(_) => break true,
+                        Err(current) => left = current,
+                    }
+                };
                 if failing {
                     return Err((self.failure)("second broke".into()));
                 }
