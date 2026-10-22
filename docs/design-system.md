@@ -78,7 +78,7 @@ For Svelte transitions, use the helper so reduced motion is honoured:
 
 Every route renders inside `AppShell` (`web/src/lib/components/app/AppShell.svelte`), which the root layout wraps around the page: a top bar with the "Waypoint" wordmark, the main nav and a live-connection Badge (Connecting, Live, Reconnecting), then the page in a centred `main` (`max-w-5xl`, `px-4 py-8`, `sm:px-8`). Pages don't add their own `main` or outer padding.
 
-The main nav (`<nav aria-label="Main">`) is three [NavLinks](#navlink): Dashboard (`/`), Applications (`/applications`) and Resumes (`/resumes`). The shell marks the current section from `page.url.pathname`: Dashboard only on `/`, Applications on `/applications` and every `/applications/<id>`, Resumes on `/resumes` and every `/resumes/<id>`. Below `sm` the nav wraps onto its own row under the wordmark and badge.
+The main nav (`<nav aria-label="Main">`) is four [NavLinks](#navlink): Dashboard (`/`), Applications (`/applications`), Resumes (`/resumes`) and Runs (`/runs`). The shell marks the current section from `page.url.pathname`: Dashboard only on `/`, Applications on `/applications` and every `/applications/<id>`, Resumes on `/resumes` and every `/resumes/<id>`, Runs on `/runs` and every `/runs/<id>`. Below `sm` the nav wraps onto its own row under the wordmark and badge.
 
 Screens are composed from the primitives only: `primitives-only.test.ts` in `web/src/lib/components/dashboard/` fails if the shell, the root layout or page, a dashboard card, a component in `components/applications` or `components/resumes`, or a page under `routes/applications` or `routes/resumes` uses a raw interactive tag, a `cursor-*` class or a half spacing step.
 

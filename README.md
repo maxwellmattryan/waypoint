@@ -25,7 +25,7 @@ docker compose down
 
 ## Dashboard
 
-The web app opens on a dashboard inside the app shell. The top bar links to the Dashboard, [Applications](#applications) and [Resumes](#resumes) and shows whether the live event stream is connected (Connecting, Live, Reconnecting). The dashboard has three cards:
+The web app opens on a dashboard inside the app shell. The top bar links to the Dashboard, [Applications](#applications), [Resumes](#resumes) and [Runs](#agent-runs-and-tools) and shows whether the live event stream is connected (Connecting, Live, Reconnecting). The dashboard has three cards:
 
 - **System**: whether the API and its database are reachable (`GET /health`), re-checked each time the event stream (re)connects.
 - **Google**: the Google connection (`GET /auth/google`). Until the three Google settings are in `.env` it reads "Not configured" and the Connect button is disabled; see [Google account](#google-account).
