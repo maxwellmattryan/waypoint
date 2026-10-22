@@ -89,7 +89,8 @@
 	<Button size="sm">{@render plus()} Add application</Button>
 {/snippet}
 
-<main class="mx-auto flex max-w-4xl flex-col gap-12 p-8">
+<!-- The app shell supplies the page's <main> and its padding. -->
+<div class="flex flex-col gap-12">
 	<header class="flex flex-col gap-2">
 		<h1 class="text-2xl font-semibold text-fg">Primitives</h1>
 		<p class="text-sm text-fg-muted">
@@ -339,4 +340,4 @@
 			{/each}
 		</div>
 	</section>
-</main>
+</div>
