@@ -67,3 +67,40 @@ export const skeletonShapes = {
 } as const;
 
 export type SkeletonShape = keyof typeof skeletonShapes;
+
+/** Stacking order: overlays (Dialog, Drawer) sit under toasts and tooltips. */
+export const layers = { overlay: 'z-40', toast: 'z-50', tooltip: 'z-50' } as const;
+
+/** Surface for overlay panels and toasts. */
+export const overlaySurface = 'bg-surface border border-border rounded-lg shadow-lg';
+
+export const dialogSizes = {
+	sm: 'max-w-sm',
+	md: 'max-w-md',
+	lg: 'max-w-2xl'
+} as const;
+
+export type DialogSize = keyof typeof dialogSizes;
+
+export type DrawerSide = 'left' | 'right';
+
+/** The accent bar colour for each toast tone. */
+export const toastTones = {
+	neutral: 'bg-neutral-soft-fg',
+	success: 'bg-success-soft-fg',
+	info: 'bg-info-soft-fg',
+	warning: 'bg-warning-soft-fg',
+	danger: 'bg-danger-soft-fg'
+} as const;
+
+export type ToastTone = keyof typeof toastTones;
+
+/** Tooltip position relative to its trigger wrapper. */
+export const tooltipPlacements = {
+	top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
+	bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
+	left: 'right-full top-1/2 -translate-y-1/2 mr-2',
+	right: 'left-full top-1/2 -translate-y-1/2 ml-2'
+} as const;
+
+export type TooltipPlacement = keyof typeof tooltipPlacements;

@@ -21,3 +21,34 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
 		})
 	});
 }
+
+// jsdom has no Web Animations API, and Svelte transitions call `element.animate`. This stub
+// finishes every animation on the next microtask so intros and outros complete.
+if (typeof Element !== 'undefined' && !Element.prototype.animate) {
+	Element.prototype.animate = function () {
+		const animation = {
+			onfinish: null as ((event: unknown) => void) | null,
+			oncancel: null,
+			currentTime: 0,
+			playState: 'running',
+			finished: Promise.resolve(),
+			cancel: () => {},
+			finish: () => {},
+			play: () => {},
+			pause: () => {},
+			reverse: () => {},
+			addEventListener: () => {},
+			removeEventListener: () => {}
+		};
+		queueMicrotask(() => {
+			animation.playState = 'finished';
+			animation.onfinish?.({});
+		});
+		return animation as unknown as Animation;
+	};
+}
+
+// `animate:flip` reads running animations before measuring.
+if (typeof Element !== 'undefined' && !Element.prototype.getAnimations) {
+	Element.prototype.getAnimations = () => [];
+}

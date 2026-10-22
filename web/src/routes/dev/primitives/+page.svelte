@@ -4,15 +4,23 @@
 		Button,
 		Card,
 		Checkbox,
+		Dialog,
+		Drawer,
 		EmptyState,
 		IconButton,
 		Input,
 		Link,
 		Select,
 		Skeleton,
+		Tabs,
 		Textarea,
+		Tooltip,
+		toast,
 		type BadgeTone,
-		type ButtonVariant
+		type ButtonVariant,
+		type DrawerSide,
+		type ToastTone,
+		type TooltipPlacement
 	} from '#lib/components/ui';
 
 	// Design-review gallery: every primitive in every variant and state. Reachable only by URL.
@@ -31,6 +39,24 @@
 	let notes = $state('');
 	let stage = $state('');
 	let remote = $state(true);
+
+	const sections = [
+		{ value: 'overview', label: 'Overview' },
+		{ value: 'notes', label: 'Notes' },
+		{ value: 'archived', label: 'Archived', disabled: true },
+		{ value: 'emails', label: 'Emails' }
+	];
+	const toastTones: ToastTone[] = ['neutral', 'success', 'info', 'warning', 'danger'];
+	const placements: TooltipPlacement[] = ['top', 'bottom', 'left', 'right'];
+	const sides: DrawerSide[] = ['right', 'left'];
+
+	let section = $state('overview');
+	let dialogOpen = $state(false);
+	let footerDialogOpen = $state(false);
+	let drawers = $state<Record<DrawerSide, boolean>>({ right: false, left: false });
+	let nestedDrawerOpen = $state(false);
+	let nestedDialogOpen = $state(false);
+	let closes = $state(0);
 </script>
 
 <svelte:head>
@@ -195,6 +221,122 @@
 				<Skeleton shape="text" class="w-3/4" />
 			</div>
 			<Skeleton class="h-16 w-32" />
+		</div>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="tabs">
+		<h2 id="tabs" class="text-lg font-semibold text-fg">Tabs</h2>
+		<Tabs label="Application sections" items={sections} bind:value={section}>
+			{#snippet children(active)}
+				<p class="text-sm text-fg-muted">The {active} panel. Use the arrow keys, Home and End.</p>
+			{/snippet}
+		</Tabs>
+		<p class="text-sm text-fg-muted">Bound value: {section}</p>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="dialog">
+		<h2 id="dialog" class="text-lg font-semibold text-fg">Dialog and Drawer</h2>
+		<div class="flex flex-wrap items-center gap-2">
+			<Button variant="secondary" onclick={() => (dialogOpen = true)}>Open dialog</Button>
+			<Button variant="secondary" onclick={() => (footerDialogOpen = true)}>
+				Open dialog with footer
+			</Button>
+			{#each sides as side (side)}
+				<Button variant="secondary" onclick={() => (drawers[side] = true)}>
+					Open {side} drawer
+				</Button>
+			{/each}
+			<Button variant="secondary" onclick={() => (nestedDrawerOpen = true)}>
+				Open drawer with dialog
+			</Button>
+			<span class="text-sm text-fg-muted">Closed {closes} times</span>
+		</div>
+
+		<Dialog
+			bind:open={dialogOpen}
+			title="Archive application"
+			description="Archived applications leave the board but keep their history."
+			onclose={() => closes++}
+		>
+			<Input label="Reason" placeholder="Optional" data-autofocus />
+		</Dialog>
+
+		<Dialog
+			bind:open={footerDialogOpen}
+			title="Withdraw application"
+			size="sm"
+			closeOnBackdrop={false}
+			onclose={() => closes++}
+		>
+			<p>A backdrop click doesn't close this one. Use Escape, Close or Cancel.</p>
+			{#snippet footer()}
+				<Button variant="secondary" onclick={() => (footerDialogOpen = false)}>Cancel</Button>
+				<Button variant="danger" onclick={() => (footerDialogOpen = false)}>Withdraw</Button>
+			{/snippet}
+		</Dialog>
+
+		{#each sides as side (side)}
+			<Drawer
+				bind:open={drawers[side]}
+				{side}
+				title="Acme · Staff engineer"
+				description="Opened from the {side}."
+				onclose={() => closes++}
+			>
+				<div class="flex flex-col gap-4">
+					<Input label="Company" value="Acme" />
+					<Textarea label="Notes" />
+				</div>
+				{#snippet footer()}
+					<Button onclick={() => (drawers[side] = false)}>Done</Button>
+				{/snippet}
+			</Drawer>
+		{/each}
+
+		<Drawer bind:open={nestedDrawerOpen} title="Nested overlays">
+			<div class="flex flex-col items-start gap-4">
+				<p>Escape closes the dialog first, then this drawer.</p>
+				<Button onclick={() => (nestedDialogOpen = true)}>Open dialog</Button>
+			</div>
+			<Dialog bind:open={nestedDialogOpen} title="On top of the drawer" size="sm">
+				<p>Page scroll stays locked until the drawer closes too.</p>
+			</Dialog>
+		</Drawer>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="toast">
+		<h2 id="toast" class="text-lg font-semibold text-fg">Toast</h2>
+		<div class="flex flex-wrap items-center gap-2">
+			{#each toastTones as tone (tone)}
+				<Button
+					variant="secondary"
+					onclick={() => toast.show({ title: `A ${tone} toast`, description: 'Gone in 5s.', tone })}
+				>
+					{tone}
+				</Button>
+			{/each}
+			<Button
+				variant="secondary"
+				onclick={() =>
+					toast.show({ title: 'Sticky toast', description: 'Stays until dismissed.', duration: 0 })}
+			>
+				sticky
+			</Button>
+		</div>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="tooltip">
+		<h2 id="tooltip" class="text-lg font-semibold text-fg">Tooltip</h2>
+		<div class="flex flex-wrap items-center gap-12 py-8 pl-16">
+			{#each placements as placement (placement)}
+				<Tooltip content="Tooltip on {placement}" {placement}>
+					{#snippet children(t)}
+						<IconButton {...t} label="Show {placement} tooltip" variant="secondary">
+							{@render plus()}
+						</IconButton>
+					{/snippet}
+				</Tooltip>
+			{/each}
 		</div>
 	</section>
 </main>
