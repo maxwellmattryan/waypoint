@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      db:
+        image: postgres:17-alpine
+        # Throwaway credentials for a container that only exists for this run.
+        env:
+          POSTGRES_USER: waypoint
+          POSTGRES_PASSWORD: waypoint
+          POSTGRES_DB: waypoint
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U waypoint -d waypoint"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    # sqlx fills the user and password from the libpq PG* variables when the URL omits them.
+    env:
+      DATABASE_URL: postgres://127.0.0.1:5432/waypoint
+      PGUSER: waypoint
+      PGPASSWORD: waypoint
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # rust-toolchain.toml is the source of truth for the channel and components.
+      - name: Install Rust toolchain
+        run: rustup toolchain install && rustup show
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: cargo fmt --all --check
+        run: cargo fmt --all --check
+      - name: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: npm run check (svelte-check)
+        run: npm run check
+      - name: npm run lint (ESLint)
+        run: npm run lint
+      - name: npm test (Vitest)
+        run: npm test
