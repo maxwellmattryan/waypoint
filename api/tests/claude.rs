@@ -317,7 +317,9 @@ async fn dies_within_2s(pid: i32) -> bool {
 async fn timeout_and_cancel_kill_the_process_group(pool: PgPool) {
     let req = request("test.group", "ping");
 
-    let timed_out = common::fake("hang_tree", Duration::from_secs(1));
+    // A fresh fake can take a while to start on a busy machine, so the timeout leaves
+    // room for it to start its grandchild first.
+    let timed_out = common::fake("hang_tree", Duration::from_secs(3));
     let (result, pid) = tokio::join!(
         timed_out.runner.call(&pool, &req),
         grandchild_pid(&timed_out.record)
@@ -329,12 +331,17 @@ async fn timeout_and_cancel_kill_the_process_group(pool: PgPool) {
         "the grandchild outlived the timeout"
     );
 
-    // The caller gives up after 1s, well inside the runner's own 10s timeout. The
-    // grandchild must exist before the future is dropped, so wait for it too.
+    // Once the grandchild exists, the caller gives up after 1s more, well inside the
+    // runner's own 10s timeout, and drops the call.
     let cancelled = common::fake("hang_tree", TIMEOUT);
-    let call = tokio::time::timeout(Duration::from_secs(1), cancelled.runner.call(&pool, &req));
-    let (dropped, pid) = tokio::join!(call, grandchild_pid(&cancelled.record));
+    let mut call = Box::pin(cancelled.runner.call(&pool, &req));
+    let pid = tokio::select! {
+        result = &mut call => panic!("the call ended before it was cancelled: {result:?}"),
+        pid = grandchild_pid(&cancelled.record) => pid,
+    };
+    let dropped = tokio::time::timeout(Duration::from_secs(1), &mut call).await;
     assert!(dropped.is_err(), "the call was still running when dropped");
+    drop(call);
     assert!(
         dies_within_2s(pid).await,
         "the grandchild outlived the dropped call"
