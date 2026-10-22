@@ -115,6 +115,8 @@ Waypoint calls Claude through your Claude subscription, not the API. Every call 
 
 The runner removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and the `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY` switches from the CLI's environment, so nothing in your shell moves billing or traffic away from the subscription. It also withholds Waypoint's own settings (`DATABASE_URL`, `POSTGRES_*`, `WAYPOINT_*`). `WAYPOINT_CLAUDE_BIN` (default `claude` on `PATH`) and `WAYPOINT_CLAUDE_TIMEOUT_SECS` (default 300) are optional; see `.env.example`. The CLI runs in its own process group, and when a call ends, times out or is cancelled the runner kills that whole group, so nothing the CLI started outlives the call.
 
+Agent steps can give the model Waypoint's own tools, and no others, through a per-call MCP server: the CLI starts the `waypoint-mcp` relay bin, which forwards to a private socket the API serves. `cargo build -p waypoint-api --bins` builds the relay beside the API binary (`./scripts/dev.sh` does this for you); set `WAYPOINT_MCP_BIN` to use one elsewhere. [docs/agent-runtime.md](docs/agent-runtime.md#mcp-server) covers the protocol and how tool calls are recorded.
+
 To check the round trip, start the app with `./scripts/dev.sh`, open <http://127.0.0.1:5173> and click **Test Claude** on the dashboard: the card shows Queued, Running and then Succeeded with the reply `pong`. Or, in another terminal:
 
 ```sh
