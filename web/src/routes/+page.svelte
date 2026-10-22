@@ -1,5 +1,7 @@
 <script lang="ts">
+	import AgentsCard from '#lib/components/dashboard/AgentsCard.svelte';
 	import ClaudeCard from '#lib/components/dashboard/ClaudeCard.svelte';
+	import DataCard from '#lib/components/dashboard/DataCard.svelte';
 	import GoogleCard from '#lib/components/dashboard/GoogleCard.svelte';
 	import SystemCard from '#lib/components/dashboard/SystemCard.svelte';
 	import { getDashboard } from '#lib/dashboard/dashboard.svelte.js';
@@ -23,5 +25,11 @@
 			queuePausedUntil={dashboard.queuePausedUntil}
 			ontest={() => dashboard.runTest()}
 		/>
+		<AgentsCard
+			killSwitch={dashboard.killSwitch}
+			saving={dashboard.savingKillSwitch}
+			ontoggle={(paused) => dashboard.setPaused(paused)}
+		/>
+		<DataCard ondelete={(confirmation) => dashboard.deleteAllData(confirmation)} />
 	</div>
 </div>

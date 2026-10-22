@@ -124,6 +124,7 @@ export class ApplicationsStore {
 		switch (event.type) {
 			case 'app.connected':
 			case 'app.lagged':
+			case 'data.deleted':
 				void this.refresh();
 				return;
 			case 'application.created':
