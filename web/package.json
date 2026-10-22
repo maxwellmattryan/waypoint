@@ -23,10 +23,14 @@
 		"@sveltejs/kit": "^3.0.0",
 		"@sveltejs/vite-plugin-svelte": "^7.2.0",
 		"@tailwindcss/vite": "^4.3.0",
+		"@testing-library/jest-dom": "^7.0.1",
+		"@testing-library/svelte": "^5.4.2",
+		"@testing-library/user-event": "^14.6.8",
 		"@types/node": "^24",
 		"eslint": "^10.4.1",
 		"eslint-plugin-svelte": "^3.19.0",
 		"globals": "^17.6.0",
+		"jsdom": "^30.1.3",
 		"svelte": "^5.57.1",
 		"svelte-check": "^4.6.0",
 		"tailwindcss": "^4.3.0",
@@ -37,6 +41,7 @@
 	},
 	"imports": {
 		"#lib": "./src/lib/index.js",
+		"#lib/components/ui": "./src/lib/components/ui/index.js",
 		"#lib/*": "./src/lib/*"
 	}
 }

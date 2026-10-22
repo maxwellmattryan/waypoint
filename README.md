@@ -1,6 +1,6 @@
 # Waypoint
 
-Waypoint is a personal job-search assistant that runs on your own machine. It tracks applications through any interview process, manages resume versions, reads recruiter email to keep statuses current, sources matching roles and prepares applications for one-click approval. It is a SvelteKit single-page app backed by a Rust (Rocket) API and PostgreSQL, all bound to localhost. See [ADR 0001](docs/adr/0001-stack.md) for the stack decision and [ROADMAP.md](ROADMAP.md) for the plan.
+Waypoint is a personal job-search assistant that runs on your own machine. It tracks applications through any interview process, manages resume versions, reads recruiter email to keep statuses current, sources matching roles and prepares applications for one-click approval. It is a SvelteKit single-page app backed by a Rust (Rocket) API and PostgreSQL, all bound to localhost. See [ADR 0001](docs/adr/0001-stack.md) for the stack decision, [ROADMAP.md](ROADMAP.md) for the plan and [the design system](docs/design-system.md) for UI tokens and primitives.
 
 ## Prerequisites
 
@@ -61,6 +61,6 @@ Web:
 ```sh
 npm --prefix web run check   # svelte-check, fails on warnings
 npm --prefix web run lint    # ESLint
-npm --prefix web test        # Vitest, run once
+npm --prefix web test        # Vitest, run once (component tests under jsdom)
 npm --prefix web run build   # static SPA in web/build
 ```
