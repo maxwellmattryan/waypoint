@@ -41,6 +41,7 @@
 	},
 	"imports": {
 		"#lib": "./src/lib/index.js",
+		"#lib/components/ui": "./src/lib/components/ui/index.js",
 		"#lib/*": "./src/lib/*"
 	}
 }
