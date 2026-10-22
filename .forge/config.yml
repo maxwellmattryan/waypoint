@@ -106,7 +106,7 @@ tracker:
     ready:
       labels: []
       excludeLabels: []
-      assignee: null
+      assignee: "@me"
       milestone: null
       projectStatus: null
     claim:
@@ -287,12 +287,32 @@ foreman:
 policy:
   protectedPaths:
     - paths:
-        - .github/workflows/**
+        - .github/**
+        - CODEOWNERS
         - .gitlab-ci.yml
         - Jenkinsfile
         - .circleci/**
       action: escalate
-      reason: CI/CD configuration
+      reason: CI/CD and GitHub repository configuration
+    - paths:
+        - AGENTS.md
+        - .claude/**
+        - .mcp.json
+        - .forge/notes/**
+        - .forge/reviewers/**
+        - .forge/verifiers/**
+      action: escalate
+      reason: agent instructions and tooling config steer future agents
+    - paths:
+        - build.rs
+        - Cargo.lock
+        - package-lock.json
+        - pnpm-lock.yaml
+        - yarn.lock
+        - bun.lock
+        - bun.lockb
+      action: escalate
+      reason: build scripts and lockfiles change what runs and what ships
     - paths:
         - Dockerfile*
         - "**/*.tf"
