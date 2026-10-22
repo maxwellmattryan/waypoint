@@ -25,7 +25,7 @@ docker compose down
 
 ## Dashboard
 
-The web app opens on a dashboard inside the app shell. The top bar links to the Dashboard and [Applications](#applications) and shows whether the live event stream is connected (Connecting, Live, Reconnecting). The dashboard has three cards:
+The web app opens on a dashboard inside the app shell. The top bar links to the Dashboard, [Applications](#applications) and [Resumes](#resumes) and shows whether the live event stream is connected (Connecting, Live, Reconnecting). The dashboard has three cards:
 
 - **System**: whether the API and its database are reachable (`GET /health`), re-checked each time the event stream (re)connects.
 - **Google**: the Google connection (`GET /auth/google`). Until the three Google settings are in `.env` it reads "Not configured" and the Connect button is disabled; see [Google account](#google-account).
@@ -33,7 +33,7 @@ The web app opens on a dashboard inside the app shell. The top bar links to the 
 
 The browser only talks to its own origin. In development, Vite proxies `/api/*` to the API (`VITE_API_URL`, default <http://127.0.0.1:8000>) with the `/api` prefix stripped, passing `Host`, `Origin` and `Sec-Fetch-Site` through unchanged, so the API's local-host and same-origin guards still apply and the API needs no CORS headers. Vite's own CORS is turned off (`server.cors: false`): by default it answers any `localhost` or `127.0.0.1` origin on any port, which would let a page on another local port read job errors and the event stream through the proxy. The proxy exists only in `vite dev`; the built SPA isn't served or proxied yet.
 
-The end-to-end tests start the real API (with a fake `claude` that answers `pong` after a second) and the dev server, then drive the dashboard and the applications pages in Chromium and check that the proxy sends no CORS headers to other origins. The applications test adds, edits and deletes its own uniquely named application in the Compose database. It runs locally, not in CI. It needs the Compose Postgres, a `.env`, Chromium installed once, and ports 8000 and 5173 free:
+The end-to-end tests start the real API (with a fake `claude` that answers `pong` after a second) and the dev server, then drive the dashboard, applications and resumes pages in Chromium and check that the proxy sends no CORS headers to other origins. The applications test adds, edits and deletes its own uniquely named application in the Compose database, and the resumes test uploads `api/tests/fixtures/resumes/resume.pdf` under a unique name, links it to its own application, then removes both. It runs locally, not in CI. It needs the Compose Postgres, a `.env`, Chromium installed once, and ports 8000 and 5173 free:
 
 ```sh
 docker compose up -d --wait db
@@ -54,7 +54,10 @@ An application has a company and a title (both required) and optional free-text 
 | `GET /applications/<id>` | Reads one |
 | `PUT /applications/<id>` | Replaces the text fields; an omitted optional field is cleared and the status is left alone |
 | `PUT /applications/<id>/status` | Sets the status (`{"status": "applied"}`); `status_changed_at` moves only when it changes |
+| `PUT /applications/<id>/resume` | Links the [resume version](#resumes) sent with it (`{"resume_version_id": 3}`), or clears it with `null`; an unknown version is a 422 |
 | `DELETE /applications/<id>` | Deletes one permanently: 204 |
+
+Every application carries `resume_version_id` (`null` until set). Only `PUT /applications/<id>/resume` changes it, and `updated_at` moves only when the link changes. The detail page's **Resume** section picks the version from a "Resume sent" menu and links to it.
 
 An invalid field answers 422 with `{"errors": [{"field", "message"}]}`, one entry per failing field; a body that isn't valid JSON for the route (or an unknown status) answers 400 with a single `body` entry. Bodies must be `Content-Type: application/json` (anything else is refused: 403 for an HTML form, 415 otherwise), and every changing route answers 403 to a request a browser sends from another site, so a page you visit can't edit your applications. With the API running:
 
@@ -69,6 +72,30 @@ curl -s -X PUT -H 'Content-Type: application/json' \
   -d '{"company": "Acme", "title": "Staff Engineer", "location": "Berlin"}' \
   http://127.0.0.1:8000/applications/1
 curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/applications/1   # 204
+```
+
+## Resumes
+
+The Resumes page (`/resumes`) keeps every resume PDF you send out, newest first, as cards showing the name, file name, size, upload date, how many applications use it, and a "No text" badge when no text could be extracted. **Upload resume** picks a PDF and a name (it defaults to the file name without `.pdf`). Clicking a card opens the viewer (`/resumes/<id>`) with the details, the extracted text, an **Open PDF** link that opens the file in the browser's PDF viewer in a new tab, and **Delete**. A version can't be edited: upload a new one instead.
+
+Uploads are PDF only, at most 10 MiB (10,485,760 bytes), and must start with `%PDF-`. The name is required (trimmed, at most 200 characters); the original file name is optional (at most 255, `resume.pdf` when missing). The PDF bytes are stored in Postgres (`resume_versions.pdf`, `BYTEA`), not on disk, so they're backed up and deleted with the row. Text is extracted when you upload, for later scoring and application prep; when that fails (an encrypted, scanned or malformed PDF) the version is still stored, with `text: null` and `has_text: false`.
+
+| Route | Does |
+|---|---|
+| `GET /resumes` | Lists every version without its text, newest `created_at` first, with `has_text` and `application_count` |
+| `POST /resumes?name=<label>&filename=<file name>` | Uploads the raw PDF as the body (`Content-Type: application/pdf`, not multipart): 201 |
+| `GET /resumes/<id>` | Reads one, with its `text` (or `null`) |
+| `GET /resumes/<id>/pdf` | The exact stored bytes, `inline`, with `nosniff` and `no-store` |
+| `DELETE /resumes/<id>` | Deletes one permanently: 204, or 409 while an application links it (unlink it first) |
+
+An invalid `name`, `filename` or `file` (empty, or not a PDF) answers 422 with every failing field, a body over 10 MiB answers 413, and any type other than `application/pdf` answers 415; nothing is stored on any error. Like the applications routes, the upload and delete answer 403 to an HTML form or multipart body and to a request a browser sends from another site. With the API running:
+
+```sh
+curl -s -X POST -H 'Content-Type: application/pdf' --data-binary @resume.pdf \
+  'http://127.0.0.1:8000/resumes?name=Backend%20CV&filename=resume.pdf'   # 201, "has_text": true
+curl -s http://127.0.0.1:8000/resumes/1                                    # includes "text"
+curl -s -o resume-copy.pdf http://127.0.0.1:8000/resumes/1/pdf
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/resumes/1   # 204, or 409 if linked
 ```
 
 ## Model calls
@@ -118,7 +145,7 @@ Once it's set up, open <http://127.0.0.1:8000/auth/google/connect> to connect, c
 
 ## API contract
 
-The API's OpenAPI 3.1 document is generated from the `#[utoipa::path]` annotations on the Rocket handlers (listed in `api/src/openapi.rs`) and committed at `api/openapi.json`. The web app's types are generated from that document into `web/src/lib/api/schema.d.ts` with openapi-typescript, and `#lib/api` exports a typed client (`createApiClient()`, built on openapi-fetch) plus the `Health`, `Job`, `Event`, `GoogleStatus`, `Application`, `ApplicationStatus`, `NewApplication`, `ApplicationInput`, `ValidationErrors` and `FieldError` types. `#lib/applications/api.js` wraps the applications routes in helpers that never throw and return `{ kind: 'ok' | 'invalid' | 'not-found' | 'failed' }`. The debug-only `/dev` routes are not part of the contract.
+The API's OpenAPI 3.1 document is generated from the `#[utoipa::path]` annotations on the Rocket handlers (listed in `api/src/openapi.rs`) and committed at `api/openapi.json`. The web app's types are generated from that document into `web/src/lib/api/schema.d.ts` with openapi-typescript, and `#lib/api` exports a typed client (`createApiClient()`, built on openapi-fetch) plus the `Health`, `Job`, `Event`, `GoogleStatus`, `Application`, `ApplicationStatus`, `NewApplication`, `ApplicationInput`, `ValidationErrors`, `FieldError`, `ResumeVersion`, `ResumeVersionDetail` and `ResumeLink` types. `#lib/applications/api.js` and `#lib/resumes/api.js` wrap the applications and resumes routes in helpers that never throw and return `{ kind: 'ok' | 'invalid' | 'not-found' | 'conflict' | 'failed' }`. The debug-only `/dev` routes are not part of the contract.
 
 After changing any route or response type, regenerate both files and commit them:
 
