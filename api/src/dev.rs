@@ -3,6 +3,7 @@
 
 use rocket::State;
 use rocket::http::Status;
+use rocket::request::{FromRequest, Outcome, Request};
 use rocket::serde::json::Json;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -10,14 +11,46 @@ use sqlx::PgPool;
 use crate::claude::{ClaudeError, ClaudeRequest, ClaudeRunner};
 
 const PING_PROMPT: &str = "Reply with exactly the word: pong";
+/// Header every `/dev` request must carry as `1`. A custom header makes a browser
+/// preflight the request, and the API answers no CORS preflight, so other sites can't
+/// trigger these routes.
+const DEV_HEADER: &str = "X-Waypoint-Dev";
 
 pub fn routes() -> Vec<rocket::Route> {
     rocket::routes![claude_ping]
 }
 
+/// Admits a request only if it carries `X-Waypoint-Dev: 1` and a browser, if one sent
+/// it, sent it from the API's own origin.
+struct DevOnly;
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for DevOnly {
+    type Error = ();
+
+    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, ()> {
+        let headers = req.headers();
+        let marked = headers.get_one(DEV_HEADER) == Some("1");
+        // Browsers send `Sec-Fetch-Site`; curl doesn't. Another localhost port is
+        // `same-site`, so only `same-origin` and `none` (typed by the user) pass.
+        let foreign = headers.get("Sec-Fetch-Site").any(|site| {
+            !site.eq_ignore_ascii_case("same-origin") && !site.eq_ignore_ascii_case("none")
+        });
+        if marked && !foreign {
+            Outcome::Success(Self)
+        } else {
+            Outcome::Error((Status::Forbidden, ()))
+        }
+    }
+}
+
 /// `POST /dev/claude/ping`: one round trip through the Claude runner.
 #[rocket::post("/dev/claude/ping")]
-async fn claude_ping(pool: &State<PgPool>, claude: &State<ClaudeRunner>) -> (Status, Json<Value>) {
+async fn claude_ping(
+    _dev: DevOnly,
+    pool: &State<PgPool>,
+    claude: &State<ClaudeRunner>,
+) -> (Status, Json<Value>) {
     let req = ClaudeRequest {
         prompt: PING_PROMPT.into(),
         purpose: "dev.ping".into(),
