@@ -62,6 +62,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/applications/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Sets or clears the resume version sent with an application. `updated_at` moves only
+         *     when the link changes, so setting the same version returns the row unchanged.
+         */
+        put: operations["set_application_resume"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/applications/{id}/stage-order": {
         parameters: {
             query?: never;
@@ -250,6 +270,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/resumes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every resume version, the newest first. */
+        get: operations["list_resumes"];
+        put?: never;
+        /** Uploads a resume PDF as a new version and extracts its text. */
+        post: operations["upload_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resumes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One resume version with its text. */
+        get: operations["get_resume"];
+        put?: never;
+        post?: never;
+        /** Deletes a resume version permanently, unless an application references it. */
+        delete: operations["delete_resume"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resumes/{id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The exact PDF bytes of a resume version. */
+        get: operations["get_resume_pdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -265,6 +338,12 @@ export interface components {
             id: number;
             location: string | null;
             notes: string | null;
+            /**
+             * Format: int64
+             * @description The resume version sent with this application. Only
+             *     `PUT /applications/{id}/resume` changes it.
+             */
+            resume_version_id: number | null;
             /** @description Where the role came from as free text, e.g. "Referral". */
             source: string | null;
             status: components["schemas"]["ApplicationStatus"];
@@ -458,6 +537,38 @@ export interface components {
         NewStage: {
             /** @description Required; trimmed, at most 200 characters. */
             name: string;
+        };
+        /** @description The `PUT /applications/{id}/resume` body. `null` clears the link. */
+        ResumeLink: {
+            /** Format: int64 */
+            resume_version_id: number | null;
+        };
+        /** @description One resume version, without its text or bytes: the `GET /resumes` item. */
+        ResumeVersion: {
+            /**
+             * Format: int64
+             * @description How many applications reference this version.
+             */
+            application_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** @description The uploaded file's original name. */
+            filename: string;
+            /** @description Whether text could be extracted from the PDF. */
+            has_text: boolean;
+            /** Format: int64 */
+            id: number;
+            /** @description The user's label, e.g. "Backend, Oct 2026". */
+            name: string;
+            /** @description SHA-256 of the PDF bytes, lowercase hex. */
+            sha256: string;
+            /** Format: int32 */
+            size_bytes: number;
+        };
+        /** @description One resume version with its extracted text: the `GET /resumes/{id}` body. */
+        ResumeVersionDetail: components["schemas"]["ResumeVersion"] & {
+            /** @description The extracted text, or `null` when none could be extracted. */
+            text: string | null;
         };
         /** @description One `application_stages` row. */
         Stage: {
@@ -876,6 +987,79 @@ export interface operations {
                 };
             };
             /** @description The entry could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_application_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeLink"];
+            };
+        };
+        responses: {
+            /** @description The application with its new resume link */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No resume version has this id (`resume_version_id`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The link could not be stored */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -1546,6 +1730,244 @@ export interface operations {
                 content?: never;
             };
             /** @description The job could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_resumes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every resume version, newest `created_at` first, ties by `id` descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeVersion"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The resume versions could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upload_resume: {
+        parameters: {
+            query: {
+                /** @description The version's label: required, 1–200 characters after trimming */
+                name: string;
+                /** @description The original file name, at most 255 characters; `resume.pdf` when blank or missing */
+                filename?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The raw PDF bytes, 1 byte to 10 MiB, starting with `%PDF-` */
+        requestBody: {
+            content: {
+                "application/pdf": string;
+            };
+        };
+        responses: {
+            /** @description The stored version (`has_text` is false when no text could be extracted) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeVersion"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is over 10 MiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/pdf` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `name`, `filename` or `file` is invalid */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The version could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The resume version's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resume version with its extracted text */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeVersionDetail"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No resume version has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The resume version could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The resume version's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resume version is deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No resume version has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An application references this version; unlink it first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The resume version could not be deleted */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_resume_pdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The resume version's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored PDF, `inline` with `nosniff` and `no-store` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No resume version has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The PDF could not be read */
             500: {
                 headers: {
                     [name: string]: unknown;

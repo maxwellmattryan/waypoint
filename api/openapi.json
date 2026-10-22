@@ -359,6 +359,81 @@
         }
       }
     },
+    "/applications/{id}/resume": {
+      "put": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Sets or clears the resume version sent with an application. `updated_at` moves only\nwhen the link changes, so setting the same version returns the row unchanged.",
+        "operationId": "set_application_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeLink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The application with its new resume link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "No resume version has this id (`resume_version_id`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The link could not be stored"
+          }
+        }
+      }
+    },
     "/applications/{id}/stage-order": {
       "put": {
         "tags": [
@@ -1049,6 +1124,232 @@
           }
         }
       }
+    },
+    "/resumes": {
+      "get": {
+        "tags": [
+          "resumes"
+        ],
+        "summary": "Every resume version, the newest first.",
+        "operationId": "list_resumes",
+        "responses": {
+          "200": {
+            "description": "Every resume version, newest `created_at` first, ties by `id` descending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ResumeVersion"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The resume versions could not be read"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "resumes"
+        ],
+        "summary": "Uploads a resume PDF as a new version and extracts its text.",
+        "operationId": "upload_resume",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "description": "The version's label: required, 1–200 characters after trimming",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "query",
+            "description": "The original file name, at most 255 characters; `resume.pdf` when blank or missing",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The raw PDF bytes, 1 byte to 10 MiB, starting with `%PDF-`",
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "Raw PDF bytes."
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The stored version (`has_text` is false when no text could be extracted)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeVersion"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "413": {
+            "description": "The body is over 10 MiB"
+          },
+          "415": {
+            "description": "The body is not `application/pdf`"
+          },
+          "422": {
+            "description": "`name`, `filename` or `file` is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The version could not be stored"
+          }
+        }
+      }
+    },
+    "/resumes/{id}": {
+      "get": {
+        "tags": [
+          "resumes"
+        ],
+        "summary": "One resume version with its text.",
+        "operationId": "get_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The resume version's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resume version with its extracted text",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeVersionDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No resume version has this id"
+          },
+          "500": {
+            "description": "The resume version could not be read"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "resumes"
+        ],
+        "summary": "Deletes a resume version permanently, unless an application references it.",
+        "operationId": "delete_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The resume version's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The resume version is deleted"
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No resume version has this id"
+          },
+          "409": {
+            "description": "An application references this version; unlink it first"
+          },
+          "500": {
+            "description": "The resume version could not be deleted"
+          }
+        }
+      }
+    },
+    "/resumes/{id}/pdf": {
+      "get": {
+        "tags": [
+          "resumes"
+        ],
+        "summary": "The exact PDF bytes of a resume version.",
+        "operationId": "get_resume_pdf",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The resume version's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stored PDF, `inline` with `nosniff` and `no-store`",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary",
+                  "description": "Raw PDF bytes."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No resume version has this id"
+          },
+          "500": {
+            "description": "The PDF could not be read"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1068,7 +1369,8 @@
           "status",
           "status_changed_at",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "resume_version_id"
         ],
         "properties": {
           "comp": {
@@ -1100,6 +1402,14 @@
               "string",
               "null"
             ]
+          },
+          "resume_version_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The resume version sent with this application. Only\n`PUT /applications/{id}/resume` changes it."
           },
           "source": {
             "type": [
@@ -1705,6 +2015,94 @@
             "description": "Required; trimmed, at most 200 characters."
           }
         }
+      },
+      "ResumeLink": {
+        "type": "object",
+        "description": "The `PUT /applications/{id}/resume` body. `null` clears the link.",
+        "required": [
+          "resume_version_id"
+        ],
+        "properties": {
+          "resume_version_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ResumeVersion": {
+        "type": "object",
+        "description": "One resume version, without its text or bytes: the `GET /resumes` item.",
+        "required": [
+          "id",
+          "name",
+          "filename",
+          "size_bytes",
+          "sha256",
+          "has_text",
+          "application_count",
+          "created_at"
+        ],
+        "properties": {
+          "application_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many applications reference this version."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "filename": {
+            "type": "string",
+            "description": "The uploaded file's original name."
+          },
+          "has_text": {
+            "type": "boolean",
+            "description": "Whether text could be extracted from the PDF."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "description": "The user's label, e.g. \"Backend, Oct 2026\"."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the PDF bytes, lowercase hex."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ResumeVersionDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ResumeVersion"
+          },
+          {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The extracted text, or `null` when none could be extracted."
+              }
+            }
+          }
+        ],
+        "description": "One resume version with its extracted text: the `GET /resumes/{id}` body."
       },
       "Stage": {
         "type": "object",

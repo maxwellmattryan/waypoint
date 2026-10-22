@@ -27,11 +27,10 @@
 
 	const dashboardHref = resolve('/');
 	const applicationsHref = resolve('/applications');
+	const resumesHref = resolve('/resumes');
 	const path = $derived(page.url.pathname);
-	// `/applications/<id>` belongs to Applications too.
-	const inApplications = $derived(
-		path === applicationsHref || path.startsWith(`${applicationsHref}/`)
-	);
+	// A section's detail pages (`/applications/<id>`, `/resumes/<id>`) belong to it too.
+	const inSection = (href: string) => path === href || path.startsWith(`${href}/`);
 </script>
 
 <div class="flex min-h-screen flex-col">
@@ -42,7 +41,8 @@
 			<p class="text-lg font-semibold tracking-tight text-fg">Waypoint</p>
 			<nav aria-label="Main" class="order-last flex w-full items-center gap-1 sm:order-none sm:w-auto">
 				<NavLink href={dashboardHref} current={path === dashboardHref}>Dashboard</NavLink>
-				<NavLink href={applicationsHref} current={inApplications}>Applications</NavLink>
+				<NavLink href={applicationsHref} current={inSection(applicationsHref)}>Applications</NavLink>
+				<NavLink href={resumesHref} current={inSection(resumesHref)}>Resumes</NavLink>
 			</nav>
 			<Badge
 				tone={badge.tone}
