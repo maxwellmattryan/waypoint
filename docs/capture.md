@@ -40,6 +40,8 @@ The URL you paste is fetched wherever it points, local and private addresses inc
 
 Non-public means `127.0.0.0/8`, `::1`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `fc00::/7`, `fe80::/10`, `0.0.0.0` and `::`. An IPv4-mapped IPv6 address is judged by its IPv4 part. So a public page can't bounce Waypoint into your local network, while a local page can still redirect to another local page. A refused hop answers 422 on `url` with "The link redirects to a private network address, so Waypoint didn't follow it.", and the private host is never requested.
 
+Captures ignore proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`): through a proxy every response would come from the proxy's address, and the per-hop checks would mean nothing.
+
 What's left: if a DNS answer changes between the lookup and the connect, one GET can reach the private host before the check after it fires. Its response is discarded unread.
 
 ## What is sent to Claude

@@ -106,6 +106,9 @@ impl Capturer {
         let client = reqwest::Client::builder()
             .timeout(config.timeout)
             .redirect(reqwest::redirect::Policy::none())
+            // A proxy would make every `remote_addr` the proxy's, which blinds the
+            // redirect guard, so proxy environment variables are ignored.
+            .no_proxy()
             .user_agent(USER_AGENT)
             .build()
             .expect("the HTTP client builds");
