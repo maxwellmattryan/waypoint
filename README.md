@@ -47,14 +47,23 @@ The Applications page (`/applications`) lists every job application you're track
 
 An application has a company and a title (both required) and optional free-text fields: job posting URL, location, compensation (e.g. "$180k–$210k + equity"), source (e.g. "Referral") and notes. Its status is one of Sourced (the default), Applied, Interviewing, Offer and Rejected. The API trims every field and stores a blank optional field as `null`. Company, title, location, compensation and source are limited to 200 characters, the URL to 2048 and notes to 20,000, and the URL must be an absolute `http` or `https` URL.
 
+Each application also has its own interview **stages** (e.g. Recruiter screen, Onsite): on the detail page you add them, tick them off, move them up and down and remove them. A stage name is limited to 200 characters and an application to 50 stages. The **timeline** below them is an append-only log of what happened when: the application being added, every status change, every stage added, completed, reopened or removed, and the notes you add there (up to 20,000 characters). Choosing **Rejected** on the detail page asks for optional **rejection feedback** (what the company said) and records it in the timeline; once an application is rejected you can add more feedback later. Every timeline write also moves the application to the top of the list.
+
 | Route | Does |
 |---|---|
 | `GET /applications` | Lists every application, newest `updated_at` first |
 | `POST /applications` | Adds one (`company`, `title`, optional fields and `status`): 201 |
 | `GET /applications/<id>` | Reads one |
 | `PUT /applications/<id>` | Replaces the text fields; an omitted optional field is cleared and the status is left alone |
-| `PUT /applications/<id>/status` | Sets the status (`{"status": "applied"}`); `status_changed_at` moves only when it changes |
-| `DELETE /applications/<id>` | Deletes one permanently: 204 |
+| `PUT /applications/<id>/status` | Sets the status (`{"status": "applied"}`); `status_changed_at` moves only when it changes. With `rejected`, an optional `feedback` is also recorded as rejection feedback |
+| `DELETE /applications/<id>` | Deletes one permanently, with its stages and timeline: 204 |
+| `GET /applications/<id>/stages` | Lists its stages in order |
+| `POST /applications/<id>/stages` | Appends a stage (`{"name": "Onsite"}`): 201 with the whole list |
+| `PUT /applications/<id>/stages/<stage_id>` | Completes or reopens a stage (`{"completed": true}`); returns the whole list |
+| `PUT /applications/<id>/stage-order` | Reorders the stages (`{"stage_ids": [3, 1, 2]}`, every stage once); returns the whole list |
+| `DELETE /applications/<id>/stages/<stage_id>` | Removes a stage; later stages move up; returns the remaining list |
+| `GET /applications/<id>/events` | Lists its timeline, newest first |
+| `POST /applications/<id>/events` | Adds a note (`{"kind": "note", "body": "…"}`) or, for a rejected application, rejection feedback (`"kind": "rejection_feedback"`): 201 |
 
 An invalid field answers 422 with `{"errors": [{"field", "message"}]}`, one entry per failing field; a body that isn't valid JSON for the route (or an unknown status) answers 400 with a single `body` entry. Bodies must be `Content-Type: application/json` (anything else is refused: 403 for an HTML form, 415 otherwise), and every changing route answers 403 to a request a browser sends from another site, so a page you visit can't edit your applications. With the API running:
 
