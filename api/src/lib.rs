@@ -12,6 +12,7 @@ mod health;
 pub mod host;
 pub mod jobs;
 pub mod openapi;
+pub mod resumes;
 
 use rocket::fairing::AdHoc;
 use rocket::figment::Figment;
@@ -63,7 +64,13 @@ pub fn rocket(
                 applications::show,
                 applications::update,
                 applications::set_status,
+                applications::set_resume,
                 applications::delete,
+                resumes::list,
+                resumes::upload,
+                resumes::show,
+                resumes::pdf,
+                resumes::delete,
                 jobs::show,
                 google::connect,
                 google::callback,
