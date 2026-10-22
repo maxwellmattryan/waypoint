@@ -62,6 +62,18 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.example' http://127.0.0.
 
 The stream shows `job.queued`, `job.started` and `job.succeeded` for the job. Like the ping, `/dev/jobs/test-prompt` exists only in debug builds and needs the `X-Waypoint-Dev: 1` header.
 
+## API contract
+
+The API's OpenAPI 3.1 document is generated from the `#[utoipa::path]` annotations on the Rocket handlers (listed in `api/src/openapi.rs`) and committed at `api/openapi.json`. The web app's types are generated from that document into `web/src/lib/api/schema.d.ts` with openapi-typescript, and `#lib/api` exports a typed client (`createApiClient()`, built on openapi-fetch) plus the `Health`, `Job` and `Event` types. The debug-only `/dev` routes are not part of the contract.
+
+After changing any route or response type, regenerate both files and commit them:
+
+```sh
+scripts/gen-api.sh
+```
+
+Never edit `api/openapi.json` or `schema.d.ts` by hand. CI fails when either is stale: a Rust test compares `api/openapi.json` with the code and checks that every mounted route is documented, and the web job regenerates `schema.d.ts` and fails on any diff.
+
 ## Checks and tests
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same format, lint, type and test checks on every pull request and every push to `develop`; Rust tests run against a Postgres service container.
@@ -87,4 +99,10 @@ npm --prefix web run check   # svelte-check, fails on warnings
 npm --prefix web run lint    # ESLint
 npm --prefix web test        # Vitest, run once (component tests under jsdom)
 npm --prefix web run build   # static SPA in web/build
+```
+
+API contract (no database needed):
+
+```sh
+scripts/gen-api.sh && git diff --exit-code   # api/openapi.json and schema.d.ts are current
 ```

@@ -1,0 +1,378 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Waypoint API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/events": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "`GET /events`: `app.connected`, then every event published while connected.",
+        "operationId": "events",
+        "responses": {
+          "200": {
+            "description": "Server-sent events: `app.connected`, then every event published while connected. Each event's SSE `event:` field is its `type`; there is no replay.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Reports whether the API can reach Postgres.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "The API and its database are reachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "503": {
+            "description": "The database check failed or timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "`GET /jobs/<id>`: one job's current state.",
+        "operationId": "show",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The job's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job's current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No job has this id"
+          },
+          "500": {
+            "description": "The job could not be read"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Event": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "job",
+              "type"
+            ],
+            "properties": {
+              "job": {
+                "$ref": "#/components/schemas/Job"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job.queued"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "job",
+              "type"
+            ],
+            "properties": {
+              "job": {
+                "$ref": "#/components/schemas/Job"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job.started"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "job",
+              "type"
+            ],
+            "properties": {
+              "job": {
+                "$ref": "#/components/schemas/Job"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job.retrying"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "job",
+              "type"
+            ],
+            "properties": {
+              "job": {
+                "$ref": "#/components/schemas/Job"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job.deferred"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "job",
+              "type"
+            ],
+            "properties": {
+              "job": {
+                "$ref": "#/components/schemas/Job"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job.succeeded"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "job",
+              "type"
+            ],
+            "properties": {
+              "job": {
+                "$ref": "#/components/schemas/Job"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job.failed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "until",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "queue.paused"
+                ]
+              },
+              "until": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "queue.resumed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "app.connected"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "skipped",
+              "type"
+            ],
+            "properties": {
+              "skipped": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "app.lagged"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "One event on the bus. It serializes with its name in `\"type\"`."
+      },
+      "Health": {
+        "type": "object",
+        "description": "The `GET /health` body.",
+        "required": [
+          "status",
+          "db"
+        ],
+        "properties": {
+          "db": {
+            "type": "string",
+            "description": "`ok` or `unavailable`."
+          },
+          "status": {
+            "type": "string",
+            "description": "`ok` or `degraded`."
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "description": "One `jobs` row. This is also the `GET /jobs/<id>` body; the payload is not echoed.",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "attempts",
+          "max_attempts",
+          "run_at",
+          "last_error",
+          "result",
+          "created_at",
+          "updated_at",
+          "finished_at"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "result": {
+            "description": "Any JSON value the job produced."
+          },
+          "run_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The earliest time the job may start."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `running`, `succeeded` or `failed`."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

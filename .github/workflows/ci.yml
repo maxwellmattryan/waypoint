@@ -72,6 +72,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: npm ci
         run: npm ci
+      - name: Generated API types are up to date
+        run: npm run gen:api && git diff --exit-code -- src/lib/api/schema.d.ts
       - name: npm run check (svelte-check)
         run: npm run check
       - name: npm run lint (ESLint)

@@ -18,7 +18,7 @@ pub const DEFAULT_CAPACITY: usize = 256;
 const HEARTBEAT: Duration = Duration::from_secs(15);
 
 /// One event on the bus. It serializes with its name in `"type"`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 #[serde(tag = "type")]
 pub enum Event {
     #[serde(rename = "job.queued")]
@@ -124,6 +124,20 @@ fn sse(event: &Event) -> SseEvent {
 }
 
 /// `GET /events`: `app.connected`, then every event published while connected.
+#[utoipa::path(
+    get,
+    path = "/events",
+    tag = "events",
+    responses(
+        (
+            status = 200,
+            description = "Server-sent events: `app.connected`, then every event published while connected. Each event's SSE `event:` field is its `type`; there is no replay.",
+            content_type = "text/event-stream",
+            body = Event,
+        ),
+        (status = 403, description = "The `Host` header is not a local address"),
+    )
+)]
 #[rocket::get("/events")]
 pub fn events(_host: LocalHost, bus: &State<EventBus>, mut shutdown: Shutdown) -> EventStream![] {
     // Subscribe now, not when the stream is first polled, so nothing published after

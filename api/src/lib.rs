@@ -8,6 +8,7 @@ pub mod events;
 mod health;
 pub mod host;
 pub mod jobs;
+pub mod openapi;
 
 use rocket::fairing::AdHoc;
 use rocket::figment::Figment;
