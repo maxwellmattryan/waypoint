@@ -1105,6 +1105,63 @@
         }
       }
     },
+    "/data": {
+      "delete": {
+        "tags": [
+          "kill_switch"
+        ],
+        "summary": "`DELETE /data`: pauses agents (they stay paused), revokes the Google grant\n(best-effort) and empties every user table.",
+        "operationId": "delete_all_data",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAllData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every user table is empty and agents are paused; `google` says what happened to the Google grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataDeletion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "422": {
+            "description": "`confirmation` is not exactly `delete all data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The data could not be deleted; nothing was deleted"
+          }
+        }
+      }
+    },
     "/events": {
       "get": {
         "tags": [
@@ -1201,6 +1258,78 @@
           },
           "500": {
             "description": "The job could not be read"
+          }
+        }
+      }
+    },
+    "/kill-switch": {
+      "get": {
+        "tags": [
+          "kill_switch"
+        ],
+        "summary": "`GET /kill-switch`: whether agents are paused.",
+        "operationId": "get_kill_switch",
+        "responses": {
+          "200": {
+            "description": "The kill switch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitch"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The kill switch could not be read"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "kill_switch"
+        ],
+        "summary": "`PUT /kill-switch`: pauses or resumes every agent run. Setting the current value is a\nno-op that returns the current state.",
+        "operationId": "set_kill_switch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetKillSwitch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The kill switch after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "500": {
+            "description": "The kill switch could not be changed"
           }
         }
       }
@@ -1877,6 +2006,32 @@
           "reconnect_required"
         ]
       },
+      "DataDeletion": {
+        "type": "object",
+        "description": "The `DELETE /data` body on success.",
+        "required": [
+          "google"
+        ],
+        "properties": {
+          "google": {
+            "$ref": "#/components/schemas/GoogleRevocation"
+          }
+        }
+      },
+      "DeleteAllData": {
+        "type": "object",
+        "description": "The `DELETE /data` body.",
+        "required": [
+          "confirmation"
+        ],
+        "properties": {
+          "confirmation": {
+            "type": "string",
+            "description": "Must be exactly `delete all data`."
+          }
+        },
+        "additionalProperties": false
+      },
       "EntryKind": {
         "type": "string",
         "description": "The kinds of entry the user writes directly.",
@@ -2137,6 +2292,40 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "The kill switch changed; `kill_switch` is the `GET /kill-switch` body.",
+            "required": [
+              "kill_switch",
+              "type"
+            ],
+            "properties": {
+              "kill_switch": {
+                "$ref": "#/components/schemas/KillSwitch"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "kill_switch.updated"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "`DELETE /data` emptied every user table; refetch everything.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "data.deleted"
+                ]
+              }
+            }
           }
         ],
         "description": "One event on the bus. It serializes with its name in `\"type\"`."
@@ -2184,6 +2373,15 @@
             "description": "Whether Google confirmed the revocation. When `false`, remove the grant by hand at\n<https://myaccount.google.com/permissions>."
           }
         }
+      },
+      "GoogleRevocation": {
+        "type": "string",
+        "description": "What happened to the Google grant when all data was deleted.",
+        "enum": [
+          "revoked",
+          "not_revoked",
+          "not_connected"
+        ]
       },
       "GoogleStatus": {
         "type": "object",
@@ -2301,6 +2499,25 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "KillSwitch": {
+        "type": "object",
+        "description": "The kill switch: the `GET /kill-switch` body.",
+        "required": [
+          "paused",
+          "updated_at"
+        ],
+        "properties": {
+          "paused": {
+            "type": "boolean",
+            "description": "Whether agents are paused."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When `paused` last changed."
           }
         }
       },
@@ -2607,6 +2824,7 @@
         "enum": [
           "queued",
           "running",
+          "paused",
           "succeeded",
           "failed"
         ]
@@ -2734,6 +2952,19 @@
           }
         ],
         "description": "A step with its tool calls, oldest first."
+      },
+      "SetKillSwitch": {
+        "type": "object",
+        "description": "The `PUT /kill-switch` body.",
+        "required": [
+          "paused"
+        ],
+        "properties": {
+          "paused": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "Stage": {
         "type": "object",

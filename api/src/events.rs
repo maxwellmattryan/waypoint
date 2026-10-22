@@ -12,6 +12,7 @@ use tokio::sync::broadcast::{self, error::RecvError};
 use crate::applications::Application;
 use crate::host::LocalHost;
 use crate::jobs::Job;
+use crate::kill_switch::KillSwitch;
 use crate::runs::Run;
 
 /// Events a slow subscriber can fall behind by before it gets [`Event::AppLagged`].
@@ -54,6 +55,12 @@ pub enum Event {
     /// An agent run changed; `run` is the `agent_runs` row as `GET /runs` returns it.
     #[serde(rename = "run.updated")]
     RunUpdated { run: Run },
+    /// The kill switch changed; `kill_switch` is the `GET /kill-switch` body.
+    #[serde(rename = "kill_switch.updated")]
+    KillSwitchUpdated { kill_switch: KillSwitch },
+    /// `DELETE /data` emptied every user table; refetch everything.
+    #[serde(rename = "data.deleted")]
+    DataDeleted,
 }
 
 impl Event {
@@ -74,6 +81,8 @@ impl Event {
             Self::ApplicationUpdated { .. } => "application.updated",
             Self::ApplicationDeleted { .. } => "application.deleted",
             Self::RunUpdated { .. } => "run.updated",
+            Self::KillSwitchUpdated { .. } => "kill_switch.updated",
+            Self::DataDeleted => "data.deleted",
         }
     }
 

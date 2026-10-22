@@ -145,6 +145,7 @@ fn document_matches_wire_shapes() {
             "application.created" | "application.updated" => ["application"].into(),
             "application.deleted" => ["id"].into(),
             "run.updated" => ["run"].into(),
+            "kill_switch.updated" => ["kill_switch"].into(),
             _ => BTreeSet::new(),
         };
         assert_eq!(payload, want, "{name} payload");
@@ -165,6 +166,8 @@ fn document_matches_wire_shapes() {
         "application.updated",
         "application.deleted",
         "run.updated",
+        "kill_switch.updated",
+        "data.deleted",
     ]
     .iter()
     .map(|n| n.to_string())
