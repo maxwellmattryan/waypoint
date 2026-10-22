@@ -285,3 +285,55 @@ async fn failures_are_typed_and_logged(pool: PgPool) {
     assert!(rows[0].duration_ms >= 1000, "{:?}", rows[0]);
     assert_eq!(rows[4].model.as_deref(), Some("claude-haiku-5-5"));
 }
+
+/// The pid of the background `sleep` that `hang_tree` starts, once the fake has written it.
+async fn grandchild_pid(record: &Path) -> i32 {
+    let file = record.join("grandchild");
+    for _ in 0..200 {
+        if let Some(pid) = fs::read_to_string(&file)
+            .ok()
+            .and_then(|raw| raw.trim().parse::<i32>().ok())
+        {
+            return pid;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the fake never wrote its grandchild's pid");
+}
+
+/// Whether `pid` is gone within 2s, polling every 50ms.
+async fn dies_within_2s(pid: i32) -> bool {
+    for _ in 0..40 {
+        // SAFETY: signal 0 only checks that the process exists; nothing is delivered.
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    false
+}
+
+#[sqlx::test]
+async fn timeout_and_cancel_kill_the_process_group(pool: PgPool) {
+    let req = request("test.group", "ping");
+
+    let timed_out = common::fake("hang_tree", Duration::from_secs(1));
+    let (result, pid) = tokio::join!(
+        timed_out.runner.call(&pool, &req),
+        grandchild_pid(&timed_out.record)
+    );
+    let err = result.expect_err("timeout");
+    assert!(matches!(err, ClaudeError::Timeout { .. }), "{err:?}");
+    assert!(dies_within_2s(pid).await, "the grandchild outlived the timeout");
+
+    // The caller gives up after 1s, well inside the runner's own 10s timeout. The
+    // grandchild must exist before the future is dropped, so wait for it too.
+    let cancelled = common::fake("hang_tree", TIMEOUT);
+    let call = tokio::time::timeout(Duration::from_secs(1), cancelled.runner.call(&pool, &req));
+    let (dropped, pid) = tokio::join!(call, grandchild_pid(&cancelled.record));
+    assert!(dropped.is_err(), "the call was still running when dropped");
+    assert!(
+        dies_within_2s(pid).await,
+        "the grandchild outlived the dropped call"
+    );
+}

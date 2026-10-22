@@ -40,7 +40,7 @@ const SCRUBBED_ENV: [&str; 7] = [
 /// Prefixes of Waypoint's own settings and secrets, also withheld from the child.
 const SCRUBBED_ENV_PREFIXES: [&str; 2] = ["POSTGRES_", "WAYPOINT_"];
 /// How much stderr (its tail) and how much of an error message are kept.
-const MAX_ERROR_BYTES: usize = 2048;
+pub(crate) const MAX_ERROR_BYTES: usize = 2048;
 /// Most stdout read from one call; more is a protocol error and the child is killed.
 const MAX_STDOUT_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -304,6 +304,8 @@ impl ClaudeRunner {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            // Its own process group, so `GroupKill` can take down anything it starts.
+            .process_group(0)
             .kill_on_drop(true);
         for key in scrubbed_env(std::env::vars_os().map(|(key, _)| key)) {
             command.env_remove(key);
@@ -317,6 +319,12 @@ impl ClaudeRunner {
             Ok(child) => child,
             Err(err) => return process_error(self.spawn_error(&err)),
         };
+        // Declared after `child`, so it drops first: on return, on the timeout and when
+        // the caller drops this future.
+        let _group = child
+            .id()
+            .and_then(|pid| i32::try_from(pid).ok())
+            .map(GroupKill);
         let (Some(mut stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())
         else {
@@ -398,6 +406,24 @@ impl ClaudeRunner {
     }
 }
 
+/// Sends `SIGKILL` to a call's whole process group when dropped, so grandchildren (a
+/// shell's background job, an MCP server the CLI started) never outlive the call.
+/// `kill_on_drop` stays as a backstop for the direct child.
+///
+/// Accepted race: once `wait()` has reaped the group leader, the group id could in theory
+/// be reused before this guard drops. The window is the few microseconds between `wait()`
+/// returning and the drop.
+struct GroupKill(i32);
+
+impl Drop for GroupKill {
+    fn drop(&mut self) {
+        // SAFETY: `killpg` only sends a signal; it touches no memory owned by this process.
+        // The group was created for this call by `process_group(0)`, and an already-gone
+        // group (`ESRCH`) is ignored on purpose.
+        let _ = unsafe { libc::killpg(self.0, libc::SIGKILL) };
+    }
+}
+
 /// The variables to remove from the child, given the names in the API's environment.
 fn scrubbed_env(present: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
     let mut keys: Vec<OsString> = SCRUBBED_ENV.iter().map(OsString::from).collect();
@@ -445,7 +471,7 @@ async fn tail(mut reader: impl AsyncRead + Unpin) -> String {
 }
 
 /// The longest prefix of `text` that fits in `max` bytes without splitting a character.
-fn head(text: &str, max: usize) -> &str {
+pub(crate) fn head(text: &str, max: usize) -> &str {
     if text.len() <= max {
         return text;
     }
