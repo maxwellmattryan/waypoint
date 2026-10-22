@@ -36,6 +36,7 @@ impl Harness {
             bus: bus.clone(),
             config,
             wake: wake.0.clone(),
+            runtime: Default::default(),
         }
         .spawn(stopped);
         let harness = Self {

@@ -19,6 +19,10 @@ use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleStatus};
 use crate::health::{self, Health};
 use crate::jobs::{self, Job};
 use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
+use crate::runs::{
+    self, Run, RunDetail, RunStatus, RunStep, RunStepDetail, StepStatus, ToolCall, ToolCallStatus,
+};
+use crate::tools::Permission;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -51,6 +55,8 @@ use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
         timeline::list_events,
         timeline::add_entry,
         capture::capture,
+        runs::list,
+        runs::show,
     ),
     components(schemas(
         Health,
@@ -84,6 +90,15 @@ use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
         ResumeVersion,
         ResumeVersionDetail,
         ResumeLink,
+        Run,
+        RunStatus,
+        RunDetail,
+        RunStep,
+        StepStatus,
+        RunStepDetail,
+        ToolCall,
+        ToolCallStatus,
+        Permission,
     ))
 )]
 struct ApiDoc;
