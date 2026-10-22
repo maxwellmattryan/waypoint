@@ -200,6 +200,33 @@ A placeholder block. `shape`: `rect` (default) | `text` | `circle`. It's `aria-h
 <Skeleton shape="circle" class="size-10" />
 ```
 
+### Stat
+
+A non-interactive tile for one figure: a small muted `label`, a large tabular-nums `value` and an optional `detail` line. `tone` (a Badge tone, default `neutral`) colours the value; `neutral` keeps the body text colour.
+
+```svelte
+<Stat label="Cost" value="$0.04" />
+<Stat label="Status" value="Failed" tone="danger" detail="after 3 attempts" />
+```
+
+### KeyValue
+
+A `<dl>` of label and value pairs in two columns (`grid-cols-[max-content_1fr]`). `items: { key: string; value: string | Snippet }[]`; a snippet value renders richer content such as a Badge or a JsonView. Keys must be unique.
+
+```svelte
+{#snippet permission()}<Badge>read</Badge>{/snippet}
+<KeyValue items={[{ key: 'Tool', value: 'lookup' }, { key: 'Permission', value: permission }]} />
+```
+
+### JsonView
+
+Pretty-prints any JSON value (`JSON.stringify(value, null, 2)`) as the text of a `<pre>`. It never renders markup: a string such as `"<img src=x>"` shows as its characters. `label` is required and becomes the block's `aria-label`. The block scrolls past `max-h-80`, so it is focusable (`tabindex="0"`) with the focus-visible ring. For `null` or `undefined` it shows the `empty` text (default "None") in muted style instead.
+
+```svelte
+<JsonView value={step.input} label="Step input" />
+<JsonView value={run.output} label="Run output" empty="No output yet" />
+```
+
 ### Tabs
 
 Horizontal tabs with automatic activation. Props: `label` (required, the tablist's `aria-label`), `items: { value: string; label: string; disabled?: boolean }[]`, `value` (bindable, defaults to the first enabled item) and a `children` snippet that receives the active value and renders its panel. The panel fades in when the value changes.

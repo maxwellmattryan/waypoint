@@ -74,6 +74,16 @@ export type SkeletonShape = keyof typeof skeletonShapes;
  */
 export const layers = { menu: 'z-30', overlay: 'z-40', toast: 'z-50', tooltip: 'z-50' } as const;
 
+/** The value colour of a Stat, by tone. `neutral` keeps the body text colour. */
+export const statTones = {
+	neutral: 'text-fg',
+	primary: 'text-primary-soft-fg',
+	success: 'text-success-soft-fg',
+	warning: 'text-warning-soft-fg',
+	danger: 'text-danger-soft-fg',
+	info: 'text-info-soft-fg'
+} as const satisfies Record<BadgeTone, string>;
+
 /** Surface for overlay panels and toasts. */
 export const overlaySurface = 'bg-surface border border-border rounded-lg shadow-lg';
 

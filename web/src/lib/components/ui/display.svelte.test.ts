@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import { Badge, Card, EmptyState, Skeleton } from './index';
-import { badgeTones, type BadgeTone } from './styles';
+import { Badge, Card, EmptyState, JsonView, KeyValue, Skeleton, Stat } from './index';
+import { badgeTones, statTones, type BadgeTone } from './styles';
 import { html, text } from './__fixtures__/snippets';
 
 describe('Card', () => {
@@ -54,5 +54,71 @@ describe('Skeleton', () => {
 		const classes = skeleton.className.split(/\s+/);
 		const animated = classes.filter((c) => c.includes('animate-'));
 		expect(animated).toEqual(['motion-safe:animate-pulse']);
+	});
+});
+
+describe('Stat', () => {
+	it('renders its label, value and detail', () => {
+		render(Stat, {
+			label: 'Cost',
+			value: '$1.25',
+			detail: 'across 3 steps',
+			'data-testid': 's'
+		});
+		const stat = screen.getByTestId('s');
+		expect(stat).toHaveTextContent('Cost');
+		expect(stat).toHaveTextContent('$1.25');
+		expect(stat).toHaveTextContent('across 3 steps');
+		expect(stat.querySelector('button, a')).toBeNull();
+	});
+
+	it('colours the value by tone', () => {
+		render(Stat, { label: 'Status', value: 'Failed', tone: 'danger' });
+		expect(screen.getByText('Failed')).toHaveClass(statTones.danger);
+	});
+});
+
+describe('KeyValue', () => {
+	it('renders each item as a term and its description, text or snippet', () => {
+		render(KeyValue, {
+			items: [
+				{ key: 'Tool', value: 'lookup' },
+				{ key: 'Permission', value: text('read') }
+			]
+		});
+		const terms = screen.getAllByRole('term').map((el) => el.textContent);
+		const values = screen.getAllByRole('definition').map((el) => el.textContent?.trim());
+		expect(terms).toEqual(['Tool', 'Permission']);
+		expect(values).toEqual(['lookup', 'read']);
+	});
+});
+
+describe('JsonView', () => {
+	it('pretty-prints JSON in a focusable, labelled block', () => {
+		render(JsonView, { value: { q: 'hi', n: [1] }, label: 'Input' });
+		const block = screen.getByLabelText('Input');
+		expect(block.tagName).toBe('PRE');
+		expect(block).toHaveAttribute('tabindex', '0');
+		expect(block.textContent).toBe('{\n  "q": "hi",\n  "n": [\n    1\n  ]\n}');
+	});
+
+	it('renders markup in a value as literal text', () => {
+		const value = '<img src=x onerror=alert(1)>';
+		render(JsonView, { value, label: 'Output' });
+		const block = screen.getByLabelText('Output');
+		expect(block.textContent).toBe(JSON.stringify(value));
+		expect(block.children).toHaveLength(0);
+		expect(document.querySelector('img')).toBeNull();
+	});
+
+	it.each([null, undefined])('shows its empty text for %s', (value) => {
+		render(JsonView, { value, label: 'Output', empty: 'No output yet' });
+		expect(screen.getByText('No output yet')).toBeInTheDocument();
+		expect(screen.queryByLabelText('Output')).toBeNull();
+	});
+
+	it('defaults the empty text to "None"', () => {
+		render(JsonView, { value: null, label: 'Error' });
+		expect(screen.getByText('None')).toBeInTheDocument();
 	});
 });

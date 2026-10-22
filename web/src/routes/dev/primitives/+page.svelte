@@ -10,11 +10,14 @@
 		FileInput,
 		IconButton,
 		Input,
+		JsonView,
+		KeyValue,
 		Link,
 		Menu,
 		NavLink,
 		Select,
 		Skeleton,
+		Stat,
 		Tabs,
 		Textarea,
 		Tooltip,
@@ -75,6 +78,9 @@
 	];
 	let picked = $state('nothing yet');
 	let menuDialogOpen = $state(false);
+
+	/** A string holding markup: JsonView shows it as text. */
+	const markupSample = '<img src=x onerror=alert(1)>';
 </script>
 
 <svelte:head>
@@ -310,6 +316,44 @@
 				<Skeleton shape="text" class="w-3/4" />
 			</div>
 			<Skeleton class="h-16 w-32" />
+		</div>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="stat">
+		<h2 id="stat" class="text-lg font-semibold text-fg">Stat</h2>
+		<div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+			<Stat label="Status" value="Succeeded" tone="success" />
+			<Stat label="Duration" value="4m 05s" />
+			<Stat label="Tokens in" value="12,345" detail="incl. cache" />
+			<Stat label="Cost" value="<$0.01" tone="warning" />
+		</div>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="key-value">
+		<h2 id="key-value" class="text-lg font-semibold text-fg">KeyValue</h2>
+		{#snippet readBadge()}
+			<Badge>read</Badge>
+		{/snippet}
+		<Card>
+			<KeyValue
+				items={[
+					{ key: 'Tool', value: 'lookup' },
+					{ key: 'Permission', value: readBadge },
+					{ key: 'Duration', value: '850 ms' }
+				]}
+			/>
+		</Card>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="json-view">
+		<h2 id="json-view" class="text-lg font-semibold text-fg">JsonView</h2>
+		<div class="grid gap-4 sm:grid-cols-2">
+			<JsonView
+				label="Sample input"
+				value={{ q: 'staff engineer', remote: true, tags: ['rust', 'svelte'] }}
+			/>
+			<JsonView label="Markup stays text" value={markupSample} />
+			<JsonView label="Empty output" value={null} empty="No output yet" />
 		</div>
 	</section>
 
