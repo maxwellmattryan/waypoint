@@ -23,6 +23,21 @@ Postgres keeps running after the script exits, and its data persists in the `way
 docker compose down
 ```
 
+## Model calls
+
+Waypoint calls Claude through your Claude subscription, not the API. Every call spawns the [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI (`claude -p`) in an empty temp directory with no tools and no saved session, and logs the model, tokens, duration and reported cost to the `claude_calls` table. Install the CLI and log in once with `claude` before using any model-backed feature.
+
+The runner removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the CLI's environment, so a key in your shell never switches billing to the API. `WAYPOINT_CLAUDE_BIN` (default `claude` on `PATH`) and `WAYPOINT_CLAUDE_TIMEOUT_SECS` (default 300) are optional; see `.env.example`.
+
+To check the round trip, start the app with `./scripts/dev.sh` and, in another terminal:
+
+```sh
+curl -s -X POST http://127.0.0.1:8000/dev/claude/ping
+docker compose exec db psql -U waypoint -c 'select status, model, input_tokens, output_tokens, cost_usd from claude_calls order by id desc limit 1'
+```
+
+The ping should answer `pong` with the model and token counts. `/dev/claude/ping` exists only in debug builds (`cargo run`); release builds don't serve it.
+
 ## Checks and tests
 
 Rust (no database needed):
