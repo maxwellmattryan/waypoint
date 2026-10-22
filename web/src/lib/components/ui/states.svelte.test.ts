@@ -1,12 +1,14 @@
-import { render } from '@testing-library/svelte';
+import { fireEvent, render } from '@testing-library/svelte';
 import type { Component } from 'svelte';
 import { describe, expect, it } from 'vitest';
+import MenuHarness from './__fixtures__/MenuHarness.svelte';
 import {
 	Badge,
 	Button,
 	Card,
 	Checkbox,
 	EmptyState,
+	FileInput,
 	IconButton,
 	Input,
 	Link,
@@ -34,7 +36,12 @@ type Row = {
 	disabledProps: Record<string, unknown>;
 	/** The class the disabled state must carry. */
 	disabledClass: string;
+	/** Brings the element on screen first, e.g. opens a menu. */
+	reveal?: (container: HTMLElement) => Promise<unknown>;
 };
+
+const openMenu = (container: HTMLElement) =>
+	fireEvent.click(container.querySelector('[aria-haspopup="menu"]')!);
 
 const options = [{ value: 'a', label: 'A' }];
 const tabItems = [
@@ -125,6 +132,15 @@ const interactiveRows: Row[] = [
 		disabledClass: 'disabled:cursor-not-allowed'
 	},
 	{
+		name: 'FileInput',
+		component: FileInput,
+		props: { label: 'PDF file', accept: 'application/pdf,.pdf' },
+		find: (c) => c.querySelector('input[type="file"]'),
+		pointer: true,
+		disabledProps: { disabled: true },
+		disabledClass: 'disabled:cursor-not-allowed'
+	},
+	{
 		name: 'Card with href',
 		component: Card,
 		props: { href: '/x', children: text('Card') },
@@ -141,6 +157,25 @@ const interactiveRows: Row[] = [
 		pointer: true,
 		disabledProps: { items: [{ ...tabItems[0], disabled: true }, tabItems[1]] },
 		disabledClass: 'disabled:cursor-not-allowed'
+	},
+	{
+		name: 'Menu trigger',
+		component: MenuHarness,
+		props: {},
+		find: (c) => c.querySelector('[aria-haspopup="menu"]'),
+		pointer: true,
+		disabledProps: { disabled: true },
+		disabledClass: 'disabled:cursor-not-allowed'
+	},
+	{
+		name: 'Menu item',
+		component: MenuHarness,
+		props: { items: [{ value: 'a', label: 'A' }] },
+		find: (c) => c.querySelector('[role="menuitem"]'),
+		pointer: true,
+		disabledProps: { items: [{ value: 'a', label: 'A', disabled: true }] },
+		disabledClass: 'disabled:cursor-not-allowed',
+		reveal: openMenu
 	}
 ];
 
@@ -150,16 +185,54 @@ function classesOf(el: Element | null): string[] {
 }
 
 describe('interactive primitives own their state and cursor classes', () => {
-	it.each(interactiveRows)('$name', ({ component, props, find, pointer, disabledProps, disabledClass }) => {
-		const { container } = render(component, props);
-		const classes = classesOf(find(container));
-		expect(classes.some((c) => c.includes('hover:'))).toBe(true);
-		expect(classes.some((c) => c.includes('active:'))).toBe(true);
-		expect(classes.some((c) => c.startsWith('focus-visible:'))).toBe(true);
-		expect(classes.includes('cursor-pointer')).toBe(pointer);
+	it.each(interactiveRows)(
+		'$name',
+		async ({ component, props, find, pointer, disabledProps, disabledClass, reveal }) => {
+			const { container } = render(component, props);
+			await reveal?.(container);
+			const classes = classesOf(find(container));
+			expect(classes.some((c) => c.includes('hover:'))).toBe(true);
+			expect(classes.some((c) => c.includes('active:'))).toBe(true);
+			expect(classes.some((c) => c.startsWith('focus-visible:'))).toBe(true);
+			expect(classes.includes('cursor-pointer')).toBe(pointer);
 
-		const disabled = render(component, { ...props, ...disabledProps });
-		expect(classesOf(find(disabled.container))).toContain(disabledClass);
+			const disabled = render(component, { ...props, ...disabledProps });
+			await reveal?.(disabled.container);
+			expect(classesOf(find(disabled.container))).toContain(disabledClass);
+		}
+	);
+});
+
+// Drag sources have no focus or disabled state of their own; they carry the grab cursors.
+const dragRows: {
+	name: string;
+	component: AnyComponent;
+	props: Record<string, unknown>;
+	find: (container: HTMLElement) => Element | null;
+}[] = [
+	{
+		name: 'Card draggable',
+		component: Card,
+		props: { draggable: true, children: text('Card') },
+		find: (c) => c.firstElementChild
+	}
+];
+
+describe('drag sources carry the grab cursors', () => {
+	it.each(dragRows)('$name', ({ component, props, find }) => {
+		const { container } = render(component, props);
+		const el = find(container);
+		expect(el).toHaveAttribute('draggable', 'true');
+		const classes = classesOf(el);
+		expect(classes).toContain('cursor-grab');
+		expect(classes).toContain('active:cursor-grabbing');
+		expect(classes.some((c) => c.startsWith('hover:'))).toBe(true);
+		expect(classes).not.toContain('cursor-pointer');
+
+		const still = render(component, { ...props, draggable: false });
+		const plain = find(still.container);
+		expect(plain).not.toHaveAttribute('draggable');
+		expect(classesOf(plain).some((c) => c.includes('cursor-'))).toBe(false);
 	});
 });
 

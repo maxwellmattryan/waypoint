@@ -21,7 +21,8 @@ const application: Application = {
 	status: 'sourced',
 	status_changed_at: '2026-10-22T00:00:00Z',
 	created_at: '2026-10-22T00:00:00Z',
-	updated_at: '2026-10-22T00:00:00Z'
+	updated_at: '2026-10-22T00:00:00Z',
+	resume_version_id: null
 };
 
 function submit(form: HTMLElement) {

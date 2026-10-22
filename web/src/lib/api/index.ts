@@ -21,6 +21,9 @@ export type {
 	Health,
 	Job,
 	NewApplication,
+	ResumeLink,
+	ResumeVersion,
+	ResumeVersionDetail,
 	Stage,
 	ValidationErrors
 } from './client';

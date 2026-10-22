@@ -18,6 +18,7 @@ use crate::events::{self, Event};
 use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleStatus};
 use crate::health::{self, Health};
 use crate::jobs::{self, Job};
+use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -35,7 +36,13 @@ use crate::jobs::{self, Job};
         applications::show,
         applications::update,
         applications::set_status,
+        applications::set_resume,
         applications::delete,
+        resumes::list,
+        resumes::upload,
+        resumes::show,
+        resumes::pdf,
+        resumes::delete,
         stages::list,
         stages::add,
         stages::update,
@@ -74,6 +81,9 @@ use crate::jobs::{self, Job};
         CaptureFailureReason,
         ValidationErrors,
         FieldError,
+        ResumeVersion,
+        ResumeVersionDetail,
+        ResumeLink,
     ))
 )]
 struct ApiDoc;

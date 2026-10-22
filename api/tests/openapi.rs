@@ -142,6 +142,8 @@ fn document_matches_wire_shapes() {
             n if n.starts_with("job.") => ["job"].into(),
             "queue.paused" => ["until"].into(),
             "app.lagged" => ["skipped"].into(),
+            "application.created" | "application.updated" => ["application"].into(),
+            "application.deleted" => ["id"].into(),
             _ => BTreeSet::new(),
         };
         assert_eq!(payload, want, "{name} payload");
@@ -158,6 +160,9 @@ fn document_matches_wire_shapes() {
         "queue.resumed",
         "app.connected",
         "app.lagged",
+        "application.created",
+        "application.updated",
+        "application.deleted",
     ]
     .iter()
     .map(|n| n.to_string())
@@ -227,6 +232,7 @@ fn document_matches_wire_shapes() {
         "status_changed_at",
         "created_at",
         "updated_at",
+        "resume_version_id",
     ]
     .iter()
     .map(|f| f.to_string())
@@ -246,6 +252,11 @@ fn document_matches_wire_shapes() {
             "{nullable} is a nullable string"
         );
     }
+    assert_eq!(
+        application["properties"]["resume_version_id"]["type"],
+        serde_json::json!(["integer", "null"]),
+        "resume_version_id is a nullable integer"
+    );
     for timestamp in ["status_changed_at", "created_at", "updated_at"] {
         assert_eq!(
             application["properties"][timestamp]["format"], "date-time",
@@ -263,10 +274,32 @@ fn document_matches_wire_shapes() {
         &paths["/applications/{id}"]["put"],
         &paths["/applications/{id}"]["delete"],
         &paths["/applications/{id}/status"]["put"],
+        &paths["/applications/{id}/resume"]["put"],
     ] {
         assert!(operation["responses"]["403"].is_object(), "{operation}");
         assert_eq!(operation["tags"], serde_json::json!(["applications"]));
     }
+    assert!(paths["/applications/{id}/resume"]["put"]["responses"]["422"].is_object());
+
+    for operation in [
+        &paths["/resumes"]["get"],
+        &paths["/resumes"]["post"],
+        &paths["/resumes/{id}"]["get"],
+        &paths["/resumes/{id}"]["delete"],
+        &paths["/resumes/{id}/pdf"]["get"],
+    ] {
+        assert_eq!(operation["tags"], serde_json::json!(["resumes"]));
+    }
+    let upload = &paths["/resumes"]["post"];
+    assert!(upload["requestBody"]["content"]["application/pdf"].is_object());
+    for status in ["201", "413", "415", "422"] {
+        assert!(upload["responses"][status].is_object(), "upload {status}");
+    }
+    assert!(paths["/resumes/{id}"]["delete"]["responses"]["409"].is_object());
+    assert!(
+        paths["/resumes/{id}/pdf"]["get"]["responses"]["200"]["content"]["application/pdf"]
+            .is_object()
+    );
     assert!(paths["/applications"]["post"]["responses"]["201"].is_object());
     assert!(paths["/applications"]["post"]["responses"]["422"].is_object());
     assert!(paths["/applications/{id}"]["delete"]["responses"]["204"].is_object());

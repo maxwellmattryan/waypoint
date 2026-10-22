@@ -1,6 +1,8 @@
 //! Job applications: one `applications` row per role the user is tracking, with CRUD
-//! routes and a status route. Creating an application and changing its status also
-//! write to its timeline ([`timeline`]); its interview stages live in [`stages`].
+//! routes, a status route and a resume-link route. Creating an application and changing its
+//! status also write to its timeline ([`timeline`]); its interview stages live in [`stages`].
+//! Each successful write publishes an `application.*` event on the [`EventBus`] once its
+//! write has committed; a refused or failed request publishes nothing.
 //!
 //! Input is normalised here and nowhere else: text is trimmed, a blank optional field
 //! becomes `null`, lengths are counted in characters and `url` must be an absolute http or
@@ -23,7 +25,9 @@ use sqlx::error::BoxDynError;
 use sqlx::postgres::{PgTypeInfo, PgValueRef};
 use sqlx::{Decode, PgPool, Postgres, Type};
 
+use crate::events::{Event, EventBus};
 use crate::host::{LocalHost, NotCrossSite};
+use crate::resumes::ResumeLink;
 use timeline::EventKind;
 
 /// Most characters in `company`, `title`, `location`, `comp` and `source`.
@@ -129,10 +133,25 @@ pub struct Application {
     pub status_changed_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// The resume version sent with this application. Only
+    /// `PUT /applications/{id}/resume` changes it.
+    #[schema(required = true)]
+    pub resume_version_id: Option<i64>,
 }
 
 const COLUMNS: &str = "id, company, title, url, location, comp, source, notes, status, \
-                       status_changed_at, created_at, updated_at";
+                       status_changed_at, created_at, updated_at, resume_version_id";
+
+/// The SQLSTATE Postgres reports for a foreign-key violation, on insert or update (the
+/// referenced row is missing) and on delete (a `RESTRICT` reference still exists).
+pub(crate) const FOREIGN_KEY_VIOLATION: &str = "23503";
+
+/// Whether `err` is a foreign-key violation.
+pub(crate) fn is_foreign_key_violation(err: &sqlx::Error) -> bool {
+    err.as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| code == FOREIGN_KEY_VIOLATION)
+}
 
 /// The `PUT /applications/{id}` body: every text field, replacing the stored ones. An
 /// omitted optional field is cleared. Unknown keys, `status` included, are ignored.
@@ -227,6 +246,10 @@ pub enum ApiError {
     /// 400: the body didn't parse.
     BadRequest,
     NotFound,
+    /// 409: the change would break a reference (a linked resume version).
+    Conflict,
+    /// 413: the body is over the route's size limit.
+    TooLarge,
     Internal,
 }
 
@@ -238,6 +261,8 @@ impl<'r> Responder<'r, 'static> for ApiError {
                 (Status::BadRequest, Json(ValidationErrors::body())).respond_to(req)
             }
             Self::NotFound => Err(Status::NotFound),
+            Self::Conflict => Err(Status::Conflict),
+            Self::TooLarge => Err(Status::PayloadTooLarge),
             Self::Internal => Err(Status::InternalServerError),
         }
     }
@@ -246,7 +271,7 @@ impl<'r> Responder<'r, 'static> for ApiError {
 /// Logs a database error for `what` and turns it into a 500.
 pub(crate) fn internal(what: impl fmt::Display) -> impl FnOnce(sqlx::Error) -> ApiError {
     move |err| {
-        rocket::warn!("applications: cannot {what}: {err}");
+        rocket::warn!("cannot {what}: {err}");
         ApiError::Internal
     }
 }
@@ -421,6 +446,7 @@ pub async fn create(
     _site: NotCrossSite,
     _json: JsonContent,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
     body: Result<Json<NewApplication>, json::Error<'_>>,
 ) -> Result<(Status, Json<Application>), ApiError> {
     let body = parsed(body)?;
@@ -468,6 +494,9 @@ pub async fn create(
     tx.commit()
         .await
         .map_err(internal("store an application"))?;
+    bus.publish(Event::ApplicationCreated {
+        application: application.clone(),
+    });
     Ok((Status::Created, Json(application)))
 }
 
@@ -526,10 +555,11 @@ pub async fn update(
     _json: JsonContent,
     id: i64,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
     body: Result<Json<ApplicationInput>, json::Error<'_>>,
 ) -> Result<Json<Application>, ApiError> {
     let fields = validate(&parsed(body)?).map_err(ApiError::Invalid)?;
-    sqlx::query_as(&format!(
+    let application: Application = sqlx::query_as(&format!(
         "UPDATE applications SET company = $2, title = $3, url = $4, location = $5, \
          comp = $6, source = $7, notes = $8, updated_at = now() \
          WHERE id = $1 RETURNING {COLUMNS}"
@@ -545,8 +575,11 @@ pub async fn update(
     .fetch_optional(pool.inner())
     .await
     .map_err(internal("update an application"))?
-    .map(Json)
-    .ok_or(ApiError::NotFound)
+    .ok_or(ApiError::NotFound)?;
+    bus.publish(Event::ApplicationUpdated {
+        application: application.clone(),
+    });
+    Ok(Json(application))
 }
 
 /// Sets an application's status. The single place status changes: when the status
@@ -578,6 +611,7 @@ pub async fn set_status(
     _json: JsonContent,
     id: i64,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
     body: Result<Json<StatusChange>, json::Error<'_>>,
 ) -> Result<Json<Application>, ApiError> {
     let StatusChange { status, feedback } = parsed(body)?;
@@ -636,14 +670,78 @@ pub async fn set_status(
         .await
         .map_err(internal("record rejection feedback"))?;
     }
-    let application = sqlx::query_as(&format!("SELECT {COLUMNS} FROM applications WHERE id = $1"))
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(internal("read an application"))?;
+    let application: Application =
+        sqlx::query_as(&format!("SELECT {COLUMNS} FROM applications WHERE id = $1"))
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(internal("read an application"))?;
     tx.commit()
         .await
         .map_err(internal("set an application's status"))?;
+    // Published even when the status didn't change: clients just apply the same row.
+    bus.publish(Event::ApplicationUpdated {
+        application: application.clone(),
+    });
+    Ok(Json(application))
+}
+
+/// Sets or clears the resume version sent with an application. `updated_at` moves only
+/// when the link changes, so setting the same version returns the row unchanged.
+#[utoipa::path(
+    put,
+    path = "/applications/{id}/resume",
+    tag = "applications",
+    operation_id = "set_application_resume",
+    params(("id" = i64, Path, description = "The application's id")),
+    request_body = ResumeLink,
+    responses(
+        (status = 200, description = "The application with its new resume link", body = Application),
+        (status = 400, description = "The body is not valid JSON for this route", body = ValidationErrors),
+        (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
+        (status = 404, description = "No application has this id"),
+        (status = 415, description = "The body is not `application/json`"),
+        (status = 422, description = "No resume version has this id (`resume_version_id`)", body = ValidationErrors),
+        (status = 500, description = "The link could not be stored"),
+    )
+)]
+#[rocket::put("/applications/<id>/resume", data = "<body>")]
+pub async fn set_resume(
+    _host: LocalHost,
+    _site: NotCrossSite,
+    _json: JsonContent,
+    id: i64,
+    pool: &State<PgPool>,
+    bus: &State<EventBus>,
+    body: Result<Json<ResumeLink>, json::Error<'_>>,
+) -> Result<Json<Application>, ApiError> {
+    let ResumeLink { resume_version_id } = parsed(body)?;
+    let application: Application = sqlx::query_as(&format!(
+        "UPDATE applications SET resume_version_id = $2, \
+         updated_at = CASE WHEN resume_version_id IS NOT DISTINCT FROM $2 \
+         THEN updated_at ELSE now() END \
+         WHERE id = $1 RETURNING {COLUMNS}"
+    ))
+    .bind(id)
+    .bind(resume_version_id)
+    .fetch_optional(pool.inner())
+    .await
+    .map_err(|err| {
+        if is_foreign_key_violation(&err) {
+            ApiError::Invalid(ValidationErrors {
+                errors: vec![FieldError {
+                    field: "resume_version_id".into(),
+                    message: "No resume version has this id".into(),
+                }],
+            })
+        } else {
+            internal("set an application's resume")(err)
+        }
+    })?
+    .ok_or(ApiError::NotFound)?;
+    bus.publish(Event::ApplicationUpdated {
+        application: application.clone(),
+    });
     Ok(Json(application))
 }
 
@@ -667,6 +765,7 @@ pub async fn delete(
     _site: NotCrossSite,
     id: i64,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
 ) -> Result<Status, ApiError> {
     let done = sqlx::query("DELETE FROM applications WHERE id = $1")
         .bind(id)
@@ -676,6 +775,7 @@ pub async fn delete(
     if done.rows_affected() == 0 {
         Err(ApiError::NotFound)
     } else {
+        bus.publish(Event::ApplicationDeleted { id });
         Ok(Status::NoContent)
     }
 }

@@ -147,6 +147,9 @@ export function watchJob(
 					return;
 				case 'queue.paused':
 				case 'queue.resumed':
+				case 'application.created':
+				case 'application.updated':
+				case 'application.deleted':
 					return;
 				default:
 					apply(event.job, phaseOfEvent(event.type), true);

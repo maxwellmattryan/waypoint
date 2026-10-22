@@ -7,9 +7,11 @@
 		Dialog,
 		Drawer,
 		EmptyState,
+		FileInput,
 		IconButton,
 		Input,
 		Link,
+		Menu,
 		NavLink,
 		Select,
 		Skeleton,
@@ -38,6 +40,7 @@
 	let clicks = $state(0);
 	let company = $state('');
 	let notes = $state('');
+	let pickedFile = $state<string | null>(null);
 	let stage = $state('');
 	let remote = $state(true);
 
@@ -58,6 +61,20 @@
 	let nestedDrawerOpen = $state(false);
 	let nestedDialogOpen = $state(false);
 	let closes = $state(0);
+
+	const moveItems = [
+		{ value: 'applied', label: 'Applied' },
+		{ value: 'interviewing', label: 'Interviewing' },
+		{ value: 'offer', label: 'Offer' },
+		{ value: 'rejected', label: 'Rejected' }
+	];
+	const actionItems = [
+		{ value: 'edit', label: 'Edit' },
+		{ value: 'archive', label: 'Archive', disabled: true },
+		{ value: 'delete', label: 'Delete' }
+	];
+	let picked = $state('nothing yet');
+	let menuDialogOpen = $state(false);
 </script>
 
 <svelte:head>
@@ -73,6 +90,14 @@
 {#snippet close()}
 	<svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
 		<path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round" />
+	</svg>
+{/snippet}
+
+{#snippet more()}
+	<svg class="size-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+		<circle cx="3" cy="8" r="1.5" />
+		<circle cx="8" cy="8" r="1.5" />
+		<circle cx="13" cy="8" r="1.5" />
 	</svg>
 {/snippet}
 
@@ -173,6 +198,22 @@
 		</p>
 	</section>
 
+	<section class="flex flex-col gap-4" aria-labelledby="file-input">
+		<h2 id="file-input" class="text-lg font-semibold text-fg">FileInput</h2>
+		<div class="grid gap-6 sm:grid-cols-2">
+			<FileInput
+				label="PDF file"
+				accept="application/pdf,.pdf"
+				buttonLabel="Choose PDF"
+				hint="At most 10 MB."
+				onchange={(file) => (pickedFile = file?.name ?? null)}
+			/>
+			<FileInput label="File with error" error="Must be a PDF" />
+			<FileInput label="Disabled file input" disabled />
+		</div>
+		<p class="text-sm text-fg-muted">Picked: {pickedFile ?? '–'}</p>
+	</section>
+
 	<section class="flex flex-col gap-4" aria-labelledby="checkbox">
 		<h2 id="checkbox" class="text-lg font-semibold text-fg">Checkbox</h2>
 		<div class="flex flex-wrap items-center gap-6">
@@ -194,7 +235,44 @@
 				<p class="font-medium">Link card</p>
 				<p class="text-sm text-fg-muted">An anchor with hover, focus and active states.</p>
 			</Card>
+			<Card draggable>
+				<p class="font-medium">Draggable card</p>
+				<p class="text-sm text-fg-muted">A drag source: grab cursor, grabbing while held.</p>
+			</Card>
 		</div>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="menu">
+		<h2 id="menu" class="text-lg font-semibold text-fg">Menu</h2>
+		<div class="flex flex-wrap items-center gap-4 pb-48">
+			<Menu label="Move to" heading="Move to" items={moveItems} onselect={(value) => (picked = value)}>
+				{#snippet trigger(t)}
+					<Button {...t} variant="secondary">Move</Button>
+				{/snippet}
+			</Menu>
+			<Menu
+				label="Actions"
+				items={actionItems}
+				placement="bottom-start"
+				onselect={(value) => (picked = value)}
+			>
+				{#snippet trigger(t)}
+					<IconButton {...t} label="More actions" variant="secondary">{@render more()}</IconButton>
+				{/snippet}
+			</Menu>
+			<Button variant="secondary" onclick={() => (menuDialogOpen = true)}>Open dialog with menu</Button>
+			<span class="text-sm text-fg-muted">Picked: {picked}</span>
+		</div>
+		<Dialog bind:open={menuDialogOpen} title="Menu in a dialog" size="sm">
+			<div class="flex flex-col items-start gap-4 pb-40">
+				<p>Escape closes the menu first, then this dialog.</p>
+				<Menu label="Move to" heading="Move to" items={moveItems} onselect={(value) => (picked = value)}>
+					{#snippet trigger(t)}
+						<Button {...t} variant="secondary">Move</Button>
+					{/snippet}
+				</Menu>
+			</div>
+		</Dialog>
 	</section>
 
 	<section class="flex flex-col gap-4" aria-labelledby="badge">

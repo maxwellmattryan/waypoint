@@ -63,6 +63,7 @@ export class Dashboard {
 
 	#deps: DashboardDeps;
 	#close: (() => void) | null = null;
+	#listeners: ((event: Event) => void)[] = [];
 	/** Bumped on every stream error so a health fetch started before it can't report OK. */
 	#healthGeneration = 0;
 
@@ -110,7 +111,20 @@ export class Dashboard {
 		await this.#refreshJob();
 	}
 
+	/**
+	 * Calls `listener` with every event from the stream, `app.connected` and `app.lagged`
+	 * included, until the returned function is called. Pages use this to share the app's
+	 * one `EventSource`.
+	 */
+	subscribe(listener: (event: Event) => void): () => void {
+		this.#listeners = [...this.#listeners, listener];
+		return () => {
+			this.#listeners = this.#listeners.filter((held) => held !== listener);
+		};
+	}
+
 	#onEvent(event: Event): void {
+		for (const listener of this.#listeners) listener(event);
 		switch (event.type) {
 			case 'app.connected':
 				this.connection = 'live';
@@ -126,6 +140,11 @@ export class Dashboard {
 				return;
 			case 'queue.resumed':
 				this.queuePausedUntil = null;
+				return;
+			// Subscribers such as the applications store handle these.
+			case 'application.created':
+			case 'application.updated':
+			case 'application.deleted':
 				return;
 			default:
 				this.#applyJob(event.job, phaseOfEvent(event.type), true);

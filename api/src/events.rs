@@ -9,6 +9,7 @@ use rocket::{Shutdown, State};
 use serde::Serialize;
 use tokio::sync::broadcast::{self, error::RecvError};
 
+use crate::applications::Application;
 use crate::host::LocalHost;
 use crate::jobs::Job;
 
@@ -41,6 +42,14 @@ pub enum Event {
     AppConnected,
     #[serde(rename = "app.lagged")]
     AppLagged { skipped: u64 },
+    /// An application was created; `application` is the `POST /applications` body.
+    #[serde(rename = "application.created")]
+    ApplicationCreated { application: Application },
+    /// An application's text or status changed; `application` is the route's body.
+    #[serde(rename = "application.updated")]
+    ApplicationUpdated { application: Application },
+    #[serde(rename = "application.deleted")]
+    ApplicationDeleted { id: i64 },
 }
 
 impl Event {
@@ -57,6 +66,9 @@ impl Event {
             Self::QueueResumed => "queue.resumed",
             Self::AppConnected => "app.connected",
             Self::AppLagged { .. } => "app.lagged",
+            Self::ApplicationCreated { .. } => "application.created",
+            Self::ApplicationUpdated { .. } => "application.updated",
+            Self::ApplicationDeleted { .. } => "application.deleted",
         }
     }
 
