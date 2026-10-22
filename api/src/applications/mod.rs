@@ -1,10 +1,14 @@
 //! Job applications: one `applications` row per role the user is tracking, with CRUD
-//! routes and a status route. Every handler is one SQL statement that returns the row.
+//! routes and a status route. Creating an application and changing its status also
+//! write to its timeline ([`timeline`]); its interview stages live in [`stages`].
 //!
 //! Input is normalised here and nowhere else: text is trimmed, a blank optional field
 //! becomes `null`, lengths are counted in characters and `url` must be an absolute http or
 //! https URL. A body that doesn't parse is a 400; a body that parses but breaks a rule is
 //! a 422 naming every failing field.
+
+pub mod stages;
+pub mod timeline;
 
 use std::fmt;
 
@@ -15,9 +19,12 @@ use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::{self, Responder};
 use rocket::serde::json::{self, Json};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::error::BoxDynError;
+use sqlx::postgres::{PgTypeInfo, PgValueRef};
+use sqlx::{Decode, PgPool, Postgres, Type};
 
 use crate::host::{LocalHost, NotCrossSite};
+use timeline::EventKind;
 
 /// Most characters in `company`, `title`, `location`, `comp` and `source`.
 pub const MAX_SHORT: usize = 200;
@@ -26,7 +33,8 @@ pub const MAX_URL: usize = 2048;
 /// Most characters in `notes`.
 pub const MAX_NOTES: usize = 20_000;
 
-const REQUIRED: &str = "Required";
+pub(crate) const REQUIRED: &str = "Required";
+const FEEDBACK_NOT_REJECTED: &str = "Only when the status is rejected";
 const BAD_URL: &str = "Must be an http or https URL";
 const BAD_BODY: &str = "The request body is not valid JSON for this route";
 
@@ -72,6 +80,25 @@ impl TryFrom<String> for ApplicationStatus {
             .into_iter()
             .find(|status| status.as_str() == value)
             .ok_or_else(|| format!("unknown application status {value:?}"))
+    }
+}
+
+// Decoding straight from a TEXT column lets nullable status columns read as
+// `Option<ApplicationStatus>`.
+impl Type<Postgres> for ApplicationStatus {
+    fn type_info() -> PgTypeInfo {
+        <String as Type<Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &PgTypeInfo) -> bool {
+        <String as Type<Postgres>>::compatible(ty)
+    }
+}
+
+impl<'r> Decode<'r, Postgres> for ApplicationStatus {
+    fn decode(value: PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let text = <String as Decode<Postgres>>::decode(value)?;
+        Ok(Self::try_from(text)?)
     }
 }
 
@@ -158,9 +185,13 @@ pub struct NewApplication {
 }
 
 /// The `PUT /applications/{id}/status` body.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, utoipa::ToSchema)]
 pub struct StatusChange {
     pub status: ApplicationStatus,
+    /// Rejection feedback, recorded as a `rejection_feedback` event. Allowed only with
+    /// `rejected`; blank means none. At most 20,000 characters.
+    #[serde(default)]
+    pub feedback: Option<String>,
 }
 
 /// One rule a field broke.
@@ -213,7 +244,7 @@ impl<'r> Responder<'r, 'static> for ApiError {
 }
 
 /// Logs a database error for `what` and turns it into a 500.
-fn internal(what: impl fmt::Display) -> impl FnOnce(sqlx::Error) -> ApiError {
+pub(crate) fn internal(what: impl fmt::Display) -> impl FnOnce(sqlx::Error) -> ApiError {
     move |err| {
         rocket::warn!("applications: cannot {what}: {err}");
         ApiError::Internal
@@ -221,7 +252,7 @@ fn internal(what: impl fmt::Display) -> impl FnOnce(sqlx::Error) -> ApiError {
 }
 
 /// Unwraps a JSON body, or answers 400 without echoing any of it.
-fn parsed<T>(body: Result<Json<T>, json::Error<'_>>) -> Result<T, ApiError> {
+pub(crate) fn parsed<T>(body: Result<Json<T>, json::Error<'_>>) -> Result<T, ApiError> {
     match body {
         Ok(Json(value)) => Ok(value),
         Err(json::Error::Parse(_, err)) => {
@@ -271,7 +302,7 @@ struct Fields {
 }
 
 /// Trims a value and turns a blank one into `None`, recording a length error.
-fn text(
+pub(crate) fn text(
     errors: &mut Vec<FieldError>,
     field: &str,
     value: Option<&str>,
@@ -404,6 +435,10 @@ pub async fn create(
         notes: body.notes,
     };
     let fields = validate(&input).map_err(ApiError::Invalid)?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(internal("start a transaction"))?;
     let application: Application = sqlx::query_as(&format!(
         "INSERT INTO applications (company, title, url, location, comp, source, notes, status) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {COLUMNS}"
@@ -416,9 +451,23 @@ pub async fn create(
     .bind(fields.source)
     .bind(fields.notes)
     .bind(status.as_str())
-    .fetch_one(pool.inner())
+    .fetch_one(&mut *tx)
     .await
     .map_err(internal("store an application"))?;
+    timeline::record(
+        &mut tx,
+        application.id,
+        EventKind::Created,
+        None,
+        Some(status),
+        None,
+        None,
+    )
+    .await
+    .map_err(internal("record an application's creation"))?;
+    tx.commit()
+        .await
+        .map_err(internal("store an application"))?;
     Ok((Status::Created, Json(application)))
 }
 
@@ -500,9 +549,11 @@ pub async fn update(
     .ok_or(ApiError::NotFound)
 }
 
-/// Sets an application's status. The single place status changes: `status_changed_at`
-/// and `updated_at` move only when the status differs, so setting the same status is a
-/// no-op that returns the row unchanged.
+/// Sets an application's status. The single place status changes: when the status
+/// differs, `status_changed_at` and `updated_at` move and a `status_changed` event is
+/// written. Non-blank `feedback` (only with `rejected`) also writes a `rejection_feedback`
+/// event and moves `updated_at`, even if the application was already rejected. The same
+/// status without feedback is a no-op that returns the row unchanged.
 #[utoipa::path(
     put,
     path = "/applications/{id}/status",
@@ -516,6 +567,7 @@ pub async fn update(
         (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
         (status = 404, description = "No application has this id"),
         (status = 415, description = "The body is not `application/json`"),
+        (status = 422, description = "`feedback` is too long, or given with a status other than `rejected`", body = ValidationErrors),
         (status = 500, description = "The status could not be stored"),
     )
 )]
@@ -528,20 +580,71 @@ pub async fn set_status(
     pool: &State<PgPool>,
     body: Result<Json<StatusChange>, json::Error<'_>>,
 ) -> Result<Json<Application>, ApiError> {
-    let StatusChange { status } = parsed(body)?;
-    sqlx::query_as(&format!(
-        "UPDATE applications SET status = $2, \
-         status_changed_at = CASE WHEN status = $2 THEN status_changed_at ELSE now() END, \
-         updated_at = CASE WHEN status = $2 THEN updated_at ELSE now() END \
-         WHERE id = $1 RETURNING {COLUMNS}"
-    ))
-    .bind(id)
-    .bind(status.as_str())
-    .fetch_optional(pool.inner())
-    .await
-    .map_err(internal("set an application's status"))?
-    .map(Json)
-    .ok_or(ApiError::NotFound)
+    let StatusChange { status, feedback } = parsed(body)?;
+    let mut errors = Vec::new();
+    let feedback = text(&mut errors, "feedback", feedback.as_deref(), MAX_NOTES);
+    if errors.is_empty() && feedback.is_some() && status != ApplicationStatus::Rejected {
+        errors.push(FieldError {
+            field: "feedback".into(),
+            message: FEEDBACK_NOT_REJECTED.into(),
+        });
+    }
+    if !errors.is_empty() {
+        return Err(ApiError::Invalid(ValidationErrors { errors }));
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(internal("start a transaction"))?;
+    let current = timeline::lock_application(&mut tx, id).await?;
+    if current != status {
+        sqlx::query(
+            "UPDATE applications SET status = $2, status_changed_at = now(), \
+             updated_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(status.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(internal("set an application's status"))?;
+        timeline::record(
+            &mut tx,
+            id,
+            EventKind::StatusChanged,
+            Some(current),
+            Some(status),
+            None,
+            None,
+        )
+        .await
+        .map_err(internal("record a status change"))?;
+    }
+    if let Some(feedback) = feedback {
+        if current == status {
+            timeline::touch(&mut tx, id).await?;
+        }
+        timeline::record(
+            &mut tx,
+            id,
+            EventKind::RejectionFeedback,
+            None,
+            None,
+            None,
+            Some(&feedback),
+        )
+        .await
+        .map_err(internal("record rejection feedback"))?;
+    }
+    let application = sqlx::query_as(&format!("SELECT {COLUMNS} FROM applications WHERE id = $1"))
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(internal("read an application"))?;
+    tx.commit()
+        .await
+        .map_err(internal("set an application's status"))?;
+    Ok(Json(application))
 }
 
 /// Deletes an application permanently.
