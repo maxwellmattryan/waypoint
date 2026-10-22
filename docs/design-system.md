@@ -76,7 +76,11 @@ For Svelte transitions, use the helper so reduced motion is honoured:
 
 ## App shell
 
-Every route renders inside `AppShell` (`web/src/lib/components/app/AppShell.svelte`), which the root layout wraps around the page: a top bar with the "Waypoint" wordmark and a live-connection Badge (Connecting, Live, Reconnecting), then the page in a centred `main` (`max-w-5xl`, `px-4 py-8`, `sm:px-8`). Pages don't add their own `main` or outer padding. Screens are composed from the primitives only: `primitives-only.test.ts` in `web/src/lib/components/dashboard/` fails if the shell, the root page or a dashboard card uses a raw interactive tag, a `cursor-*` class or a half spacing step.
+Every route renders inside `AppShell` (`web/src/lib/components/app/AppShell.svelte`), which the root layout wraps around the page: a top bar with the "Waypoint" wordmark, the main nav and a live-connection Badge (Connecting, Live, Reconnecting), then the page in a centred `main` (`max-w-5xl`, `px-4 py-8`, `sm:px-8`). Pages don't add their own `main` or outer padding.
+
+The main nav (`<nav aria-label="Main">`) is two [NavLinks](#navlink): Dashboard (`/`) and Applications (`/applications`). The shell marks the current section from `page.url.pathname`: Dashboard only on `/`, Applications on `/applications` and every `/applications/<id>`. Below `sm` the nav wraps onto its own row under the wordmark and badge.
+
+Screens are composed from the primitives only: `primitives-only.test.ts` in `web/src/lib/components/dashboard/` fails if the shell, the root layout or page, a dashboard card, a component in `components/applications` or a page under `routes/applications` uses a raw interactive tag, a `cursor-*` class or a half spacing step.
 
 ## Primitives
 
@@ -110,6 +114,17 @@ An inline `<a>`. `external` adds `target="_blank"` and `rel="noopener noreferrer
 ```svelte
 <Link href={resolve('/jobs')}>Jobs</Link>
 <Link href="https://example.com" external>Posting</Link>
+```
+
+### NavLink
+
+A navigation `<a>` for the app's sections, styled as a tab-like pill (`rounded-md px-3 py-2 text-sm font-medium`): muted text by default, `surface-raised` background on hover, `border` on active, and the focus ring. `current` sets `aria-current="page"` and keeps the raised background and full-contrast text. `disabled` works as on Link: no `href`, `aria-disabled="true"`, `tabindex="-1"` and `cursor-not-allowed`. Pass internal routes through `resolve()`.
+
+```svelte
+<nav aria-label="Main">
+	<NavLink href={resolve('/')} current={path === resolve('/')}>Dashboard</NavLink>
+	<NavLink href={resolve('/applications')} current={inApplications}>Applications</NavLink>
+</nav>
 ```
 
 ### Input, Textarea, Select

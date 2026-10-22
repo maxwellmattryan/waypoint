@@ -25,7 +25,7 @@ docker compose down
 
 ## Dashboard
 
-The web app opens on a dashboard inside the app shell. The top bar shows whether the live event stream is connected (Connecting, Live, Reconnecting). Below it are three cards and an empty applications list:
+The web app opens on a dashboard inside the app shell. The top bar links to the Dashboard and [Applications](#applications) and shows whether the live event stream is connected (Connecting, Live, Reconnecting). The dashboard has three cards:
 
 - **System**: whether the API and its database are reachable (`GET /health`), re-checked each time the event stream (re)connects.
 - **Google**: the Google connection (`GET /auth/google`). Until the three Google settings are in `.env` it reads "Not configured" and the Connect button is disabled; see [Google account](#google-account).
@@ -33,12 +33,42 @@ The web app opens on a dashboard inside the app shell. The top bar shows whether
 
 The browser only talks to its own origin. In development, Vite proxies `/api/*` to the API (`VITE_API_URL`, default <http://127.0.0.1:8000>) with the `/api` prefix stripped, passing `Host`, `Origin` and `Sec-Fetch-Site` through unchanged, so the API's local-host and same-origin guards still apply and the API needs no CORS headers. Vite's own CORS is turned off (`server.cors: false`): by default it answers any `localhost` or `127.0.0.1` origin on any port, which would let a page on another local port read job errors and the event stream through the proxy. The proxy exists only in `vite dev`; the built SPA isn't served or proxied yet.
 
-The end-to-end test starts the real API (with a fake `claude` that answers `pong` after a second) and the dev server, then drives the dashboard in Chromium and checks that the proxy sends no CORS headers to other origins. It runs locally, not in CI. It needs the Compose Postgres, a `.env`, Chromium installed once, and ports 8000 and 5173 free:
+The end-to-end tests start the real API (with a fake `claude` that answers `pong` after a second) and the dev server, then drive the dashboard and the applications pages in Chromium and check that the proxy sends no CORS headers to other origins. The applications test adds, edits and deletes its own uniquely named application in the Compose database. It runs locally, not in CI. It needs the Compose Postgres, a `.env`, Chromium installed once, and ports 8000 and 5173 free:
 
 ```sh
 docker compose up -d --wait db
 npx --prefix web playwright install chromium   # once
 npm --prefix web run test:e2e
+```
+
+## Applications
+
+The Applications page (`/applications`) lists every job application you're tracking, the most recently updated first, as cards showing the company, title, location, status and when it was last updated. **Add application** opens a form; clicking a card opens its detail page (`/applications/<id>`), where you change the status, edit the details or delete the application.
+
+An application has a company and a title (both required) and optional free-text fields: job posting URL, location, compensation (e.g. "$180k–$210k + equity"), source (e.g. "Referral") and notes. Its status is one of Sourced (the default), Applied, Interviewing, Offer and Rejected. The API trims every field and stores a blank optional field as `null`. Company, title, location, compensation and source are limited to 200 characters, the URL to 2048 and notes to 20,000, and the URL must be an absolute `http` or `https` URL.
+
+| Route | Does |
+|---|---|
+| `GET /applications` | Lists every application, newest `updated_at` first |
+| `POST /applications` | Adds one (`company`, `title`, optional fields and `status`): 201 |
+| `GET /applications/<id>` | Reads one |
+| `PUT /applications/<id>` | Replaces the text fields; an omitted optional field is cleared and the status is left alone |
+| `PUT /applications/<id>/status` | Sets the status (`{"status": "applied"}`); `status_changed_at` moves only when it changes |
+| `DELETE /applications/<id>` | Deletes one permanently: 204 |
+
+An invalid field answers 422 with `{"errors": [{"field", "message"}]}`, one entry per failing field; a body that isn't valid JSON for the route (or an unknown status) answers 400 with a single `body` entry. Bodies must be `Content-Type: application/json` (anything else is refused: 403 for an HTML form, 415 otherwise), and every changing route answers 403 to a request a browser sends from another site, so a page you visit can't edit your applications. With the API running:
+
+```sh
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"company": "Acme", "title": "Staff Engineer", "location": "Remote"}' \
+  http://127.0.0.1:8000/applications                                        # 201, "status": "sourced"
+curl -s http://127.0.0.1:8000/applications
+curl -s -X PUT -H 'Content-Type: application/json' -d '{"status": "applied"}' \
+  http://127.0.0.1:8000/applications/1/status
+curl -s -X PUT -H 'Content-Type: application/json' \
+  -d '{"company": "Acme", "title": "Staff Engineer", "location": "Berlin"}' \
+  http://127.0.0.1:8000/applications/1
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/applications/1   # 204
 ```
 
 ## Model calls
@@ -88,7 +118,7 @@ Once it's set up, open <http://127.0.0.1:8000/auth/google/connect> to connect, c
 
 ## API contract
 
-The API's OpenAPI 3.1 document is generated from the `#[utoipa::path]` annotations on the Rocket handlers (listed in `api/src/openapi.rs`) and committed at `api/openapi.json`. The web app's types are generated from that document into `web/src/lib/api/schema.d.ts` with openapi-typescript, and `#lib/api` exports a typed client (`createApiClient()`, built on openapi-fetch) plus the `Health`, `Job`, `Event` and `GoogleStatus` types. The debug-only `/dev` routes are not part of the contract.
+The API's OpenAPI 3.1 document is generated from the `#[utoipa::path]` annotations on the Rocket handlers (listed in `api/src/openapi.rs`) and committed at `api/openapi.json`. The web app's types are generated from that document into `web/src/lib/api/schema.d.ts` with openapi-typescript, and `#lib/api` exports a typed client (`createApiClient()`, built on openapi-fetch) plus the `Health`, `Job`, `Event`, `GoogleStatus`, `Application`, `ApplicationStatus`, `NewApplication`, `ApplicationInput`, `ValidationErrors` and `FieldError` types. `#lib/applications/api.js` wraps the applications routes in helpers that never throw and return `{ kind: 'ok' | 'invalid' | 'not-found' | 'failed' }`. The debug-only `/dev` routes are not part of the contract.
 
 After changing any route or response type, regenerate both files and commit them:
 
