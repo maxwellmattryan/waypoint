@@ -11,13 +11,14 @@ use sqlx::PgPool;
 
 async fn client(pool: PgPool, mode: &str) -> (Client, common::Fake) {
     let fake = common::fake(mode, Duration::from_secs(10));
-    let rocket = waypoint_api::rocket(rocket::Config::figment(), pool, fake.runner.clone());
+    let rocket = common::app(pool, fake.runner.clone(), Default::default());
     (Client::tracked(rocket).await.expect("valid rocket"), fake)
 }
 
 async fn ping(client: &Client) -> LocalResponse<'_> {
     client
         .post("/dev/claude/ping")
+        .header(Header::new("Host", common::HOST))
         .header(Header::new("X-Waypoint-Dev", "1"))
         .dispatch()
         .await
@@ -27,12 +28,17 @@ async fn ping(client: &Client) -> LocalResponse<'_> {
 async fn ping_rejects_unmarked_and_cross_site_requests(pool: PgPool) {
     let (client, _fake) = client(pool.clone(), "success").await;
 
-    let bare = client.post("/dev/claude/ping").dispatch().await;
+    let bare = client
+        .post("/dev/claude/ping")
+        .header(Header::new("Host", common::HOST))
+        .dispatch()
+        .await;
     assert_eq!(bare.status(), Status::Forbidden);
 
     for site in ["cross-site", "same-site"] {
         let foreign = client
             .post("/dev/claude/ping")
+            .header(Header::new("Host", common::HOST))
             .header(Header::new("X-Waypoint-Dev", "1"))
             .header(Header::new("Sec-Fetch-Site", site))
             .dispatch()

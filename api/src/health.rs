@@ -8,6 +8,8 @@ use rocket::serde::json::Json;
 use serde::Serialize;
 use sqlx::PgPool;
 
+use crate::host::LocalHost;
+
 const DB_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Serialize)]
@@ -17,7 +19,7 @@ pub struct Health {
 }
 
 #[rocket::get("/health")]
-pub async fn health(pool: &State<PgPool>) -> (Status, Json<Health>) {
+pub async fn health(_host: LocalHost, pool: &State<PgPool>) -> (Status, Json<Health>) {
     let check = tokio::time::timeout(
         DB_CHECK_TIMEOUT,
         sqlx::query("SELECT 1").execute(pool.inner()),

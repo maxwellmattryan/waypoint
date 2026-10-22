@@ -324,7 +324,10 @@ async fn timeout_and_cancel_kill_the_process_group(pool: PgPool) {
     );
     let err = result.expect_err("timeout");
     assert!(matches!(err, ClaudeError::Timeout { .. }), "{err:?}");
-    assert!(dies_within_2s(pid).await, "the grandchild outlived the timeout");
+    assert!(
+        dies_within_2s(pid).await,
+        "the grandchild outlived the timeout"
+    );
 
     // The caller gives up after 1s, well inside the runner's own 10s timeout. The
     // grandchild must exist before the future is dropped, so wait for it too.

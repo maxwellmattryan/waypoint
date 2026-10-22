@@ -9,6 +9,9 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 
 use crate::claude::{ClaudeError, ClaudeRequest, ClaudeRunner};
+use crate::events::EventBus;
+use crate::host::LocalHost;
+use crate::jobs::{self, Wake};
 
 const PING_PROMPT: &str = "Reply with exactly the word: pong";
 /// Header every `/dev` request must carry as `1`. A custom header makes a browser
@@ -17,7 +20,7 @@ const PING_PROMPT: &str = "Reply with exactly the word: pong";
 const DEV_HEADER: &str = "X-Waypoint-Dev";
 
 pub fn routes() -> Vec<rocket::Route> {
-    rocket::routes![claude_ping]
+    rocket::routes![claude_ping, jobs_test_prompt]
 }
 
 /// Admits a request only if it carries `X-Waypoint-Dev: 1` and a browser, if one sent
@@ -47,6 +50,7 @@ impl<'r> FromRequest<'r> for DevOnly {
 /// `POST /dev/claude/ping`: one round trip through the Claude runner.
 #[rocket::post("/dev/claude/ping")]
 async fn claude_ping(
+    _host: LocalHost,
     _dev: DevOnly,
     pool: &State<PgPool>,
     claude: &State<ClaudeRunner>,
@@ -83,5 +87,25 @@ async fn claude_ping(
                 "message": err.to_string(),
             })),
         ),
+    }
+}
+
+/// `POST /dev/jobs/test-prompt`: enqueues a `test_prompt` job with the ping prompt and
+/// answers `202 {"job_id"}`. Follow it on `/events` or at `/jobs/<id>`.
+#[rocket::post("/dev/jobs/test-prompt")]
+async fn jobs_test_prompt(
+    _host: LocalHost,
+    _dev: DevOnly,
+    pool: &State<PgPool>,
+    bus: &State<EventBus>,
+    wake: &State<Wake>,
+) -> Result<(Status, Json<Value>), Status> {
+    let payload = json!({"prompt": PING_PROMPT});
+    match jobs::enqueue(pool, bus, wake, jobs::TEST_PROMPT, payload).await {
+        Ok(job) => Ok((Status::Accepted, Json(json!({"job_id": job.id})))),
+        Err(err) => {
+            rocket::warn!("dev: cannot enqueue a test_prompt job: {err}");
+            Err(Status::InternalServerError)
+        }
     }
 }
