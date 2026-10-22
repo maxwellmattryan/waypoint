@@ -348,6 +348,11 @@ impl Registry {
             .collect()
     }
 
+    /// The permission level of tool `name`, or `None` when no tool has the name.
+    pub fn permission(&self, name: &str) -> Option<Permission> {
+        self.tools.get(name).map(|entry| entry.info.permission)
+    }
+
     /// Invokes tool `name` for run step `step_id` and records it in `tool_calls`.
     /// `claude_call_id` is the model call that asked for the tool, if any. Returns the
     /// output and what the handler's model calls spent.

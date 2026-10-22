@@ -96,7 +96,7 @@ Each row records the input, output, error, duration, tokens and cost, and `claud
 | `write` | Changes Waypoint's own data; reversible and logged with undo. |
 | `external` | Leaves Waypoint (sends, submits, calls out); always passes an approval gate. |
 
-Levels are stored on every tool call but not enforced yet. The approval gate for `external` tools is a later job.
+Levels are stored on every tool call. Until the approval gate for `external` tools exists (a later job), the [MCP server](#mcp-server) neither lists nor runs them, so only step code can call one.
 
 ### Supported schema subset
 
@@ -110,7 +110,7 @@ Any other keyword (`oneOf`, `$ref`, `minimum`, `pattern`, …) makes registratio
 
 ## MCP server
 
-A step hands the model Waypoint's tools with `ctx.call_with_tools(req)` or `ctx.call_structured_with_tools::<T>(req, schema)`. They work like `call`/`call_structured`, except that every registered tool is available to the model through Waypoint's MCP server, and no other tool is. Plain `call`/`call_structured` never pass any MCP flags.
+A step hands the model Waypoint's tools with `ctx.call_with_tools(req)` or `ctx.call_structured_with_tools::<T>(req, schema)`. They work like `call`/`call_structured`, except that every registered `read` and `write` tool is available to the model through Waypoint's MCP server, and no other tool is. Plain `call`/`call_structured` never pass any MCP flags.
 
 ### Transport
 
@@ -132,7 +132,7 @@ Newline-delimited JSON-RPC 2.0 over the relay's stdio. Requests on one connectio
 |---|---|
 | `initialize` | `protocolVersion` (the client's when it is `2025-06-18`, `2025-03-26` or `2024-11-05`, otherwise `2025-06-18`), `capabilities: {tools: {listChanged: false}}`, `serverInfo: {name: "waypoint", version}` |
 | `ping` | `{}` |
-| `tools/list` | `{"tools": [{name, description, inputSchema}]}` for every registered tool, by name. No `outputSchema`. |
+| `tools/list` | `{"tools": [{name, description, inputSchema}]}` for every registered tool except `external` ones, by name. No `outputSchema`. |
 | `tools/call` `{name, arguments}` | runs the tool through the registry (missing `arguments` counts as `{}`) |
 
 Notifications (no `id`) get no response. Errors: an unknown method is `-32601`, a line that isn't JSON is `-32700`, and a batch array or any other non-object is `-32600`.
@@ -143,7 +143,9 @@ How a `tools/call` ends:
 |---|---|---|
 | output | `{"content":[{"type":"text","text":"<output as compact JSON>"}],"isError":false}` | as for `ctx.tool` |
 | unknown tool | JSON-RPC error `-32602`, `no tool has this name` | `unknown_tool` |
-| invalid input or output, handler or model-call failure, database error | `{"content":[{"type":"text","text":"<error>"}],"isError":true}`, so the model can react | as for `ctx.tool` |
+| invalid input or output, handler or model-call failure | `{"content":[{"type":"text","text":"<error>"}],"isError":true}`, so the model can react | as for `ctx.tool` |
+| database error | `isError` result `the tool call could not be recorded`; the sqlx error goes to the log only | none or `running` |
+| `external` tool | `isError` result `this tool needs the user's approval and isn't available to agents yet`; the handler never runs | none |
 | `name` missing or not a string | JSON-RPC error `-32602`, `invalid params` | none |
 
 Error texts never quote input values.

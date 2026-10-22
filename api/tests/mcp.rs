@@ -122,14 +122,38 @@ impl Tool for Broken {
     }
 }
 
-/// An `external` tool whose output breaks its own schema.
+/// An `external` tool, which agents can neither see nor call yet.
+struct Sender;
+
+#[rocket::async_trait]
+impl Tool for Sender {
+    const NAME: &'static str = "send";
+    const DESCRIPTION: &'static str = "Sends a message";
+    const PERMISSION: Permission = Permission::External;
+    type Input = Value;
+    type Output = Value;
+
+    fn input_schema() -> Value {
+        json!({"type": "object"})
+    }
+
+    fn output_schema() -> Value {
+        json!({"type": "object"})
+    }
+
+    async fn call(&self, _ctx: &mut ToolContext<'_>, _input: Value) -> Result<Value, ToolError> {
+        panic!("an external tool's handler must not run for an agent");
+    }
+}
+
+/// A `read` tool whose output breaks its own schema.
 struct Liar;
 
 #[rocket::async_trait]
 impl Tool for Liar {
     const NAME: &'static str = "liar";
     const DESCRIPTION: &'static str = "Returns the wrong shape";
-    const PERMISSION: Permission = Permission::External;
+    const PERMISSION: Permission = Permission::Read;
     type Input = Value;
     type Output = Value;
 
@@ -183,6 +207,7 @@ fn registry(tools: &[&str]) -> Registry {
             "summarize" => registry.register(Summarize),
             "broken" => registry.register(Broken),
             "liar" => registry.register(Liar),
+            "send" => registry.register(Sender),
             other => panic!("no test tool {other}"),
         }
         .expect("register");
@@ -342,7 +367,7 @@ async fn protocol_round_trips(pool: PgPool) {
         .await
         .expect("the step");
     let fake = common::fake("success", TIMEOUT);
-    let tools = Arc::new(registry(&["lookup", "broken", "liar"]));
+    let tools = Arc::new(registry(&["lookup", "broken", "liar", "send"]));
     let server = Server::new(pool.clone(), fake.runner.clone(), tools, step_id);
 
     let call = |id: i64, params: Value| {
@@ -415,6 +440,17 @@ async fn protocol_round_trips(pool: PgPool) {
         (
             call(11, json!({"name": 5})),
             Some(err(json!(11), -32602, "invalid params")),
+        ),
+        // An `external` tool is refused without running its handler or writing a row.
+        (
+            call(15, json!({"name": "send", "arguments": {}})),
+            Some(ok(
+                15,
+                text_result(
+                    "this tool needs the user's approval and isn't available to agents yet",
+                    true,
+                ),
+            )),
         ),
         (
             json!({"jsonrpc": "2.0", "id": "twelve", "method": "resources/list"}).to_string(),

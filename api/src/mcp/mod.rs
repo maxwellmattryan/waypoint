@@ -20,13 +20,19 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::claude::{ClaudeError, ClaudeRunner, MCP_SERVER_NAME};
-use crate::tools::{Registry, Spend, ToolCallError};
+use crate::tools::{Permission, Registry, Spend, ToolCallError};
 
 /// The longest request line read; a longer one closes the connection.
 pub const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
 /// The protocol version answered when the client asks for one this server doesn't know.
 const LATEST_PROTOCOL: &str = "2025-06-18";
 const SUPPORTED_PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
+
+/// The `isError` text for a `tools/call` of an `external` tool.
+const EXTERNAL_REFUSED: &str =
+    "this tool needs the user's approval and isn't available to agents yet";
+/// The `isError` text when the `tool_calls` row can't be written.
+const DATABASE_FAILED: &str = "the tool call could not be recorded";
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -132,11 +138,14 @@ impl Server {
         })
     }
 
+    /// Every registered tool except `external` ones, which need the user's approval and
+    /// aren't offered to agents until the approval gate exists.
     fn list(&self) -> Value {
         let tools: Vec<Value> = self
             .tools
             .describe()
             .into_iter()
+            .filter(|tool| tool.permission != Permission::External)
             .map(|tool| {
                 json!({
                     "name": tool.name,
@@ -160,6 +169,10 @@ impl Server {
             .filter(|arguments| !arguments.is_null())
             .cloned()
             .unwrap_or_else(|| json!({}));
+        if self.tools.permission(name) == Some(Permission::External) {
+            // The handler never runs and no row is written.
+            return Ok(text_result(EXTERNAL_REFUSED.to_owned(), true));
+        }
         let (spend, id, result) = self
             .tools
             .invoke_metered(
@@ -179,6 +192,11 @@ impl Server {
         match result {
             Ok(output) => Ok(text_result(output.to_string(), false)),
             Err(ToolCallError::UnknownTool) => Err((INVALID_PARAMS, "no tool has this name")),
+            // The sqlx error can name tables and constraints; it stays in the log.
+            Err(ToolCallError::Database(err)) => {
+                rocket::warn!("mcp: cannot record a call to tool {name}: {err}");
+                Ok(text_result(DATABASE_FAILED.to_owned(), true))
+            }
             // The registry's messages never quote input values.
             Err(err) => Ok(text_result(err.to_string(), true)),
         }
