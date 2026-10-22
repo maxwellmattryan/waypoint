@@ -1,0 +1,1 @@
+-- Intentionally empty baseline migration. Later jobs add their tables as new migration files.

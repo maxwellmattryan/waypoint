@@ -5,3 +5,12 @@
 **/.vscode/
 
 **/.idea/
+
+#### #### #### ####
+#### Waypoint
+#### #### #### ####
+/target
+/.env
+web/node_modules
+web/build
+web/.svelte-kit

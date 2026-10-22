@@ -1,0 +1,23 @@
+# A fixed project name keeps the container and volume names the same in any checkout.
+name: waypoint
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-waypoint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-waypoint}
+      POSTGRES_DB: ${POSTGRES_DB:-waypoint}
+    ports:
+      # Localhost only; 5433 avoids a locally installed Postgres on 5432.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - waypoint-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+volumes:
+  waypoint-pgdata:
