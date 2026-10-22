@@ -88,3 +88,21 @@ curl -s -X DELETE http://127.0.0.1:8000/auth/google
 Like connect, disconnect answers 403 to a request from another website (`Sec-Fetch-Site: cross-site`) and to an HTML form post, so a page you visit can't disconnect you.
 
 Waypoint asks Google to revoke the grant and deletes the stored tokens either way. When the answer is `{"revoked":false}` Google didn't confirm, so remove Waypoint by hand at <https://myaccount.google.com/permissions>.
+
+## Delete all data
+
+The dashboard's Data card wipes everything Waypoint holds about you and cuts off its Google access. You confirm by typing `delete all data`. The API route is:
+
+```sh
+curl -s -X DELETE http://127.0.0.1:8000/data \
+  -H 'Content-Type: application/json' -d '{"confirmation":"delete all data"}'
+# {"google":"revoked"}
+```
+
+The phrase must match exactly (case-sensitive, not trimmed); anything else is a 422 and a body that doesn't parse is a 400, and neither changes anything. A cross-site request or an HTML form post gets 403, as on disconnect. On the right phrase, in this order:
+
+1. Agents are paused, as with the [kill switch](agent-runtime.md#kill-switch), and **stay paused** afterwards. Resume them from the Agents card when you want.
+2. If an account is connected, its refresh token is decrypted and revoked at Google while the row still exists. This is best effort: if Google doesn't answer 2xx, the token doesn't decrypt or Google isn't configured, the deletion goes ahead anyway.
+3. One `TRUNCATE … RESTART IDENTITY` empties every user table: applications and their stages and events, resume versions (PDFs included), runs, steps, tool calls, model-call logs, jobs, the Google account and pending OAuth states. Only the migration history and the kill switch remain, so the install looks fresh.
+
+The body's `google` says what happened to the grant: `revoked`, `not_revoked` (remove Waypoint by hand at <https://myaccount.google.com/permissions>; the dashboard shows a warning that stays until dismissed) or `not_connected`. After the wipe the API publishes `data.deleted`, and open pages refetch. Nothing outside Postgres is touched: `.env` and `WAYPOINT_TOKEN_KEY` stay as they are. There is no undo.
