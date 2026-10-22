@@ -18,7 +18,7 @@ The constraints that shape the choice:
 
 - **Frontend:** SvelteKit with Svelte 5 runes, TypeScript and Tailwind CSS, built with `@sveltejs/adapter-static` as a static single-page app (SSR off, `index.html` fallback) that talks to the API over HTTP.
 - **Web package manager:** npm, with `web/package-lock.json` committed.
-- **Backend:** a Rust API on Rocket, in a Cargo workspace (`api/`, package `waypoint-api`) pinned to stable Rust by `rust-toolchain.toml`.
+- **Backend:** a Rust API on Rocket, in a Cargo workspace (`api/`, package `waypoint-api`) pinned to a dated nightly by `rust-toolchain.toml`.
 - **Database:** PostgreSQL, accessed with sqlx using runtime-checked queries, and schema changes as sqlx migrations in `api/migrations/` that the API applies on startup. Background work will use a Postgres-backed job queue.
 - **Local infrastructure:** Postgres runs in Docker Compose (service `db`, `postgres:17-alpine`), published only on `127.0.0.1`, with data in a named volume.
 - **Local only:** the API always binds `127.0.0.1`, the web dev server binds `127.0.0.1`, there is no hosted deployment and no app login.
