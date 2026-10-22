@@ -33,7 +33,7 @@ Why: an app left in **Testing** gets refresh tokens that Google expires after 7 
 
 1. Open **APIs & Services → Credentials** (**Google Auth Platform → Clients**) and choose **Create credentials → OAuth client ID**.
 2. Pick the application type **Desktop app** and name it, e.g. `Waypoint local`.
-3. Copy the client ID and the client secret.
+3. Copy the client ID and the client secret now, or download the JSON. The console may not show the secret again.
 
 Desktop-app clients accept a loopback redirect on any port, so you don't register a redirect URI. Waypoint uses `http://127.0.0.1:<WAYPOINT_API_PORT>/auth/google/callback`.
 
@@ -47,7 +47,7 @@ WAYPOINT_GOOGLE_CLIENT_SECRET=<client secret>
 WAYPOINT_TOKEN_KEY=<output of: openssl rand -base64 32>
 ```
 
-`WAYPOINT_TOKEN_KEY` must be 32 random bytes in standard base64; the API refuses to start with any other value. Keep it secret and never commit it (`.env` is gitignored). If you lose or change it, the stored tokens no longer decrypt: Waypoint marks the account `reconnect_required` and you connect again.
+`WAYPOINT_TOKEN_KEY` must be 32 random bytes in standard base64; the API refuses to start with any other value. Keep it secret and never commit it (`.env` is gitignored). If you lose or change it, the stored tokens no longer decrypt: the next time Waypoint uses them, it marks the account `reconnect_required` and you connect again.
 
 Until all three settings are set, the rest of Waypoint works and Google reports "not configured".
 
@@ -76,11 +76,15 @@ If you untick a permission, Waypoint revokes the partial grant, stores nothing a
 - `connected`: the tokens are stored and refresh themselves.
 - `reconnect_required`: Google revoked or expired the grant, or the tokens no longer decrypt (the key changed). Open `/auth/google/connect` again.
 
+Waypoint finds this out only when it next uses the tokens, so right after a revocation or a key change the status still reads `connected`.
+
 ## Disconnect
 
 ```sh
 curl -s -X DELETE http://127.0.0.1:8000/auth/google
 # {"revoked":true}
 ```
+
+Like connect, disconnect answers 403 to a request from another website (`Sec-Fetch-Site: cross-site`) and to an HTML form post, so a page you visit can't disconnect you.
 
 Waypoint asks Google to revoke the grant and deletes the stored tokens either way. When the answer is `{"revoked":false}` Google didn't confirm, so remove Waypoint by hand at <https://myaccount.google.com/permissions>.
