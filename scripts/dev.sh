@@ -53,6 +53,8 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Builds the waypoint-mcp relay too, so agent calls find it beside the API binary.
+cargo build -p waypoint-api --bins
 cargo run -p waypoint-api &
 api_pid=$!
 

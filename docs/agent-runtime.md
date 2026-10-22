@@ -1,6 +1,6 @@
 # Agent runtime
 
-Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps executed by the job queue, with each step's input, output, status, tokens and cost stored as it goes. Steps call the model through Waypoint's `claude -p` runner and call **tools**, typed Rust handlers with JSON schemas and a permission level. This page covers the shared machinery in `api/src/runs` and `api/src/tools`. No real workflows or tools are registered yet; the MCP server, the approval gate, undo and the run inspector UI build on this later.
+Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps executed by the job queue, with each step's input, output, status, tokens and cost stored as it goes. Steps call the model through Waypoint's `claude -p` runner and call **tools**, typed Rust handlers with JSON schemas and a permission level. This page covers the shared machinery in `api/src/runs`, `api/src/tools` and `api/src/mcp`. No real workflows or tools are registered yet; the approval gate, undo, per-step tool allowlists and the run inspector UI build on this later.
 
 ## Tables
 
@@ -75,9 +75,9 @@ pub trait Tool: Send + Sync + 'static {
 }
 ```
 
-`Input` types should use `#[serde(deny_unknown_fields)]`. `ToolContext` gives the pool and metered `call`/`call_structured`, whose spend is stored on the tool call and added to the calling step. Register tools with `Registry::register`, which refuses a duplicate name or a schema outside the supported subset, and pass the registry to `Runtime::new` with the workflows. `Registry::describe` lists the tools for the later MCP server.
+`Input` types should use `#[serde(deny_unknown_fields)]`. `ToolContext` gives the pool and metered `call`/`call_structured`, whose spend is stored on the tool call and added to the calling step. Register tools with `Registry::register`, which refuses a duplicate name or a schema outside the supported subset, and pass the registry to `Runtime::new` with the workflows. `Registry::describe` lists the tools, which is what the [MCP server](#mcp-server) offers the model.
 
-A step calls a tool with `ctx.tool(name, input)`. Each invocation:
+A step calls a tool directly with `ctx.tool(name, input)`, or lets the model call tools during `ctx.call_with_tools` (see [MCP server](#mcp-server)). Each invocation:
 
 1. inserts a `tool_calls` row (`running`); if that fails, the handler never runs,
 2. for an unknown name, ends `unknown_tool` with no permission, without calling a handler,
@@ -86,7 +86,7 @@ A step calls a tool with `ctx.tool(name, input)`. Each invocation:
 5. checks the output against the output schema; a mismatch ends `invalid_output`, with the output stored for debugging,
 6. otherwise ends `succeeded` with the output.
 
-Each row records the input, output, error, duration, tokens and cost, and `claude_call_id`: the model call that asked for the tool, once the MCP server passes it (always empty for now). Validation errors name the JSON path and the expected type, such as `$.items[2].title: expected string`, and never quote the value.
+Each row records the input, output, error, duration, tokens and cost, and `claude_call_id`: the model call that asked for the tool (empty for `ctx.tool` and for agent calls that failed). Validation errors name the JSON path and the expected type, such as `$.items[2].title: expected string`, and never quote the value.
 
 ### Permission levels
 
@@ -96,7 +96,7 @@ Each row records the input, output, error, duration, tokens and cost, and `claud
 | `write` | Changes Waypoint's own data; reversible and logged with undo. |
 | `external` | Leaves Waypoint (sends, submits, calls out); always passes an approval gate. |
 
-Levels are stored on every tool call but not enforced yet. The approval gate for `external` tools is a later job.
+Levels are stored on every tool call. Until the approval gate for `external` tools exists (a later job), the [MCP server](#mcp-server) neither lists nor runs them, so only step code can call one.
 
 ### Supported schema subset
 
@@ -107,6 +107,52 @@ Tool schemas are checked by a small in-repo checker (`api/src/tools/schema.rs`),
 - `description` and `title` (ignored when validating).
 
 Any other keyword (`oneOf`, `$ref`, `minimum`, `pattern`, …) makes registration fail.
+
+## MCP server
+
+A step hands the model Waypoint's tools with `ctx.call_with_tools(req)` or `ctx.call_structured_with_tools::<T>(req, schema)`. They work like `call`/`call_structured`, except that every registered `read` and `write` tool is available to the model through Waypoint's MCP server, and no other tool is. Plain `call`/`call_structured` never pass any MCP flags.
+
+### Transport
+
+There is no HTTP endpoint. Each agent call gets its own session:
+
+1. A temp dir (`waypoint-mcp-…`, mode 0700), separate from the CLI's empty working dir, holds a Unix socket `mcp.sock` that the API listens on and a generated `mcp.json`:
+   `{"mcpServers":{"waypoint":{"type":"stdio","command":"<waypoint-mcp>","args":["--socket","<dir>/mcp.sock"]}}}`. It holds no secrets and no env.
+2. `claude` is spawned with the usual isolated argv (`--tools ""`, `--strict-mcp-config`, never `--bare`), then `--model`/`--json-schema` when given, then `--mcp-config <dir>/mcp.json --allowedTools mcp__waypoint` last, because both flags are variadic.
+3. The CLI starts the `waypoint-mcp` bin (`api/src/bin/waypoint-mcp.rs`), a relay that copies its stdin to the socket and the socket to its stdout. It reads no env and opens no database; the protocol is served inside the API process by `api/src/mcp`.
+4. When the CLI exits (success, error, timeout or kill), the session stops accepting connections, lets tool calls already in flight finish and write their rows, then removes the dir.
+
+The relay is found at `WAYPOINT_MCP_BIN`, or `waypoint-mcp` beside the API binary by default; `cargo build -p waypoint-api --bins` builds it, and `scripts/dev.sh` does so before starting the API. If the relay is missing, or the dir or socket can't be set up, the call fails with `ClaudeError::Process` naming the cause before `claude` is spawned, and the step retries.
+
+### Protocol
+
+Newline-delimited JSON-RPC 2.0 over the relay's stdio. Requests on one connection are handled one at a time in arrival order, and a line over 4 MiB closes the connection.
+
+| Method | Result |
+|---|---|
+| `initialize` | `protocolVersion` (the client's when it is `2025-06-18`, `2025-03-26` or `2024-11-05`, otherwise `2025-06-18`), `capabilities: {tools: {listChanged: false}}`, `serverInfo: {name: "waypoint", version}` |
+| `ping` | `{}` |
+| `tools/list` | `{"tools": [{name, description, inputSchema}]}` for every registered tool except `external` ones, by name. No `outputSchema`. |
+| `tools/call` `{name, arguments}` | runs the tool through the registry (missing `arguments` counts as `{}`) |
+
+Notifications (no `id`) get no response. Errors: an unknown method is `-32601`, a line that isn't JSON is `-32700`, and a batch array or any other non-object is `-32600`.
+
+How a `tools/call` ends:
+
+| Registry result | Response | `tool_calls` row |
+|---|---|---|
+| output | `{"content":[{"type":"text","text":"<output as compact JSON>"}],"isError":false}` | as for `ctx.tool` |
+| unknown tool | JSON-RPC error `-32602`, `no tool has this name` | `unknown_tool` |
+| invalid input or output, handler or model-call failure | `{"content":[{"type":"text","text":"<error>"}],"isError":true}`, so the model can react | as for `ctx.tool` |
+| database error | `isError` result `the tool call could not be recorded`; the sqlx error goes to the log only | none or `running` |
+| `external` tool | `isError` result `this tool needs the user's approval and isn't available to agents yet`; the handler never runs | none |
+| `name` missing or not a string | JSON-RPC error `-32602`, `invalid params` | none |
+
+Error texts never quote input values.
+
+### Linking and spend
+
+Tool calls made during an agent call are recorded on the calling step. When the outer call succeeds, every `tool_calls` row its session created gets `claude_call_id` set to the outer call's `claude_calls.id`; when it fails, they keep `claude_call_id` empty. The model calls a tool handler makes count against the step (and so the run) even when the outer call fails. A usage limit inside a tool's own model call reaches the model as an `isError` result, not as the step's outcome.
 
 ## Routes
 

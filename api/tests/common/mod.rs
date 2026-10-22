@@ -19,8 +19,8 @@ use waypoint_api::jobs;
 /// The `Host` header every HTTP test sends; the API rejects requests without one.
 pub const HOST: &str = "127.0.0.1";
 
-/// A runner pointed at `fake-claude.sh` in one mode, with the directory the fake records
-/// its argv, cwd, cwd listing, env and stdin into.
+/// A runner pointed at `fake-claude.sh` in one mode and at the built `waypoint-mcp` relay,
+/// with the directory the fake records its argv, cwd, cwd listing, env and stdin into.
 pub struct Fake {
     pub runner: ClaudeRunner,
     pub record: PathBuf,
@@ -46,7 +46,8 @@ pub fn fake(mode: &str, timeout: Duration) -> Fake {
     .expect("write wrapper");
     fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).expect("chmod wrapper");
     Fake {
-        runner: ClaudeRunner::new(wrapper, timeout),
+        runner: ClaudeRunner::new(wrapper, timeout)
+            .with_mcp_bin(env!("CARGO_BIN_EXE_waypoint-mcp")),
         record,
         _dir: dir,
     }
