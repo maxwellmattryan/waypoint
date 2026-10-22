@@ -438,15 +438,34 @@ async fn guards_refuse_foreign_requests(pool: PgPool) {
     let created = create(&client, json!({"company": "Acme", "title": "Engineer"})).await;
     let one = format!("/applications/{}", id(&created));
     let status = format!("{one}/status");
+    let stages = format!("{one}/stages");
+    let response = send(&client, Method::Post, &stages, &json!({"name": "Onsite"})).await;
+    assert_eq!(response.status(), Status::Created);
+    let stages_before = json_body(response).await;
+    let stage = format!("{stages}/{}", id(&stages_before[0]));
+    let order = format!("{one}/stage-order");
+    let entries = format!("{one}/events");
+    let events_before =
+        json_body(client.get(entries.clone()).header(host()).dispatch().await).await;
+    let created = json_body(get(&client, id(&created)).await).await;
     let valid_create = json!({"company": "Evil", "title": "Engineer"}).to_string();
     let valid_update = json!({"company": "Evil", "title": "Engineer"}).to_string();
-    let valid_status = json!({"status": "rejected"}).to_string();
+    let valid_status = json!({"status": "rejected", "feedback": "Evil"}).to_string();
+    let valid_stage = json!({"name": "Evil"}).to_string();
+    let valid_completed = json!({"completed": true}).to_string();
+    let valid_order = json!({"stage_ids": [id(&stages_before[0])]}).to_string();
+    let valid_entry = json!({"kind": "note", "body": "Evil"}).to_string();
 
-    let mutating: [(Method, &str, &str); 4] = [
+    let mutating: [(Method, &str, &str); 9] = [
         (Method::Post, "/applications", &valid_create),
         (Method::Put, &one, &valid_update),
         (Method::Put, &status, &valid_status),
         (Method::Delete, &one, ""),
+        (Method::Post, &stages, &valid_stage),
+        (Method::Put, &stage, &valid_completed),
+        (Method::Put, &order, &valid_order),
+        (Method::Delete, &stage, ""),
+        (Method::Post, &entries, &valid_entry),
     ];
     for (method, path, body) in mutating {
         let response = client
@@ -480,12 +499,21 @@ async fn guards_refuse_foreign_requests(pool: PgPool) {
     }
 
     // What any web page can auto-submit: a form POST Rocket turns into DELETE or PUT.
-    for (path, override_) in [(&one, "delete"), (&one, "put"), (&status, "put")] {
+    for (path, override_) in [
+        (&one, "delete"),
+        (&one, "put"),
+        (&status, "put"),
+        (&stage, "put"),
+        (&stage, "delete"),
+        (&order, "put"),
+    ] {
         let response = client
             .post(path.clone())
             .header(host())
             .header(ContentType::Form)
-            .body(format!("_method={override_}&status=rejected"))
+            .body(format!(
+                "_method={override_}&status=rejected&completed=true"
+            ))
             .dispatch()
             .await;
         assert_eq!(
@@ -500,6 +528,10 @@ async fn guards_refuse_foreign_requests(pool: PgPool) {
         (Method::Post, "/applications", &valid_create),
         (Method::Put, &one, &valid_update),
         (Method::Put, &status, &valid_status),
+        (Method::Post, &stages, &valid_stage),
+        (Method::Put, &stage, &valid_completed),
+        (Method::Put, &order, &valid_order),
+        (Method::Post, &entries, &valid_entry),
     ] {
         let response = client
             .req(method, path)
@@ -516,13 +548,20 @@ async fn guards_refuse_foreign_requests(pool: PgPool) {
     }
 
     let evil = Header::new("Host", "evil.example");
-    let all: [(Method, &str, &str); 6] = [
+    let all: [(Method, &str, &str); 13] = [
         (Method::Get, "/applications", ""),
         (Method::Post, "/applications", &valid_create),
         (Method::Get, &one, ""),
         (Method::Put, &one, &valid_update),
         (Method::Put, &status, &valid_status),
         (Method::Delete, &one, ""),
+        (Method::Get, &stages, ""),
+        (Method::Post, &stages, &valid_stage),
+        (Method::Put, &stage, &valid_completed),
+        (Method::Put, &order, &valid_order),
+        (Method::Delete, &stage, ""),
+        (Method::Get, &entries, ""),
+        (Method::Post, &entries, &valid_entry),
     ];
     for (method, path, body) in all {
         let response = client
@@ -544,6 +583,18 @@ async fn guards_refuse_foreign_requests(pool: PgPool) {
         json_body(get(&client, id(&created)).await).await,
         created,
         "nothing was changed"
+    );
+    let response = client.get(stages).header(host()).dispatch().await;
+    assert_eq!(
+        json_body(response).await,
+        stages_before,
+        "no stage was added, changed, reordered or removed"
+    );
+    let response = client.get(entries).header(host()).dispatch().await;
+    assert_eq!(
+        json_body(response).await,
+        events_before,
+        "nothing was recorded"
     );
 }
 

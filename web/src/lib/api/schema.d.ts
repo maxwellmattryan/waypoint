@@ -44,6 +44,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/applications/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An application's timeline, newest first. */
+        get: operations["list_application_events"];
+        put?: never;
+        /** Adds a note, or rejection feedback for a rejected application, to the timeline. */
+        post: operations["add_application_entry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/applications/{id}/stage-order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Puts an application's stages in a new order. Records no event. */
+        put: operations["reorder_application_stages"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/applications/{id}/stages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An application's stages, in order. */
+        get: operations["list_application_stages"];
+        put?: never;
+        /** Appends a stage and records `stage_added`. */
+        post: operations["add_application_stage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/applications/{id}/stages/{stage_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Completes or reopens a stage, recording `stage_completed` or `stage_reopened` when that
+         *     changes anything.
+         */
+        put: operations["update_application_stage"];
+        post?: never;
+        /** Removes a stage, closes the gap in positions and records `stage_removed`. */
+        delete: operations["remove_application_stage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/applications/{id}/status": {
         parameters: {
             query?: never;
@@ -53,9 +127,11 @@ export interface paths {
         };
         get?: never;
         /**
-         * Sets an application's status. The single place status changes: `status_changed_at`
-         *     and `updated_at` move only when the status differs, so setting the same status is a
-         *     no-op that returns the row unchanged.
+         * Sets an application's status. The single place status changes: when the status
+         *     differs, `status_changed_at` and `updated_at` move and a `status_changed` event is
+         *     written. Non-blank `feedback` (only with `rejected`) also writes a `rejection_feedback`
+         *     event and moves `updated_at`, even if the application was already rejected. The same
+         *     status without feedback is a no-op that returns the row unchanged.
          */
         put: operations["set_application_status"];
         post?: never;
@@ -203,6 +279,22 @@ export interface components {
             /** @description The job posting, an absolute http or https URL. */
             url: string | null;
         };
+        /** @description One `application_events` row. Which of the optional fields are set depends on `kind`. */
+        ApplicationEvent: {
+            /** Format: int64 */
+            application_id: number;
+            /** @description The text of a `note` or `rejection_feedback`. */
+            body: string | null;
+            /** Format: date-time */
+            created_at: string;
+            from_status: null | components["schemas"]["ApplicationStatus"];
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["EventKind"];
+            /** @description The stage's name when the event was written, for the `stage_*` kinds. */
+            stage_name: string | null;
+            to_status: null | components["schemas"]["ApplicationStatus"];
+        };
         /**
          * @description The `PUT /applications/{id}` body: every text field, replacing the stored ones. An
          *     omitted optional field is cleared. Unknown keys, `status` included, are ignored.
@@ -228,6 +320,11 @@ export interface components {
          * @enum {string}
          */
         ConnectionState: "disconnected" | "connected" | "reconnect_required";
+        /**
+         * @description The kinds of entry the user writes directly.
+         * @enum {string}
+         */
+        EntryKind: "note" | "rejection_feedback";
         /** @description One event on the bus. It serializes with its name in `"type"`. */
         Event: {
             job: components["schemas"]["Job"];
@@ -283,6 +380,11 @@ export interface components {
             /** @enum {string} */
             type: "application.deleted";
         };
+        /**
+         * @description What an event records.
+         * @enum {string}
+         */
+        EventKind: "created" | "status_changed" | "stage_added" | "stage_completed" | "stage_reopened" | "stage_removed" | "note" | "rejection_feedback";
         /** @description One rule a field broke. */
         FieldError: {
             /** @description The JSON field name, or `body` when the body itself didn't parse. */
@@ -359,8 +461,54 @@ export interface components {
             title: string;
             url?: string | null;
         };
+        /** @description The `POST /applications/{id}/events` body. */
+        NewEntry: {
+            /** @description Required; trimmed, at most 20,000 characters. */
+            body: string;
+            kind: components["schemas"]["EntryKind"];
+        };
+        /** @description The `POST /applications/{id}/stages` body. */
+        NewStage: {
+            /** @description Required; trimmed, at most 200 characters. */
+            name: string;
+        };
+        /** @description One `application_stages` row. */
+        Stage: {
+            /** Format: int64 */
+            application_id: number;
+            /**
+             * Format: date-time
+             * @description When the stage was completed; null while it is open. Always serialized.
+             */
+            completed_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /**
+             * Format: int32
+             * @description 0 for the first stage, counting up without gaps.
+             */
+            position: number;
+        };
+        /** @description The `PUT /applications/{id}/stages/{stage_id}` body. */
+        StageChange: {
+            /** @description `true` completes the stage, `false` reopens it. */
+            completed: boolean;
+        };
+        /** @description The `PUT /applications/{id}/stage-order` body. */
+        StageOrder: {
+            /** @description Every stage id of the application, each once, in the new order. */
+            stage_ids: number[];
+        };
         /** @description The `PUT /applications/{id}/status` body. */
         StatusChange: {
+            /**
+             * @description Rejection feedback, recorded as a `rejection_feedback` event. Allowed only with
+             *     `rejected`; blank means none. At most 20,000 characters.
+             */
+            feedback?: string | null;
             status: components["schemas"]["ApplicationStatus"];
         };
         /** @description The 400 and 422 body: every failing field at once. */
@@ -632,6 +780,425 @@ export interface operations {
             };
         };
     };
+    list_application_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every event of the application, newest `created_at` first, ties by `id` descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationEvent"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The timeline could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_application_entry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewEntry"];
+            };
+        };
+        responses: {
+            /** @description The stored event */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationEvent"];
+                };
+            };
+            /** @description The body is not valid JSON for this route, or `kind` is unknown */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `body` is blank or too long, or `kind` is `rejection_feedback` and the application isn't rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The entry could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reorder_application_stages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageOrder"];
+            };
+        };
+        responses: {
+            /** @description Every stage of the application, in the new order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Stage"][];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `stage_ids` is not exactly the application's stage ids, each once */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The order could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_application_stages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every stage of the application, by `position` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Stage"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The stages could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_application_stage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewStage"];
+            };
+        };
+        responses: {
+            /** @description Every stage of the application, by `position`, the new one last */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Stage"][];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `name` is blank or too long, or the application already has 50 stages */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The stage could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_application_stage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+                /** @description The stage's id */
+                stage_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageChange"];
+            };
+        };
+        responses: {
+            /** @description Every stage of the application, by `position` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Stage"][];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id, or it has no stage with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The stage could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_application_stage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+                /** @description The stage's id */
+                stage_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The remaining stages of the application, by `position` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Stage"][];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id, or it has no stage with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The stage could not be removed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     set_application_status: {
         parameters: {
             query?: never;
@@ -686,6 +1253,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `feedback` is too long, or given with a status other than `rejected` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
             };
             /** @description The status could not be stored */
             500: {
