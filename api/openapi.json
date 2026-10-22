@@ -950,6 +950,86 @@
         }
       }
     },
+    "/captures": {
+      "post": {
+        "tags": [
+          "captures"
+        ],
+        "summary": "Reads a job posting URL and returns its fields for the add form, or queues Claude to\nread the page.",
+        "operationId": "capture_url",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The fields, found in the page's JSON-LD or a job board's API",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capture"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "No structured data; Claude reads the page in this job, whose `result` is a `Capture`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureQueued"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "The URL is invalid, or it redirects from a public address to a private one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The extraction job could not be queued"
+          },
+          "502": {
+            "description": "The page could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/events": {
       "get": {
         "tags": [
@@ -1257,6 +1337,132 @@
           "offer",
           "rejected"
         ]
+      },
+      "Capture": {
+        "type": "object",
+        "description": "A capture: the 200 body, and a succeeded `capture_extract` job's `result`.",
+        "required": [
+          "method",
+          "fields"
+        ],
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/CapturedFields"
+          },
+          "method": {
+            "$ref": "#/components/schemas/CaptureMethod"
+          }
+        }
+      },
+      "CaptureFailure": {
+        "type": "object",
+        "description": "The 502 body. It never includes page content.",
+        "required": [
+          "reason",
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "A sentence for the user."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/CaptureFailureReason"
+          }
+        }
+      },
+      "CaptureFailureReason": {
+        "type": "string",
+        "description": "Why the page couldn't be read.",
+        "enum": [
+          "timeout",
+          "unreachable",
+          "http_status",
+          "not_html",
+          "too_large",
+          "empty_page"
+        ]
+      },
+      "CaptureMethod": {
+        "type": "string",
+        "description": "How the fields were found.",
+        "enum": [
+          "json_ld",
+          "greenhouse",
+          "lever",
+          "ashby",
+          "llm"
+        ]
+      },
+      "CaptureQueued": {
+        "type": "object",
+        "description": "The 202 body: Claude will read the page in this job.",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "CaptureRequest": {
+        "type": "object",
+        "description": "The `POST /captures` body.",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The job posting's absolute http or https URL. Required."
+          }
+        }
+      },
+      "CapturedFields": {
+        "type": "object",
+        "description": "The fields for the add form, normalised: trimmed, blank as `null`, at most 200\ncharacters each.",
+        "required": [
+          "company",
+          "title",
+          "url",
+          "location",
+          "comp"
+        ],
+        "properties": {
+          "comp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "The trimmed URL the user submitted."
+          }
+        }
       },
       "ConnectionState": {
         "type": "string",

@@ -1,0 +1,32 @@
+{
+  "id": 4012345,
+  "internal_job_id": 3012345,
+  "title": "Staff Software Engineer, Platform",
+  "updated_at": "2026-10-01T12:00:00-04:00",
+  "requisition_id": "ENG-101",
+  "company_name": "Example Labs",
+  "first_published": "2026-09-15T09:00:00-04:00",
+  "location": { "name": "New York, NY" },
+  "absolute_url": "https://boards.greenhouse.io/examplelabs/jobs/4012345",
+  "language": "en",
+  "metadata": null,
+  "content": "&lt;p&gt;Build the platform.&lt;/p&gt;",
+  "departments": [{ "id": 1, "name": "Engineering", "child_ids": [], "parent_id": null }],
+  "offices": [{ "id": 2, "name": "New York", "location": "New York, NY", "child_ids": [], "parent_id": null }],
+  "pay_input_ranges": [
+    {
+      "min_cents": 18000000,
+      "max_cents": 21000000,
+      "currency_type": "USD",
+      "title": "New York pay range",
+      "blurb": "&lt;p&gt;Base salary.&lt;/p&gt;"
+    },
+    {
+      "min_cents": 15000000,
+      "max_cents": 17000000,
+      "currency_type": "USD",
+      "title": "Remote pay range",
+      "blurb": ""
+    }
+  ]
+}

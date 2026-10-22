@@ -37,6 +37,7 @@ async fn every_mounted_route_is_documented() {
         ClaudeRunner::new("claude", Duration::from_secs(1)),
         waypoint_api::jobs::Config::default(),
         waypoint_api::google::Config::default(),
+        waypoint_api::capture::Config::default(),
     );
     let doc = document();
     let paths = doc["paths"].as_object().expect("paths");

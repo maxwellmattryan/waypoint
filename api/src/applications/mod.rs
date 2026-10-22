@@ -319,7 +319,7 @@ pub(crate) fn text(
 }
 
 /// Whether `value` is an absolute http or https URL with a host.
-fn is_web_url(value: &str) -> bool {
+pub(crate) fn is_web_url(value: &str) -> bool {
     reqwest::Url::parse(value).is_ok_and(|url| {
         matches!(url.scheme(), "http" | "https") && url.host_str().is_some_and(|h| !h.is_empty())
     })

@@ -49,6 +49,7 @@ async fn app(pool: PgPool, config: google::Config) -> Client {
         ClaudeRunner::new("claude", Duration::from_secs(1)),
         waypoint_api::jobs::Config::default(),
         config,
+        waypoint_api::capture::Config::default(),
     );
     Client::tracked(rocket).await.expect("valid rocket")
 }

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
 use waypoint_api::claude::ClaudeRunner;
-use waypoint_api::{MIGRATOR, config, google, jobs};
+use waypoint_api::{MIGRATOR, capture, config, google, jobs};
 
 #[rocket::main]
 async fn main() -> ExitCode {
@@ -41,9 +41,16 @@ async fn run() -> Result<(), String> {
         .map_err(|err| format!("database migrations failed: {err}"))?;
 
     let figment = config::figment(rocket::Config::figment(), port);
-    waypoint_api::rocket(figment, pool, claude, jobs, google)
-        .launch()
-        .await
-        .map_err(|err| format!("server failed: {err}"))?;
+    waypoint_api::rocket(
+        figment,
+        pool,
+        claude,
+        jobs,
+        google,
+        capture::Config::default(),
+    )
+    .launch()
+    .await
+    .map_err(|err| format!("server failed: {err}"))?;
     Ok(())
 }

@@ -10,6 +10,10 @@ use crate::applications::{
     self, Application, ApplicationInput, ApplicationStatus, FieldError, NewApplication,
     StatusChange, ValidationErrors,
 };
+use crate::capture::{
+    self, Capture, CaptureFailure, CaptureFailureReason, CaptureMethod, CaptureQueued,
+    CaptureRequest, CapturedFields,
+};
 use crate::events::{self, Event};
 use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleStatus};
 use crate::health::{self, Health};
@@ -39,6 +43,7 @@ use crate::jobs::{self, Job};
         stages::remove,
         timeline::list_events,
         timeline::add_entry,
+        capture::capture,
     ),
     components(schemas(
         Health,
@@ -60,6 +65,13 @@ use crate::jobs::{self, Job};
         EventKind,
         NewEntry,
         EntryKind,
+        CaptureRequest,
+        Capture,
+        CapturedFields,
+        CaptureMethod,
+        CaptureQueued,
+        CaptureFailure,
+        CaptureFailureReason,
         ValidationErrors,
         FieldError,
     ))

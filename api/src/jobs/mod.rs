@@ -23,6 +23,9 @@ use crate::host::LocalHost;
 
 /// The `test_prompt` job kind: payload `{"prompt": string}`, one `claude -p` call.
 pub const TEST_PROMPT: &str = "test_prompt";
+/// The `capture_extract` job kind: payload `{"url": string, "text": string}`, one
+/// structured `claude -p` call whose `result` is a `Capture` (see `capture::llm`).
+pub const CAPTURE_EXTRACT: &str = "capture_extract";
 
 /// One `jobs` row. This is also the `GET /jobs/<id>` body; the payload is not echoed.
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, utoipa::ToSchema)]
