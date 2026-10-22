@@ -25,6 +25,8 @@ docker compose down
 
 ## Checks and tests
 
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same format, lint, type and test checks on every pull request and every push to `develop`; Rust tests run against a Postgres service container.
+
 Rust (no database needed):
 
 ```sh
