@@ -151,9 +151,12 @@ A native checkbox with a required `label`. `checked` is bindable. The input and 
 
 A surface with border, radius, small shadow and `p-4`. Without `href` it's a non-interactive `<div>`. With `href` it's an `<a>` with hover, focus-visible and active states.
 
+`draggable` (default `false`) makes the `<div>` a drag source: `draggable="true"`, `cursor-grab`, `active:cursor-grabbing` and a hover border. Toggling it keeps the same element, so a card that's briefly not draggable (a move in flight) keeps its focus and transitions. With `href` set, `draggable` is ignored and the card stays a link. Pass `ondragstart` and `ondragend` like any other attribute; inner links should set `draggable="false"` so a drag that starts on them moves the card rather than the URL.
+
 ```svelte
 <Card>Summary</Card>
 <Card href={resolve('/jobs/[id]', { id })}>Acme · Staff engineer</Card>
+<Card draggable={!pending} aria-busy={pending} {ondragstart}>…</Card>
 ```
 
 ### Badge
@@ -261,14 +264,37 @@ The trigger snippet receives `{ 'aria-describedby' }`. Spread it onto the trigge
 
 It shows after `delay` on pointer enter and at once when the trigger gets focus, and hides on pointer leave, blur or Escape. Escape on a visible tooltip stops there, so it doesn't also close a Dialog behind it. It's positioned with CSS next to its wrapper, with no collision handling, so keep the content short and leave room on the chosen side.
 
+### Menu
+
+A menu button: a trigger that opens a short list of actions. Props: `label` (required, the menu's `aria-label`), `items: { value: string; label: string; disabled?: boolean }[]`, `onselect(value)`, an optional `heading` shown as plain text at the top of the panel, `placement`: `bottom-end` (default) | `bottom-start`, and a `trigger` snippet.
+
+The trigger snippet receives `{ id, 'aria-haspopup': 'menu', 'aria-expanded', 'aria-controls', onclick, onkeydown }`. Spread it onto a `Button` or `IconButton`, which bring the cursor and state classes:
+
+```svelte
+<Menu label="Move to" heading="Move to" items={targets} onselect={move}>
+	{#snippet trigger(t)}
+		<IconButton {...t} size="sm" label="Move Acme · Staff engineer"><MoreIcon /></IconButton>
+	{/snippet}
+</Menu>
+```
+
+- Click, Enter, Space or ArrowDown on the trigger opens it and focuses the first enabled item; ArrowUp opens it on the last.
+- In the menu, ArrowDown and ArrowUp move between enabled items and wrap; Home and End jump to the ends. Disabled items are skipped and ignore clicks.
+- Choosing an item calls `onselect`, closes the menu and returns focus to the trigger.
+- Escape closes it and returns focus to the trigger without propagating, so a Dialog behind it stays open. Tab, or a pointer-down outside, closes it and leaves focus alone.
+- The panel (`role="menu"`, `overlaySurface`, `py-1`) fades in and out with the `fast` token. Items are `h-8 px-3 text-sm` rows with hover, active, focus-visible and disabled states (`menuItem` in `styles.ts`).
+
+Like Tooltip, the panel is `absolute` under its wrapper with no portal and no collision handling. Inside a scrolling container (`overflow: auto`) it scrolls with the content and can be clipped, so leave room below the trigger.
+
 ## Overlays
 
-Dialog, Drawer, Toaster and Tooltip render where they're declared, with `position: fixed` (or `absolute` for Tooltip). There's no portal: the app has no transformed ancestors, and a portal complicates Svelte context and tests. Don't put an overlay inside an element with `transform`, `filter` or `contain`, which would trap its fixed positioning.
+Dialog, Drawer, Toaster, Tooltip and Menu render where they're declared, with `position: fixed` (or `absolute` for Tooltip and Menu). There's no portal: the app has no transformed ancestors, and a portal complicates Svelte context and tests. Don't put an overlay inside an element with `transform`, `filter` or `contain`, which would trap its fixed positioning.
 
 Layering, from `layers` in `styles.ts`:
 
 | Layer | Class | Used by |
 |---|---|---|
+| `menu` | `z-30` | Menu panel. Below overlays; a Menu inside a Dialog stacks within the Dialog's layer |
 | `overlay` | `z-40` | Dialog and Drawer (backdrop and panel) |
 | `toast` | `z-50` | Toaster |
 | `tooltip` | `z-50` | Tooltip |
@@ -279,4 +305,4 @@ Open Dialogs and Drawers register on a shared stack (`overlay.ts`). Escape close
 
 Component tests (`*.svelte.test.ts`) run in Vitest's `client` project under jsdom with Testing Library; other tests (`*.test.ts`) run in the `server` project under Node. `npm --prefix web test` runs both. jsdom can't evaluate hover or focus styles, so `states.svelte.test.ts` checks that each primitive renders its state and cursor classes, and the `/dev/primitives` gallery covers how they look.
 
-jsdom has no Web Animations API, so `web/vitest-setup-client.ts` stubs `Element.prototype.animate` (finishing on the next microtask) and `getAnimations`. Transitions run to completion in tests: wait for an element to leave with `waitFor`. Test harnesses for overlays, tabs and tooltips live in `web/src/lib/components/ui/__fixtures__/`.
+jsdom has no Web Animations API, so `web/vitest-setup-client.ts` stubs `Element.prototype.animate` (finishing on the next microtask) and `getAnimations`. Transitions run to completion in tests: wait for an element to leave with `waitFor`. Test harnesses for overlays, tabs, tooltips and menus live in `web/src/lib/components/ui/__fixtures__/`.
