@@ -33,7 +33,7 @@ The web app opens on a dashboard inside the app shell. The top bar links to the 
 
 The browser only talks to its own origin. In development, Vite proxies `/api/*` to the API (`VITE_API_URL`, default <http://127.0.0.1:8000>) with the `/api` prefix stripped, passing `Host`, `Origin` and `Sec-Fetch-Site` through unchanged, so the API's local-host and same-origin guards still apply and the API needs no CORS headers. Vite's own CORS is turned off (`server.cors: false`): by default it answers any `localhost` or `127.0.0.1` origin on any port, which would let a page on another local port read job errors and the event stream through the proxy. The proxy exists only in `vite dev`; the built SPA isn't served or proxied yet.
 
-The end-to-end tests start the real API (with a fake `claude` that answers `pong` after a second) and the dev server, then drive the dashboard and the applications pages in Chromium and check that the proxy sends no CORS headers to other origins. The applications test adds, edits and deletes its own uniquely named application in the Compose database. It runs locally, not in CI. It needs the Compose Postgres, a `.env`, Chromium installed once, and ports 8000 and 5173 free:
+The end-to-end tests start the real API (with a fake `claude` that answers `pong` after a second) and the dev server, then drive the dashboard and the applications pages in Chromium and check that the proxy sends no CORS headers to other origins. The applications test adds, edits and deletes its own uniquely named application in the Compose database, and the board test adds one, drags it and moves it from its Move menu while a second page follows along live, then deletes it. They run locally, not in CI. It needs the Compose Postgres, a `.env`, Chromium installed once, and ports 8000 and 5173 free:
 
 ```sh
 docker compose up -d --wait db
@@ -44,6 +44,8 @@ npm --prefix web run test:e2e
 ## Applications
 
 The Applications page (`/applications`) lists every job application you're tracking, the most recently updated first, as cards showing the company, title, location, status and when it was last updated. **Add application** opens a form; clicking a card opens its detail page (`/applications/<id>`), where you change the status, edit the details or delete the application.
+
+The **View** tabs switch between List and Board, and the URL follows along (`/applications?view=board`), so a reload or a link keeps the Board view. The board has one column per status (Sourced, Applied, Interviewing, Offer, Rejected). Move a card by dragging it to another column, or by picking a status from its **Move** menu; on a touch device, use the menu. The card moves at once and goes back if the API refuses the change. Both views update live: an application added, edited, moved or deleted in another tab shows up without a reload, through the `application.*` events on the [event stream](#jobs-and-live-events).
 
 An application has a company and a title (both required) and optional free-text fields: job posting URL, location, compensation (e.g. "$180k–$210k + equity"), source (e.g. "Referral") and notes. Its status is one of Sourced (the default), Applied, Interviewing, Offer and Rejected. The API trims every field and stores a blank optional field as `null`. Company, title, location, compensation and source are limited to 200 characters, the URL to 2048 and notes to 20,000, and the URL must be an absolute `http` or `https` URL.
 
