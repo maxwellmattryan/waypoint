@@ -11,6 +11,9 @@ export type {
 	Health,
 	Job,
 	NewApplication,
+	ResumeLink,
+	ResumeVersion,
+	ResumeVersionDetail,
 	ValidationErrors
 } from './client';
 export { startTestPrompt } from './dev';

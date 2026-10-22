@@ -7,6 +7,7 @@
 		Dialog,
 		Drawer,
 		EmptyState,
+		FileInput,
 		IconButton,
 		Input,
 		Link,
@@ -38,6 +39,7 @@
 	let clicks = $state(0);
 	let company = $state('');
 	let notes = $state('');
+	let pickedFile = $state<string | null>(null);
 	let stage = $state('');
 	let remote = $state(true);
 
@@ -171,6 +173,22 @@
 		<p class="text-sm text-fg-muted">
 			Bound values: {company || '–'} · {notes || '–'} · {stage || '–'}
 		</p>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="file-input">
+		<h2 id="file-input" class="text-lg font-semibold text-fg">FileInput</h2>
+		<div class="grid gap-6 sm:grid-cols-2">
+			<FileInput
+				label="PDF file"
+				accept="application/pdf,.pdf"
+				buttonLabel="Choose PDF"
+				hint="At most 10 MB."
+				onchange={(file) => (pickedFile = file?.name ?? null)}
+			/>
+			<FileInput label="File with error" error="Must be a PDF" />
+			<FileInput label="Disabled file input" disabled />
+		</div>
+		<p class="text-sm text-fg-muted">Picked: {pickedFile ?? '–'}</p>
 	</section>
 
 	<section class="flex flex-col gap-4" aria-labelledby="checkbox">

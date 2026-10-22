@@ -3,13 +3,21 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { fade } from 'svelte/transition';
-	import { createApiClient, type Application, type ApplicationStatus } from '#lib/api';
+	import {
+		createApiClient,
+		type Application,
+		type ApplicationStatus,
+		type ResumeVersion
+	} from '#lib/api';
 	import {
 		deleteApplication,
 		getApplication,
+		setApplicationResume,
 		setApplicationStatus,
 		updateApplication
 	} from '#lib/applications/api.js';
+	import { listResumes } from '#lib/resumes/api.js';
+	import ResumeSelect from '#lib/components/resumes/ResumeSelect.svelte';
 	import { formatDate, isWebUrl } from '#lib/applications/format.js';
 	import { isStatus, statusLabel } from '#lib/applications/statuses.js';
 	import ApplicationFormDialog from '#lib/components/applications/ApplicationFormDialog.svelte';
@@ -37,9 +45,43 @@
 	let confirmingDelete = $state(false);
 	let deleting = $state(false);
 
+	/** Every resume version for the Resume section; its failure doesn't block the page. */
+	let resumes = $state<
+		{ kind: 'loading' } | { kind: 'error' } | { kind: 'loaded'; versions: ResumeVersion[] }
+	>({ kind: 'loading' });
+	let resumeId = $state<number | null>(null);
+	let savingResume = $state(false);
+
+	const resumesHref = resolve('/resumes');
+
 	function show(application: Application) {
 		view = { kind: 'loaded', application };
 		status = application.status;
+		resumeId = application.resume_version_id;
+	}
+
+	async function loadResumes() {
+		const result = await listResumes(client);
+		resumes = result.kind === 'ok' ? { kind: 'loaded', versions: result.data } : { kind: 'error' };
+	}
+
+	$effect(() => {
+		void loadResumes();
+	});
+
+	async function changeResume(application: Application, next: number | null) {
+		const previous = application.resume_version_id;
+		if (next === previous) return;
+		savingResume = true;
+		const result = await setApplicationResume(client, application.id, next);
+		savingResume = false;
+		if (result.kind === 'ok') {
+			show(result.data);
+			toast.success(result.data.resume_version_id === null ? 'Resume cleared' : 'Resume set');
+		} else {
+			resumeId = previous;
+			toast.error("Couldn't change the resume");
+		}
 	}
 
 	async function load(target: number | null) {
@@ -176,6 +218,51 @@
 						{@render item('Updated', formatDate(application.updated_at))}
 						{@render item('Status changed', formatDate(application.status_changed_at))}
 					</dl>
+
+					<section
+						class="flex flex-col gap-2 border-t border-border pt-4"
+						aria-labelledby="resume-heading"
+					>
+						<h2 id="resume-heading" class="text-sm font-semibold text-fg">Resume</h2>
+						{#if resumes.kind === 'loading'}
+							<Skeleton class="h-10 sm:w-60" />
+						{:else if resumes.kind === 'error'}
+							<p class="text-sm text-fg-subtle" in:fade={{ duration: motionDuration('base') }}>
+								Couldn't load resumes
+							</p>
+						{:else if resumes.versions.length === 0}
+							<p class="text-sm text-fg-subtle" in:fade={{ duration: motionDuration('base') }}>
+								No resumes uploaded yet. <Link href={resumesHref}>Upload one</Link>
+							</p>
+						{:else}
+							{@const linked = resumes.versions.find(
+								(v) => v.id === application.resume_version_id
+							)}
+							<div
+								class="flex flex-wrap items-end gap-x-4 gap-y-2"
+								in:fade={{ duration: motionDuration('base') }}
+							>
+								<div class="w-full sm:w-60">
+									<ResumeSelect
+										versions={resumes.versions}
+										bind:value={resumeId}
+										disabled={savingResume}
+										onchange={(event) => {
+											const next = event.currentTarget.value;
+											void changeResume(application, next === '' ? null : Number(next));
+										}}
+									/>
+								</div>
+								{#if linked}
+									<p class="flex h-10 items-center text-sm">
+										<Link href={resolve('/resumes/[id]', { id: String(linked.id) })}>
+											{linked.name}
+										</Link>
+									</p>
+								{/if}
+							</div>
+						{/if}
+					</section>
 
 					<section
 						class="flex flex-col gap-2 border-t border-border pt-4"

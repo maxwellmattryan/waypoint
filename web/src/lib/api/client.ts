@@ -20,6 +20,12 @@ export type NewApplication = components['schemas']['NewApplication'];
 export type ApplicationInput = components['schemas']['ApplicationInput'];
 /** The 400 and 422 body of the applications routes. */
 export type ValidationErrors = components['schemas']['ValidationErrors'];
+/** One uploaded resume PDF, without its text, as `GET /resumes` lists it. */
+export type ResumeVersion = components['schemas']['ResumeVersion'];
+/** One resume version with its extracted text, as `GET /resumes/{id}` returns it. */
+export type ResumeVersionDetail = components['schemas']['ResumeVersionDetail'];
+/** The `PUT /applications/{id}/resume` body; `null` clears the link. */
+export type ResumeLink = components['schemas']['ResumeLink'];
 /** One failing field in {@link ValidationErrors}. */
 export type FieldError = components['schemas']['FieldError'];
 
