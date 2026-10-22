@@ -11,6 +11,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 /// The blob format version this module writes and reads.
 const VERSION: u8 = 1;
@@ -18,9 +20,23 @@ const NONCE_LEN: usize = 24;
 const TAG_LEN: usize = 16;
 
 /// The 32-byte key that seals stored tokens (`WAYPOINT_TOKEN_KEY`). Its `Debug` never
-/// shows the key.
-#[derive(Clone, PartialEq, Eq)]
+/// shows the key, its bytes are wiped on drop, and `==` compares in constant time.
+#[derive(Clone)]
 pub struct TokenKey([u8; 32]);
+
+impl Drop for TokenKey {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl PartialEq for TokenKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.ct_eq(&other.0).into()
+    }
+}
+
+impl Eq for TokenKey {}
 
 impl TokenKey {
     pub fn new(bytes: [u8; 32]) -> Self {

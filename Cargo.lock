@@ -2993,10 +2993,12 @@ dependencies = [
  "serde_json",
  "sha2",
  "sqlx",
+ "subtle",
  "tempfile",
  "tokio",
  "utoipa",
  "wiremock",
+ "zeroize",
 ]
 
 [[package]]
