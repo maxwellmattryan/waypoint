@@ -4,6 +4,64 @@
  */
 
 export interface paths {
+    "/auth/google": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reports whether Google is configured and connected. Never decrypts or calls Google. */
+        get: operations["status"];
+        put?: never;
+        post?: never;
+        /** Disconnects Google: revokes the grant (best-effort) and deletes the stored tokens. */
+        delete: operations["disconnect"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/google/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Where Google sends the browser back after consent. Exchanges the code, checks the
+         *     granted scopes and stores the sealed tokens. Answers a fixed HTML page.
+         */
+        get: operations["callback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/google/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Starts the Google sign-in: stores a fresh state and PKCE verifier and redirects to
+         *     Google's consent page. Open it in a browser.
+         */
+        get: operations["connect"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events": {
         parameters: {
             query?: never;
@@ -59,6 +117,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description Whether a Google account is connected.
+         * @enum {string}
+         */
+        ConnectionState: "disconnected" | "connected" | "reconnect_required";
         /** @description One event on the bus. It serializes with its name in `"type"`. */
         Event: {
             job: components["schemas"]["Job"];
@@ -100,6 +163,27 @@ export interface components {
             skipped: number;
             /** @enum {string} */
             type: "app.lagged";
+        };
+        /** @description The `DELETE /auth/google` body. */
+        GoogleDisconnect: {
+            /**
+             * @description Whether Google confirmed the revocation. When `false`, remove the grant by hand at
+             *     <https://myaccount.google.com/permissions>.
+             */
+            revoked: boolean;
+        };
+        /** @description The `GET /auth/google` body. */
+        GoogleStatus: {
+            /** @description Whether the client id, secret and token key are all set. */
+            configured: boolean;
+            /**
+             * Format: date-time
+             * @description When the account was last connected; `null` when disconnected.
+             */
+            connected_at: string | null;
+            /** @description The granted scopes, sorted; empty when disconnected. */
+            scopes: string[];
+            state: components["schemas"]["ConnectionState"];
         };
         /** @description The `GET /health` body. */
         Health: {
@@ -143,6 +227,194 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Google connection's status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleStatus"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The status could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    disconnect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tokens are deleted; `revoked` says whether Google confirmed the revocation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleDisconnect"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No Google account is connected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The account could not be deleted */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    callback: {
+        parameters: {
+            query?: {
+                /** @description The authorization code Google issued */
+                code?: string;
+                /** @description The state `connect` created */
+                state?: string;
+                /** @description Google's error, e.g. `access_denied` */
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Google is connected */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description The state is invalid or expired, the user cancelled, or a permission was not granted */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The connection could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Google's token endpoint failed or returned no refresh token */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Google is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+        };
+    };
+    connect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirects to Google's consent page */
+            303: {
+                headers: {
+                    /** @description Google's authorization URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The flow could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Google is not configured; the message names the missing settings */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
     events: {
         parameters: {
             query?: never;

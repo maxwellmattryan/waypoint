@@ -36,7 +36,15 @@ async fn every_route_rejects_foreign_or_missing_host(pool: PgPool) {
         .routes()
         .map(|route| (route.method, concrete_path(route)))
         .collect();
-    for expected in ["/health", "/events", "/jobs/1", "/dev/jobs/test-prompt"] {
+    for expected in [
+        "/health",
+        "/events",
+        "/jobs/1",
+        "/dev/jobs/test-prompt",
+        "/auth/google",
+        "/auth/google/connect",
+        "/auth/google/callback",
+    ] {
         assert!(
             routes.iter().any(|(_, path)| path == expected),
             "{expected} is mounted: {routes:?}"
@@ -60,7 +68,12 @@ async fn every_route_rejects_foreign_or_missing_host(pool: PgPool) {
         }
     }
 
-    for table in ["jobs", "claude_calls"] {
+    for table in [
+        "jobs",
+        "claude_calls",
+        "google_oauth_states",
+        "google_accounts",
+    ] {
         let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
             .fetch_one(&pool)
             .await

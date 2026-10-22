@@ -52,7 +52,13 @@ pub fn fake(mode: &str, timeout: Duration) -> Fake {
 
 /// The API with Rocket's default test config.
 pub fn app(pool: PgPool, runner: ClaudeRunner, config: jobs::Config) -> Rocket<Build> {
-    waypoint_api::rocket(rocket::Config::figment(), pool, runner, config)
+    waypoint_api::rocket(
+        rocket::Config::figment(),
+        pool,
+        runner,
+        config,
+        waypoint_api::google::Config::default(),
+    )
 }
 
 /// Queue settings that keep tests fast: 50ms polls and retries, a 60s usage-limit pause.

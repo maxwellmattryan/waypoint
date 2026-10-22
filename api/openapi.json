@@ -5,6 +5,192 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/auth/google": {
+      "get": {
+        "tags": [
+          "google"
+        ],
+        "summary": "Reports whether Google is configured and connected. Never decrypts or calls Google.",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "The Google connection's status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The status could not be read"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "google"
+        ],
+        "summary": "Disconnects Google: revokes the grant (best-effort) and deletes the stored tokens.",
+        "operationId": "disconnect",
+        "responses": {
+          "200": {
+            "description": "The tokens are deleted; `revoked` says whether Google confirmed the revocation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleDisconnect"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No Google account is connected"
+          },
+          "500": {
+            "description": "The account could not be deleted"
+          }
+        }
+      }
+    },
+    "/auth/google/callback": {
+      "get": {
+        "tags": [
+          "google"
+        ],
+        "summary": "Where Google sends the browser back after consent. Exchanges the code, checks the\ngranted scopes and stores the sealed tokens. Answers a fixed HTML page.",
+        "operationId": "callback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "The authorization code Google issued",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "The state `connect` created",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "Google's error, e.g. `access_denied`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Google is connected",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The state is invalid or expired, the user cancelled, or a permission was not granted",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The connection could not be stored",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Google's token endpoint failed or returned no refresh token",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Google is not configured",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google/connect": {
+      "get": {
+        "tags": [
+          "google"
+        ],
+        "summary": "Starts the Google sign-in: stores a fresh state and PKCE verifier and redirects to\nGoogle's consent page. Open it in a browser.",
+        "operationId": "connect",
+        "responses": {
+          "303": {
+            "description": "Redirects to Google's consent page",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Google's authorization URL"
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site"
+          },
+          "500": {
+            "description": "The flow could not be stored"
+          },
+          "503": {
+            "description": "Google is not configured; the message names the missing settings",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/events": {
       "get": {
         "tags": [
@@ -108,6 +294,15 @@
   },
   "components": {
     "schemas": {
+      "ConnectionState": {
+        "type": "string",
+        "description": "Whether a Google account is connected.",
+        "enum": [
+          "disconnected",
+          "connected",
+          "reconnect_required"
+        ]
+      },
       "Event": {
         "oneOf": [
           {
@@ -287,6 +482,53 @@
           }
         ],
         "description": "One event on the bus. It serializes with its name in `\"type\"`."
+      },
+      "GoogleDisconnect": {
+        "type": "object",
+        "description": "The `DELETE /auth/google` body.",
+        "required": [
+          "revoked"
+        ],
+        "properties": {
+          "revoked": {
+            "type": "boolean",
+            "description": "Whether Google confirmed the revocation. When `false`, remove the grant by hand at\n<https://myaccount.google.com/permissions>."
+          }
+        }
+      },
+      "GoogleStatus": {
+        "type": "object",
+        "description": "The `GET /auth/google` body.",
+        "required": [
+          "configured",
+          "state",
+          "scopes",
+          "connected_at"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "Whether the client id, secret and token key are all set."
+          },
+          "connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the account was last connected; `null` when disconnected."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The granted scopes, sorted; empty when disconnected."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConnectionState"
+          }
+        }
       },
       "Health": {
         "type": "object",

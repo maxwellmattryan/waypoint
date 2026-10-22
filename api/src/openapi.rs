@@ -5,14 +5,23 @@
 use utoipa::OpenApi;
 
 use crate::events::{self, Event};
+use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleStatus};
 use crate::health::{self, Health};
 use crate::jobs::{self, Job};
 
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Waypoint API"),
-    paths(health::health, jobs::show, events::events),
-    components(schemas(Health, Job, Event))
+    paths(
+        health::health,
+        jobs::show,
+        events::events,
+        google::connect,
+        google::callback,
+        google::status,
+        google::disconnect,
+    ),
+    components(schemas(Health, Job, Event, GoogleStatus, ConnectionState, GoogleDisconnect))
 )]
 struct ApiDoc;
 
