@@ -248,7 +248,7 @@ daemon:
     tokens: 600000000
     usd: 150
 foreman:
-  enabled: false
+  enabled: true
   decides:
     - spec-approval
     - split-approval
