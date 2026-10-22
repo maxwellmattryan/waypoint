@@ -148,6 +148,10 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.example' http://127.0.0.
 
 The stream shows `job.queued`, `job.started` and `job.succeeded` for the job. Like the ping, `/dev/jobs/test-prompt` exists only in debug builds and needs the `X-Waypoint-Dev: 1` header.
 
+## Agent runs and tools
+
+Agent workflows run as runs: each step's input, output, status, tokens and cost is stored, along with every tool call it makes, and a failed or interrupted run picks up at its first unfinished step. Tools are typed Rust handlers with JSON schemas and a permission level (`read`, `write` or `external`). `GET /runs` and `GET /runs/<id>` show what a run did. No workflows or tools are registered yet. [docs/agent-runtime.md](docs/agent-runtime.md) covers the tables, the resume rules, how tokens and cost add up, the tool trait and the supported schema subset.
+
 ## Capture from URL
 
 On the Applications page, **Capture from URL** reads a job posting's link and opens the add form prefilled for you to check. It uses the page's JSON-LD first, then the Greenhouse, Lever or Ashby posting API, and asks Claude to read the page text only when neither has the details. [docs/capture.md](docs/capture.md) covers the tiers, the limits, the redirect guard and what is sent to Claude.
