@@ -12,6 +12,7 @@ pub mod google;
 mod health;
 pub mod host;
 pub mod jobs;
+pub mod mcp;
 pub mod openapi;
 pub mod resumes;
 pub mod runs;

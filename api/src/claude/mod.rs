@@ -20,10 +20,14 @@ use sqlx::PgPool;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
+pub(crate) use self::args::MCP_SERVER_NAME;
 use self::stream::Completed;
 
 /// Binary used when `WAYPOINT_CLAUDE_BIN` is unset; resolved through `PATH`.
 pub const DEFAULT_BIN: &str = "claude";
+/// File name of the MCP relay bin, looked up beside the API binary when
+/// `WAYPOINT_MCP_BIN` is unset.
+pub const MCP_BIN_NAME: &str = "waypoint-mcp";
 /// Timeout used when `WAYPOINT_CLAUDE_TIMEOUT_SECS` is unset.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 /// Environment variables removed from the child: keys and switches that would move
@@ -49,6 +53,8 @@ const MAX_STDOUT_BYTES: u64 = 16 * 1024 * 1024;
 pub struct ClaudeRunner {
     bin: PathBuf,
     timeout: Duration,
+    /// The `waypoint-mcp` relay named in agent calls' MCP config.
+    mcp_bin: PathBuf,
 }
 
 /// One single-turn model call.
@@ -161,29 +167,48 @@ struct Meta {
 type Outcome = (Meta, Result<Completed, ClaudeError>);
 
 impl ClaudeRunner {
+    /// A runner for `bin`. The MCP relay defaults to `waypoint-mcp` beside the running
+    /// binary, or the bare name when that can't be found.
     pub fn new(bin: impl Into<PathBuf>, timeout: Duration) -> Self {
+        let mcp_bin = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join(MCP_BIN_NAME)))
+            .unwrap_or_else(|| PathBuf::from(MCP_BIN_NAME));
         Self {
             bin: bin.into(),
             timeout,
+            mcp_bin,
         }
     }
 
-    /// Reads `WAYPOINT_CLAUDE_BIN` (default `claude`) and `WAYPOINT_CLAUDE_TIMEOUT_SECS`
-    /// (default 300).
+    /// Uses `path` as the `waypoint-mcp` relay.
+    pub fn with_mcp_bin(mut self, path: impl Into<PathBuf>) -> Self {
+        self.mcp_bin = path.into();
+        self
+    }
+
+    /// The `waypoint-mcp` relay agent calls use.
+    pub fn mcp_bin(&self) -> &Path {
+        &self.mcp_bin
+    }
+
+    /// Reads `WAYPOINT_CLAUDE_BIN` (default `claude`), `WAYPOINT_CLAUDE_TIMEOUT_SECS`
+    /// (default 300) and `WAYPOINT_MCP_BIN` (default `waypoint-mcp` beside this binary).
     pub fn from_env() -> Result<Self, String> {
         let timeout = parse_timeout(
             std::env::var("WAYPOINT_CLAUDE_TIMEOUT_SECS")
                 .ok()
                 .as_deref(),
         )?;
-        let bin = match std::env::var_os("WAYPOINT_CLAUDE_BIN").filter(|bin| !bin.is_empty()) {
+        let bin = match env_path("WAYPOINT_CLAUDE_BIN")? {
             None => PathBuf::from(DEFAULT_BIN),
-            // The child runs in a temp dir, so a relative path is resolved here first.
-            Some(bin) if Path::new(&bin).components().count() > 1 => std::path::absolute(&bin)
-                .map_err(|err| format!("WAYPOINT_CLAUDE_BIN is not a usable path: {err}"))?,
-            Some(bin) => PathBuf::from(bin),
+            Some(bin) => bin,
         };
-        Ok(Self::new(bin, timeout))
+        let runner = Self::new(bin, timeout);
+        Ok(match env_path("WAYPOINT_MCP_BIN")? {
+            None => runner,
+            Some(mcp_bin) => runner.with_mcp_bin(mcp_bin),
+        })
     }
 
     /// Sends `req.prompt` and returns the text reply.
@@ -192,7 +217,18 @@ impl ClaudeRunner {
         pool: &PgPool,
         req: &ClaudeRequest,
     ) -> Result<ClaudeResponse, ClaudeError> {
-        self.run(pool, req, None, |_| Ok(())).await
+        self.run(pool, req, None, None, |_| Ok(())).await
+    }
+
+    /// [`ClaudeRunner::call`] with Waypoint's MCP server from the config at `mcp_config`.
+    pub(crate) async fn call_with_mcp(
+        &self,
+        pool: &PgPool,
+        req: &ClaudeRequest,
+        mcp_config: &Path,
+    ) -> Result<ClaudeResponse, ClaudeError> {
+        self.run(pool, req, None, Some(mcp_config), |_| Ok(()))
+            .await
     }
 
     /// Sends `req.prompt` with `--json-schema` and deserializes the structured output
@@ -204,9 +240,31 @@ impl ClaudeRunner {
         req: &ClaudeRequest,
         schema: &Value,
     ) -> Result<(T, ClaudeResponse), ClaudeError> {
+        self.structured(pool, req, schema, None).await
+    }
+
+    /// [`ClaudeRunner::call_structured`] with Waypoint's MCP server from the config at
+    /// `mcp_config`.
+    pub(crate) async fn call_structured_with_mcp<T: DeserializeOwned>(
+        &self,
+        pool: &PgPool,
+        req: &ClaudeRequest,
+        schema: &Value,
+        mcp_config: &Path,
+    ) -> Result<(T, ClaudeResponse), ClaudeError> {
+        self.structured(pool, req, schema, Some(mcp_config)).await
+    }
+
+    async fn structured<T: DeserializeOwned>(
+        &self,
+        pool: &PgPool,
+        req: &ClaudeRequest,
+        schema: &Value,
+        mcp_config: Option<&Path>,
+    ) -> Result<(T, ClaudeResponse), ClaudeError> {
         let mut typed = None;
         let response = self
-            .run(pool, req, Some(schema), |structured| {
+            .run(pool, req, Some(schema), mcp_config, |structured| {
                 let value = structured.ok_or_else(|| ClaudeError::SchemaMismatch {
                     message: "the result has no structured_output".into(),
                 })?;
@@ -229,10 +287,11 @@ impl ClaudeRunner {
         pool: &PgPool,
         req: &ClaudeRequest,
         schema: Option<&Value>,
+        mcp_config: Option<&Path>,
         check: impl FnOnce(Option<&Value>) -> Result<(), ClaudeError>,
     ) -> Result<ClaudeResponse, ClaudeError> {
         let started = Instant::now();
-        let (meta, outcome) = self.execute(req, schema).await;
+        let (meta, outcome) = self.execute(req, schema, mcp_config).await;
         let outcome = outcome.and_then(|done| check(done.structured.as_ref()).map(|()| done));
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
@@ -268,7 +327,12 @@ impl ClaudeRunner {
     }
 
     /// Spawns the CLI in a fresh temp dir, enforces the timeout and removes the dir.
-    async fn execute(&self, req: &ClaudeRequest, schema: Option<&Value>) -> Outcome {
+    async fn execute(
+        &self,
+        req: &ClaudeRequest,
+        schema: Option<&Value>,
+        mcp_config: Option<&Path>,
+    ) -> Outcome {
         let dir = match tempfile::Builder::new()
             .prefix("waypoint-claude-")
             .tempdir()
@@ -278,7 +342,7 @@ impl ClaudeRunner {
                 return process_error(format!("cannot create a temp dir for claude: {err}"));
             }
         };
-        let mut command = self.command(req.model.as_deref(), schema, dir.path());
+        let mut command = self.command(req.model.as_deref(), schema, mcp_config, dir.path());
         // Dropping the future on timeout drops the child, and `kill_on_drop` kills it.
         let outcome = tokio::time::timeout(self.timeout, self.drive(&mut command, &req.prompt))
             .await
@@ -296,10 +360,16 @@ impl ClaudeRunner {
         outcome
     }
 
-    fn command(&self, model: Option<&str>, schema: Option<&Value>, cwd: &Path) -> Command {
+    fn command(
+        &self,
+        model: Option<&str>,
+        schema: Option<&Value>,
+        mcp_config: Option<&Path>,
+        cwd: &Path,
+    ) -> Command {
         let mut command = Command::new(&self.bin);
         command
-            .args(args::build(model, schema))
+            .args(args::build(model, schema, mcp_config))
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -437,6 +507,18 @@ fn scrubbed_env(present: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
     keys
 }
 
+/// Reads path variable `key`; empty counts as unset. The child runs in a temp dir, so a
+/// relative path is made absolute here, while a bare name is kept for a `PATH` lookup.
+fn env_path(key: &str) -> Result<Option<PathBuf>, String> {
+    match std::env::var_os(key).filter(|value| !value.is_empty()) {
+        None => Ok(None),
+        Some(value) if Path::new(&value).components().count() > 1 => std::path::absolute(&value)
+            .map(Some)
+            .map_err(|err| format!("{key} is not a usable path: {err}")),
+        Some(value) => Ok(Some(PathBuf::from(value))),
+    }
+}
+
 fn process_error(message: String) -> Outcome {
     (Meta::default(), Err(ClaudeError::Process { message }))
 }
@@ -492,7 +574,7 @@ mod tests {
     fn command_scrubs_api_key_env() {
         let runner = ClaudeRunner::new("claude", DEFAULT_TIMEOUT);
         let cwd = Path::new("/tmp/waypoint-test");
-        let command = runner.command(None, None, cwd);
+        let command = runner.command(None, None, None, cwd);
         let std = command.as_std();
 
         let envs: Vec<_> = std.get_envs().collect();
