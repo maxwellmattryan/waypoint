@@ -713,3 +713,84 @@ async fn disconnect_revokes_and_deletes(pool: PgPool) {
     // Nothing to disconnect.
     assert_eq!(disconnect().await.status(), Status::NotFound);
 }
+
+#[sqlx::test]
+async fn disconnect_rejects_cross_site_and_form_override(pool: PgPool) {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let client = app(pool.clone(), config(&server)).await;
+    seed(&pool, "access", "refresh", 3600).await;
+
+    // What any web page can auto-submit: a plain HTML form that Rocket turns into DELETE.
+    for site in [Some("cross-site"), None] {
+        let mut request = client
+            .post("/auth/google")
+            .header(host())
+            .header(ContentType::Form)
+            .body("_method=delete");
+        if let Some(site) = site {
+            request = request.header(Header::new("Sec-Fetch-Site", site));
+        }
+        assert_eq!(
+            request.dispatch().await.status(),
+            Status::Forbidden,
+            "{site:?}"
+        );
+    }
+    let response = client
+        .delete("/auth/google")
+        .header(host())
+        .header(Header::new("Sec-Fetch-Site", "cross-site"))
+        .dispatch()
+        .await;
+    assert_eq!(response.status(), Status::Forbidden);
+    assert_eq!(count(&pool, "google_accounts").await, 1);
+}
+
+#[sqlx::test]
+async fn undecryptable_tokens_require_reconnect(pool: PgPool) {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    // The tokens were sealed with KEY; the API now runs with another key.
+    let rotated = google::Config {
+        token_key: Some(TokenKey::new([8; 32])),
+        ..config(&server)
+    };
+    let google = Google::new(rotated.clone());
+    let client = app(pool.clone(), rotated).await;
+
+    for expires_in in [3600, 10] {
+        sqlx::query("DELETE FROM google_accounts")
+            .execute(&pool)
+            .await
+            .expect("clear account");
+        seed(&pool, "access", "refresh", expires_in).await;
+        assert_eq!(
+            google::access_token(&pool, &google).await,
+            Err(GoogleError::ReconnectRequired),
+            "expires in {expires_in}s"
+        );
+        assert_eq!(status(&client).await["state"], "reconnect_required");
+    }
+
+    // Disconnect can't revoke what it can't decrypt, but still deletes the row.
+    let response = client
+        .delete("/auth/google")
+        .header(host())
+        .dispatch()
+        .await;
+    assert_eq!(response.status(), Status::Ok);
+    assert_eq!(
+        response.into_json::<Value>().await,
+        Some(json!({"revoked": false}))
+    );
+    assert_eq!(count(&pool, "google_accounts").await, 0);
+}

@@ -279,7 +279,7 @@ export interface operations {
                     "application/json": components["schemas"]["GoogleDisconnect"];
                 };
             };
-            /** @description The `Host` header is not a local address */
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
             403: {
                 headers: {
                     [name: string]: unknown;

@@ -49,7 +49,7 @@
             }
           },
           "403": {
-            "description": "The `Host` header is not a local address"
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
           },
           "404": {
             "description": "No Google account is connected"

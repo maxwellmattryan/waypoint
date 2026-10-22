@@ -257,8 +257,12 @@ fn not_configured_message(missing: &[&str]) -> String {
 }
 
 /// Refuses a request a browser sent from another site (`Sec-Fetch-Site: cross-site`),
-/// so a page you visit can't start a flow. `same-origin`, `same-site` (the web app on
-/// another localhost port), `none` and a missing header (curl) pass.
+/// so a page you visit can't start a flow or disconnect. `same-origin`, `same-site` (the
+/// web app on another localhost port), `none` and a missing header (curl) pass.
+///
+/// It also refuses an HTML form body. Rocket rewrites a form `POST` whose first field is
+/// `_method=delete` into a `DELETE`, and any page can submit such a form without a CORS
+/// preflight, so the method alone doesn't prove the request came from Waypoint.
 pub struct NotCrossSite;
 
 #[rocket::async_trait]
@@ -270,7 +274,10 @@ impl<'r> FromRequest<'r> for NotCrossSite {
             .headers()
             .get("Sec-Fetch-Site")
             .any(|site| site.eq_ignore_ascii_case("cross-site"));
-        if cross_site {
+        let form = req
+            .content_type()
+            .is_some_and(|ct| ct.is_form() || ct.is_form_data());
+        if cross_site || form {
             Outcome::Error((Status::Forbidden, ()))
         } else {
             Outcome::Success(Self)
@@ -595,7 +602,7 @@ pub async fn status(
     tag = "google",
     responses(
         (status = 200, description = "The tokens are deleted; `revoked` says whether Google confirmed the revocation", body = GoogleDisconnect),
-        (status = 403, description = "The `Host` header is not a local address"),
+        (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
         (status = 404, description = "No Google account is connected"),
         (status = 500, description = "The account could not be deleted"),
     )
@@ -603,6 +610,7 @@ pub async fn status(
 #[rocket::delete("/auth/google")]
 pub async fn disconnect(
     _host: LocalHost,
+    _site: NotCrossSite,
     google: &State<Google>,
     pool: &State<PgPool>,
 ) -> Result<Json<GoogleDisconnect>, Status> {
