@@ -74,6 +74,80 @@ test('applications: create, view, status, edit, delete', async ({ page }) => {
 	await expect(page.getByText('Remote', { exact: true })).toBeVisible();
 	await expect(page.locator('header [data-status]')).toHaveText('Applied');
 
+	// Stages: a blank name is refused on the client, then two go in (Enter and the button).
+	const stages = page.getByRole('region', { name: 'Stages' });
+	const newStage = stages.getByLabel('New stage');
+	const stageRows = stages.getByRole('listitem');
+	await expect(stages.getByText('No stages yet')).toBeVisible();
+	await stages.getByRole('button', { name: 'Add stage' }).click();
+	await expect(stages.getByText('Required')).toBeVisible();
+	await newStage.fill('Recruiter screen');
+	await newStage.press('Enter');
+	await expect(stageRows).toHaveText(['Recruiter screen']);
+	await expect(newStage).toHaveValue('');
+	await newStage.fill('Onsite');
+	await stages.getByRole('button', { name: 'Add stage' }).click();
+	await expect(stageRows).toHaveText(['Recruiter screen', 'Onsite']);
+	await expect(stageRows.first().getByRole('button', { name: 'Move up' })).toBeDisabled();
+	await expect(stageRows.last().getByRole('button', { name: 'Move down' })).toBeDisabled();
+
+	await stages.getByRole('checkbox', { name: 'Recruiter screen' }).check();
+	await expect(stages.getByRole('checkbox', { name: 'Recruiter screen' })).toBeChecked();
+	await expect(stages.getByRole('checkbox', { name: 'Recruiter screen' })).toBeEnabled();
+	await stageRows.filter({ hasText: 'Onsite' }).getByRole('button', { name: 'Move up' }).click();
+	await expect(stageRows).toHaveText(['Onsite', 'Recruiter screen']);
+	await stageRows
+		.filter({ hasText: 'Recruiter screen' })
+		.getByRole('button', { name: 'Remove stage' })
+		.click();
+	await expect(stageRows).toHaveText(['Onsite']);
+
+	// A note.
+	const timeline = page.getByRole('region', { name: 'Timeline' });
+	const timelineItems = timeline.getByRole('listitem');
+	await expect(timeline.getByRole('button', { name: 'Add note' })).toBeDisabled();
+	await timeline.getByLabel('Add a note').fill('Recruiter will\ncall back');
+	await timeline.getByRole('button', { name: 'Add note' }).click();
+	await expect(timeline.getByLabel('Add a note')).toHaveValue('');
+	await expect(timelineItems.first()).toContainText('call back');
+
+	// Rejected goes through the dialog; cancelling it changes and sends nothing.
+	const rejection = page.getByRole('dialog', { name: 'Mark as rejected?' });
+	await page.getByLabel('Status').selectOption('rejected');
+	await expect(rejection).toContainText(`${company} · Staff Engineer`);
+	await rejection.getByRole('button', { name: 'Cancel' }).click();
+	await expect(rejection).toHaveCount(0);
+	await expect(page.getByLabel('Status')).toHaveValue('applied');
+	await expect(page.locator('header [data-status]')).toHaveText('Applied');
+	await expect(timelineItems.first()).toContainText('Note');
+
+	await page.getByLabel('Status').selectOption('rejected');
+	await rejection.getByLabel('Feedback (optional)').fill('Went with someone more senior');
+	await rejection.getByRole('button', { name: 'Mark rejected' }).click();
+	await expect(rejection).toHaveCount(0);
+	await expect(page.getByText('Status set to Rejected')).toBeVisible();
+	await expect(page.locator('header [data-status]')).toHaveText('Rejected');
+	await expect(timelineItems).toHaveText([
+		/^\s*Rejection feedback.*Went with someone more senior/s,
+		/^\s*Status changed from Applied to Rejected/,
+		/^\s*Note.*Recruiter will\s+call back/s,
+		/^\s*Stage removed: Recruiter screen/,
+		/^\s*Stage completed: Recruiter screen/,
+		/^\s*Stage added: Onsite/,
+		/^\s*Stage added: Recruiter screen/,
+		/^\s*Status changed from Sourced to Applied/,
+		/^\s*Added as Sourced/
+	]);
+
+	// Once rejected, feedback can be added on its own; it is required there.
+	await timeline.getByRole('button', { name: 'Add rejection feedback' }).click();
+	const feedbackOnly = page.getByRole('dialog', { name: 'Add rejection feedback' });
+	await expect(feedbackOnly.getByRole('button', { name: 'Save feedback' })).toBeDisabled();
+	await feedbackOnly.getByLabel('Feedback').fill('Reapply next year');
+	await feedbackOnly.getByRole('button', { name: 'Save feedback' }).click();
+	await expect(feedbackOnly).toHaveCount(0);
+	await expect(timelineItems.first()).toContainText('Reapply next year');
+
 	// Delete.
 	await page.getByRole('button', { name: 'Delete' }).click();
 	const confirm = page.getByRole('dialog', { name: 'Delete application?' });

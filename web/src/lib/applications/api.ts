@@ -1,10 +1,13 @@
 import type {
 	ApiClient,
 	Application,
+	ApplicationEvent,
 	ApplicationInput,
 	ApplicationStatus,
+	EntryKind,
 	FieldError,
-	NewApplication
+	NewApplication,
+	Stage
 } from '#lib/api';
 
 /** What an applications request came to. Never throws: a network error is `failed`. */
@@ -66,14 +69,90 @@ export function updateApplication(
 	return run(200, () => client.PUT('/applications/{id}', { ...path(id), body }));
 }
 
+/** Sets the status; `feedback` (only with `rejected`) is sent only when given. */
 export function setApplicationStatus(
 	client: ApiClient,
 	id: number,
-	status: ApplicationStatus
+	status: ApplicationStatus,
+	feedback?: string
 ): Promise<Result<Application>> {
-	return run(200, () => client.PUT('/applications/{id}/status', { ...path(id), body: { status } }));
+	const body = feedback === undefined ? { status } : { status, feedback };
+	return run(200, () => client.PUT('/applications/{id}/status', { ...path(id), body }));
 }
 
 export function deleteApplication(client: ApiClient, id: number): Promise<Result<void>> {
 	return run<void>(204, () => client.DELETE('/applications/{id}', path(id)));
+}
+
+const stagePath = (id: number, stage_id: number) => ({
+	params: { path: { id, stage_id } }
+});
+
+export function listStages(client: ApiClient, id: number): Promise<Result<Stage[]>> {
+	return run(200, () => client.GET('/applications/{id}/stages', path(id)));
+}
+
+/** Appends a stage; resolves to the whole ordered list. */
+export function addStage(client: ApiClient, id: number, name: string): Promise<Result<Stage[]>> {
+	return run(201, () => client.POST('/applications/{id}/stages', { ...path(id), body: { name } }));
+}
+
+/** Completes or reopens a stage; resolves to the whole ordered list. */
+export function setStageCompleted(
+	client: ApiClient,
+	id: number,
+	stageId: number,
+	completed: boolean
+): Promise<Result<Stage[]>> {
+	return run(200, () =>
+		client.PUT('/applications/{id}/stages/{stage_id}', {
+			...stagePath(id, stageId),
+			body: { completed }
+		})
+	);
+}
+
+/** Puts every stage in the given order; resolves to the whole ordered list. */
+export function reorderStages(
+	client: ApiClient,
+	id: number,
+	stageIds: number[]
+): Promise<Result<Stage[]>> {
+	return run(200, () =>
+		client.PUT('/applications/{id}/stage-order', {
+			...path(id),
+			body: { stage_ids: stageIds }
+		})
+	);
+}
+
+/** Removes a stage; resolves to the remaining ordered list. */
+export function removeStage(
+	client: ApiClient,
+	id: number,
+	stageId: number
+): Promise<Result<Stage[]>> {
+	return run(200, () =>
+		client.DELETE('/applications/{id}/stages/{stage_id}', stagePath(id, stageId))
+	);
+}
+
+/** The application's timeline, newest first. */
+export function listEvents(client: ApiClient, id: number): Promise<Result<ApplicationEvent[]>> {
+	return run(200, () => client.GET('/applications/{id}/events', path(id)));
+}
+
+/** Adds a note, or rejection feedback for a rejected application, to the timeline. */
+export function addEntry(
+	client: ApiClient,
+	id: number,
+	kind: EntryKind,
+	body: string
+): Promise<Result<ApplicationEvent>> {
+	return run(201, () =>
+		client.POST('/applications/{id}/events', {
+			...path(id),
+			body: { kind, body }
+		})
+	);
 }
