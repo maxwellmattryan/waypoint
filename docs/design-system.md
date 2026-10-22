@@ -24,7 +24,8 @@ Use these as Tailwind colour utilities: `bg-*`, `text-*`, `border-*`, `outline-*
 | `primary`, `primary-hover`, `primary-active`, `primary-fg` | Primary actions and links, with the text colour on top |
 | `danger`, `danger-hover`, `danger-active`, `danger-fg` | Destructive actions and error text |
 | `focus` | Focus ring |
-| `{neutral,primary,success,warning,danger,info}-soft` and `-soft-fg` | Badge background and text pairs |
+| `{neutral,primary,success,warning,danger,info}-soft` and `-soft-fg` | Badge background and text pairs; `-soft-fg` is also the toast accent bar |
+| `overlay` | Dialog and Drawer backdrop: black at 40% (light) or 60% (dark) |
 
 Values come from Tailwind's neutral, indigo, red, green, amber and sky scales. Text and background pairs meet WCAG AA (4.5:1) in both themes.
 
@@ -163,6 +164,100 @@ A placeholder block. `shape`: `rect` (default) | `text` | `circle`. It's `aria-h
 <Skeleton shape="circle" class="size-10" />
 ```
 
+### Tabs
+
+Horizontal tabs with automatic activation. Props: `label` (required, the tablist's `aria-label`), `items: { value: string; label: string; disabled?: boolean }[]`, `value` (bindable, defaults to the first enabled item) and a `children` snippet that receives the active value and renders its panel. The panel fades in when the value changes.
+
+Keyboard: only the active tab is in the Tab order (roving `tabindex`). ArrowRight and ArrowLeft select the next or previous enabled tab and wrap at the ends; Home and End select the first and last enabled tab. Disabled tabs are skipped and ignore clicks. The tabpanel is focusable and labelled by the active tab.
+
+```svelte
+<Tabs label="Application" items={[{ value: 'overview', label: 'Overview' }, { value: 'notes', label: 'Notes' }]} bind:value={tab}>
+	{#snippet children(active)}
+		{#if active === 'overview'}<Overview />{:else}<Notes />{/if}
+	{/snippet}
+</Tabs>
+```
+
+### Dialog
+
+A centred modal. Props: `open` (bindable, default `false`), `title` (required, the accessible name), optional `description` (linked with `aria-describedby`), `children`, an optional `footer` snippet for actions, `size`: `sm` | `md` (default) | `lg`, `closeOnBackdrop` (default `true`) and `onclose`.
+
+- On open, focus moves to the first `[data-autofocus]` element in the panel, else the first focusable element (the header's Close button).
+- Tab and Shift+Tab cycle inside the panel.
+- Escape, the Close button or a backdrop click (when `closeOnBackdrop`) set `open = false` and call `onclose`. Setting `open = false` yourself (a Cancel button) doesn't call `onclose`.
+- On close, focus returns to the element that had it before the dialog opened. Page scroll is locked while it's open.
+- The backdrop fades; the panel fades and scales from 0.96.
+
+```svelte
+<Button onclick={() => (open = true)}>Archive</Button>
+<Dialog bind:open title="Archive application" description="It leaves the board but keeps its history.">
+	<Input label="Reason" data-autofocus bind:value={reason} />
+	{#snippet footer()}
+		<Button variant="secondary" onclick={() => (open = false)}>Cancel</Button>
+		<Button onclick={archive}>Archive</Button>
+	{/snippet}
+</Dialog>
+```
+
+### Drawer
+
+A full-height side panel with the same props, keyboard, focus, scroll-lock and close behaviour as Dialog, minus `size`, plus `side`: `right` (default) | `left`. It slides in from its edge over a fading backdrop. The body scrolls; the footer stays at the bottom.
+
+```svelte
+<Drawer bind:open side="right" title="Acme · Staff engineer">
+	<ApplicationDetails {id} />
+</Drawer>
+```
+
+### Toast
+
+A service plus one renderer. `<Toaster />` is mounted once in `web/src/routes/+layout.svelte`; don't mount another. Call the `toast` service from anywhere:
+
+- `toast.show({ title, description?, tone?, duration? })` returns the toast's id. `tone`: `neutral` (default) | `success` | `info` | `warning` | `danger`. `duration` is in ms, default `5000`; `0` keeps the toast until it's dismissed.
+- `toast.success(title, opts?)` and `toast.error(title, opts?)` are shorthands for the `success` and `danger` tones.
+- `toast.dismiss(id)` removes one toast, and `toast.items` is the reactive list.
+
+Toasts stack at the bottom-right, newest at the bottom, each with a tone accent bar and a "Dismiss notification" button. They slide up and fade in, fade out, and the rest move into place. The region is `aria-live="polite"`; a `danger` toast is `role="alert"`, the others `role="status"`.
+
+```ts
+import { toast } from '#lib/components/ui';
+
+toast.success('Application saved');
+toast.error('Gmail sync failed', { description: 'Reconnect your account.', duration: 0 });
+```
+
+### Tooltip
+
+A short, non-interactive label for a trigger. Props: `content`, `placement`: `top` (default) | `bottom` | `left` | `right`, `delay` in ms (default `300`) and a `children` snippet that renders the trigger.
+
+The trigger snippet receives `{ 'aria-describedby' }`. Spread it onto the trigger so the trigger points at the tooltip while it's visible:
+
+```svelte
+<Tooltip content="Archive">
+	{#snippet children(t)}
+		<IconButton {...t} label="Archive application"><ArchiveIcon /></IconButton>
+	{/snippet}
+</Tooltip>
+```
+
+It shows after `delay` on pointer enter and at once when the trigger gets focus, and hides on pointer leave, blur or Escape. Escape on a visible tooltip stops there, so it doesn't also close a Dialog behind it. It's positioned with CSS next to its wrapper, with no collision handling, so keep the content short and leave room on the chosen side.
+
+## Overlays
+
+Dialog, Drawer, Toaster and Tooltip render where they're declared, with `position: fixed` (or `absolute` for Tooltip). There's no portal: the app has no transformed ancestors, and a portal complicates Svelte context and tests. Don't put an overlay inside an element with `transform`, `filter` or `contain`, which would trap its fixed positioning.
+
+Layering, from `layers` in `styles.ts`:
+
+| Layer | Class | Used by |
+|---|---|---|
+| `overlay` | `z-40` | Dialog and Drawer (backdrop and panel) |
+| `toast` | `z-50` | Toaster |
+| `tooltip` | `z-50` | Tooltip |
+
+Open Dialogs and Drawers register on a shared stack (`overlay.ts`). Escape closes only the topmost one, so a Dialog opened from a Drawer closes first. Page scroll (`document.body` `overflow`) is locked while any of them is open, and the previous value is restored when the last one closes. Overlay surfaces use `bg-surface border border-border rounded-lg shadow-lg` (`overlaySurface`).
+
 ## Tests
 
 Component tests (`*.svelte.test.ts`) run in Vitest's `client` project under jsdom with Testing Library; other tests (`*.test.ts`) run in the `server` project under Node. `npm --prefix web test` runs both. jsdom can't evaluate hover or focus styles, so `states.svelte.test.ts` checks that each primitive renders its state and cursor classes, and the `/dev/primitives` gallery covers how they look.
+
+jsdom has no Web Animations API, so `web/vitest-setup-client.ts` stubs `Element.prototype.animate` (finishing on the next microtask) and `getAnimations`. Transitions run to completion in tests: wait for an element to leave with `waitFor`. Test harnesses for overlays, tabs and tooltips live in `web/src/lib/components/ui/__fixtures__/`.
