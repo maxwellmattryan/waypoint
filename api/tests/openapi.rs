@@ -168,11 +168,19 @@ fn document_matches_wire_shapes() {
         paths["/events"]["get"]["responses"]["200"]["content"]["text/event-stream"].is_object(),
         "/events streams text/event-stream"
     );
+    // openapi-typescript keys `operations` by operationId, so a duplicate silently gives one
+    // route another's types.
+    let mut operation_ids = BTreeSet::new();
     for (path, item) in paths.as_object().unwrap() {
         for (method, operation) in item.as_object().unwrap() {
             assert!(
                 operation["responses"]["403"].is_object(),
                 "{method} {path} documents 403"
+            );
+            let operation_id = operation["operationId"].as_str().expect("operationId");
+            assert!(
+                operation_ids.insert(operation_id.to_string()),
+                "{method} {path}: operationId {operation_id:?} is used twice; set operation_id"
             );
         }
     }

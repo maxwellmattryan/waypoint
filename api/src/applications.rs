@@ -347,6 +347,7 @@ fn validate(input: &ApplicationInput) -> Result<Fields, ValidationErrors> {
     get,
     path = "/applications",
     tag = "applications",
+    operation_id = "list_applications",
     responses(
         (status = 200, description = "Every application, newest `updated_at` first, ties by `id` descending", body = [Application]),
         (status = 403, description = "The `Host` header is not a local address"),
@@ -372,6 +373,7 @@ pub async fn list(
     post,
     path = "/applications",
     tag = "applications",
+    operation_id = "create_application",
     request_body = NewApplication,
     responses(
         (status = 201, description = "The stored application", body = Application),
@@ -425,6 +427,7 @@ pub async fn create(
     get,
     path = "/applications/{id}",
     tag = "applications",
+    operation_id = "get_application",
     params(("id" = i64, Path, description = "The application's id")),
     responses(
         (status = 200, description = "The application", body = Application),
@@ -454,6 +457,7 @@ pub async fn show(
     put,
     path = "/applications/{id}",
     tag = "applications",
+    operation_id = "update_application",
     params(("id" = i64, Path, description = "The application's id")),
     request_body = ApplicationInput,
     responses(
@@ -503,6 +507,7 @@ pub async fn update(
     put,
     path = "/applications/{id}/status",
     tag = "applications",
+    operation_id = "set_application_status",
     params(("id" = i64, Path, description = "The application's id")),
     request_body = StatusChange,
     responses(
@@ -544,6 +549,7 @@ pub async fn set_status(
     delete,
     path = "/applications/{id}",
     tag = "applications",
+    operation_id = "delete_application",
     params(("id" = i64, Path, description = "The application's id")),
     responses(
         (status = 204, description = "The application is deleted"),

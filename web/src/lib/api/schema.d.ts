@@ -12,10 +12,10 @@ export interface paths {
             cookie?: never;
         };
         /** Every application, the most recently updated first. */
-        get: operations["list"];
+        get: operations["list_applications"];
         put?: never;
         /** Adds an application. */
-        post: operations["create"];
+        post: operations["create_application"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30,15 +30,15 @@ export interface paths {
             cookie?: never;
         };
         /** One application. */
-        get: operations["show"];
+        get: operations["get_application"];
         /**
          * Replaces an application's text fields. `status` and `status_changed_at` are left
          *     alone, even when the body carries a `status`.
          */
-        put: operations["update"];
+        put: operations["update_application"];
         post?: never;
         /** Deletes an application permanently. */
-        delete: operations["delete"];
+        delete: operations["delete_application"];
         options?: never;
         head?: never;
         patch?: never;
@@ -57,7 +57,7 @@ export interface paths {
          *     and `updated_at` move only when the status differs, so setting the same status is a
          *     no-op that returns the row unchanged.
          */
-        put: operations["set_status"];
+        put: operations["set_application_status"];
         post?: never;
         delete?: never;
         options?: never;
@@ -363,7 +363,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list: {
+    list_applications: {
         parameters: {
             query?: never;
             header?: never;
@@ -397,7 +397,7 @@ export interface operations {
             };
         };
     };
-    create: {
+    create_application: {
         parameters: {
             query?: never;
             header?: never;
@@ -460,7 +460,7 @@ export interface operations {
             };
         };
     };
-    show: {
+    get_application: {
         parameters: {
             query?: never;
             header?: never;
@@ -504,7 +504,7 @@ export interface operations {
             };
         };
     };
-    update: {
+    update_application: {
         parameters: {
             query?: never;
             header?: never;
@@ -577,7 +577,7 @@ export interface operations {
             };
         };
     };
-    delete: {
+    delete_application: {
         parameters: {
             query?: never;
             header?: never;
@@ -619,7 +619,7 @@ export interface operations {
             };
         };
     };
-    set_status: {
+    set_application_status: {
         parameters: {
             query?: never;
             header?: never;

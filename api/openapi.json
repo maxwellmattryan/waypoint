@@ -11,7 +11,7 @@
           "applications"
         ],
         "summary": "Every application, the most recently updated first.",
-        "operationId": "list",
+        "operationId": "list_applications",
         "responses": {
           "200": {
             "description": "Every application, newest `updated_at` first, ties by `id` descending",
@@ -39,7 +39,7 @@
           "applications"
         ],
         "summary": "Adds an application.",
-        "operationId": "create",
+        "operationId": "create_application",
         "requestBody": {
           "content": {
             "application/json": {
@@ -99,7 +99,7 @@
           "applications"
         ],
         "summary": "One application.",
-        "operationId": "show",
+        "operationId": "get_application",
         "parameters": [
           {
             "name": "id",
@@ -139,7 +139,7 @@
           "applications"
         ],
         "summary": "Replaces an application's text fields. `status` and `status_changed_at` are left\nalone, even when the body carries a `status`.",
-        "operationId": "update",
+        "operationId": "update_application",
         "parameters": [
           {
             "name": "id",
@@ -212,7 +212,7 @@
           "applications"
         ],
         "summary": "Deletes an application permanently.",
-        "operationId": "delete",
+        "operationId": "delete_application",
         "parameters": [
           {
             "name": "id",
@@ -247,7 +247,7 @@
           "applications"
         ],
         "summary": "Sets an application's status. The single place status changes: `status_changed_at`\nand `updated_at` move only when the status differs, so setting the same status is a\nno-op that returns the row unchanged.",
-        "operationId": "set_status",
+        "operationId": "set_application_status",
         "parameters": [
           {
             "name": "id",
