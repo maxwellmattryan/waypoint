@@ -80,15 +80,15 @@ fn validate_at(schema: &Value, value: &Value, path: &str) -> Result<(), String> 
     let Value::Object(schema) = schema else {
         return Ok(());
     };
-    if let Some(names) = schema.get("type").and_then(type_names) {
-        if !names.iter().any(|name| is_type(name, value)) {
-            return Err(format!("{path}: expected {}", names.join(" or ")));
-        }
+    if let Some(names) = schema
+        .get("type")
+        .and_then(type_names)
+        .filter(|names| !names.iter().any(|name| is_type(name, value)))
+    {
+        return Err(format!("{path}: expected {}", names.join(" or ")));
     }
-    if let Some(Value::Array(options)) = schema.get("enum") {
-        if !options.contains(value) {
-            return Err(format!("{path}: expected one of the allowed values"));
-        }
+    if matches!(schema.get("enum"), Some(Value::Array(options)) if !options.contains(value)) {
+        return Err(format!("{path}: expected one of the allowed values"));
     }
     match value {
         Value::Object(fields) => validate_object(schema, fields, path),
