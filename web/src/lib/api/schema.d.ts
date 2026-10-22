@@ -555,6 +555,10 @@ export interface components {
             id: number;
             /** @enum {string} */
             type: "application.deleted";
+        } | {
+            run: components["schemas"]["Run"];
+            /** @enum {string} */
+            type: "run.updated";
         };
         /**
          * @description What an event records.

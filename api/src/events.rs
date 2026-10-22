@@ -12,6 +12,7 @@ use tokio::sync::broadcast::{self, error::RecvError};
 use crate::applications::Application;
 use crate::host::LocalHost;
 use crate::jobs::Job;
+use crate::runs::Run;
 
 /// Events a slow subscriber can fall behind by before it gets [`Event::AppLagged`].
 pub const DEFAULT_CAPACITY: usize = 256;
@@ -50,6 +51,9 @@ pub enum Event {
     ApplicationUpdated { application: Application },
     #[serde(rename = "application.deleted")]
     ApplicationDeleted { id: i64 },
+    /// An agent run changed; `run` is the `agent_runs` row as `GET /runs` returns it.
+    #[serde(rename = "run.updated")]
+    RunUpdated { run: Run },
 }
 
 impl Event {
@@ -69,6 +73,7 @@ impl Event {
             Self::ApplicationCreated { .. } => "application.created",
             Self::ApplicationUpdated { .. } => "application.updated",
             Self::ApplicationDeleted { .. } => "application.deleted",
+            Self::RunUpdated { .. } => "run.updated",
         }
     }
 
@@ -206,6 +211,30 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Event::QueueResumed).unwrap(),
             serde_json::json!({"type": "queue.resumed"})
+        );
+
+        let now = Utc::now();
+        let run = Run {
+            id: 7,
+            workflow: "w".into(),
+            status: crate::runs::RunStatus::Queued,
+            input: serde_json::json!({}),
+            output: None,
+            error: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 0.0,
+            job_id: Some(1),
+            created_at: now,
+            updated_at: now,
+            started_at: None,
+            finished_at: None,
+        };
+        let event = Event::RunUpdated { run: run.clone() };
+        assert_eq!(event.name(), "run.updated");
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            serde_json::json!({"type": "run.updated", "run": run})
         );
     }
 }

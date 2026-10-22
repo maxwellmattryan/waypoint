@@ -18,6 +18,7 @@ use super::{RunStatus, StepStatus};
 use crate::claude::{
     ClaudeError, ClaudeRequest, ClaudeResponse, ClaudeRunner, MAX_ERROR_BYTES, head,
 };
+use crate::events::EventBus;
 use crate::jobs::Job;
 use crate::mcp::{Server, Session};
 use crate::tools::{Meter, Registry, Spend, ToolCallError};
@@ -167,6 +168,8 @@ pub struct StepContext<'a> {
     pool: &'a PgPool,
     runner: &'a ClaudeRunner,
     tools: Arc<Registry>,
+    bus: &'a EventBus,
+    run_id: i64,
     step_id: i64,
     meter: Meter,
 }
@@ -275,6 +278,7 @@ impl StepContext<'_> {
             .invoke_metered(self.pool, self.runner, self.step_id, None, name, input)
             .await;
         self.meter.spend.add(spend);
+        super::publish(self.pool, self.bus, self.run_id).await;
         result
     }
 }
@@ -301,12 +305,13 @@ pub async fn execute(
     pool: &PgPool,
     runner: &ClaudeRunner,
     runtime: &Runtime,
+    bus: &EventBus,
     job: &Job,
 ) -> Outcome {
     let Some(run_id) = job.payload.get("run_id").and_then(Value::as_i64) else {
         return Outcome::Fail("invalid agent_run payload: run_id must be an integer".into());
     };
-    match run(pool, runner, runtime, job, run_id).await {
+    match run(pool, runner, runtime, bus, job, run_id).await {
         Ok(outcome) => outcome,
         Err(err) => {
             let outcome = Outcome::Retry(format!("database error in run {run_id}: {err}"));
@@ -315,6 +320,7 @@ pub async fn execute(
             if let Err(err) = settled {
                 rocket::warn!("runs: cannot record the status of run {run_id}: {err}");
             }
+            super::publish(pool, bus, run_id).await;
             outcome
         }
     }
@@ -324,6 +330,7 @@ async fn run(
     pool: &PgPool,
     runner: &ClaudeRunner,
     runtime: &Runtime,
+    bus: &EventBus,
     job: &Job,
     run_id: i64,
 ) -> Result<Outcome, sqlx::Error> {
@@ -344,6 +351,7 @@ async fn run(
             found.workflow
         ));
         settle(pool, run_id, job, &outcome, Spend::default()).await?;
+        super::publish(pool, bus, run_id).await;
         return Ok(outcome);
     };
 
@@ -354,6 +362,7 @@ async fn run(
     .bind(run_id)
     .execute(pool)
     .await?;
+    super::publish(pool, bus, run_id).await;
     let steps: Vec<StepRow> = sqlx::query_as(
         "SELECT id, name, status, output FROM run_steps WHERE run_id = $1 ORDER BY ordinal",
     )
@@ -375,11 +384,14 @@ async fn run(
         .bind(&carried)
         .execute(pool)
         .await?;
+        super::publish(pool, bus, run_id).await;
 
         let mut ctx = StepContext {
             pool,
             runner,
             tools: runtime.tools.clone(),
+            bus,
+            run_id,
             step_id: step.id,
             meter: Meter::default(),
         };
@@ -405,6 +417,7 @@ async fn run(
                 .await?;
                 add_run_spend(&mut tx, run_id, spend).await?;
                 tx.commit().await?;
+                super::publish(pool, bus, run_id).await;
                 carried = output;
             }
             Err(err) => {
@@ -430,6 +443,7 @@ async fn run(
                 });
                 settle(&mut *tx, run_id, job, &outcome, spend).await?;
                 tx.commit().await?;
+                super::publish(pool, bus, run_id).await;
                 return Ok(outcome);
             }
         }
@@ -443,6 +457,7 @@ async fn run(
     .bind(&carried)
     .execute(pool)
     .await?;
+    super::publish(pool, bus, run_id).await;
     Ok(Outcome::Done(json!({"run_id": run_id})))
 }
 

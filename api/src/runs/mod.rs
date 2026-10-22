@@ -17,7 +17,7 @@ use sqlx::PgPool;
 
 pub use self::executor::{Outcome, Runtime, StepContext, StepError, Workflow, execute};
 use crate::applications::{ApiError, internal};
-use crate::events::EventBus;
+use crate::events::{Event, EventBus};
 use crate::host::LocalHost;
 use crate::jobs::{self, Wake};
 use crate::tools::Permission;
@@ -257,6 +257,7 @@ pub async fn start(
     .await?;
     let run = enqueue(&mut tx, bus, run_id).await?;
     tx.commit().await?;
+    bus.publish(Event::RunUpdated { run: run.clone() });
     wake.0.notify_one();
     Ok(run)
 }
@@ -283,8 +284,25 @@ pub async fn resume(
     }
     let run = enqueue(&mut tx, bus, run_id).await?;
     tx.commit().await?;
+    bus.publish(Event::RunUpdated { run: run.clone() });
     wake.0.notify_one();
     Ok(Some(run))
+}
+
+/// Publishes `run.updated` with run `run_id`'s current row. Best effort: a read error is
+/// logged and nothing is published, and an unknown id publishes nothing.
+pub async fn publish(pool: &PgPool, bus: &EventBus, run_id: i64) {
+    let found = sqlx::query_as::<_, Run>(&format!(
+        "SELECT {RUN_COLUMNS} FROM agent_runs WHERE id = $1"
+    ))
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await;
+    match found {
+        Ok(Some(run)) => bus.publish(Event::RunUpdated { run }),
+        Ok(None) => {}
+        Err(err) => rocket::warn!("runs: cannot publish run {run_id}: {err}"),
+    }
 }
 
 /// Inserts the run's `agent_run` job and points the run at it.

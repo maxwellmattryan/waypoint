@@ -162,3 +162,27 @@ Both routes are read-only, answer only a local `Host` (403 otherwise) and answer
 - `GET /runs/{id}`: the run with `steps` ordered by `ordinal`, each with its `tool_calls` ordered by `id`. An unknown id is 404.
 
 There are no routes to start, resume or cancel runs yet.
+
+## Events
+
+`GET /events` sends `run.updated` whenever a run changes, so the Runs pages stay live:
+
+```json
+{ "type": "run.updated", "run": { "id": 1, "workflow": "…", "status": "running", … } }
+```
+
+`run` is the `agent_runs` row exactly as `GET /runs` returns it, never the steps or tool calls. A client that wants those refetches `GET /runs/{id}` when it sees an event for that run.
+
+It fires after each of these commits, never inside a transaction:
+
+- `runs::start` and `runs::resume` (the run is `queued`; this one carries the row they return, with no extra read),
+- the executor marking the run `running`,
+- a step going `running`,
+- each `StepContext::tool` call returning, whether the tool succeeded or failed,
+- a step succeeding or failing (a failed step's event already has the run's settled status: `queued` for a retry or a usage-limit deferral, `failed` otherwise),
+- the run succeeding, or failing because its workflow isn't in the runtime,
+- the best-effort settle after a database error.
+
+So a one-step run whose step makes one tool call sends `queued`, `running` (run), `running` (step), `running` (tool returned), `running` (step succeeded) and `succeeded`.
+
+`runs::publish(pool, bus, run_id)` reads the row and publishes it. It is best effort: if the read fails it logs a warning and publishes nothing, and the run carries on. Like every event there is no replay; after `app.connected` or `app.lagged` a client refetches.

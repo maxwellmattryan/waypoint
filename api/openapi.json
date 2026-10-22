@@ -2118,6 +2118,25 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "An agent run changed; `run` is the `agent_runs` row as `GET /runs` returns it.",
+            "required": [
+              "run",
+              "type"
+            ],
+            "properties": {
+              "run": {
+                "$ref": "#/components/schemas/Run"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "run.updated"
+                ]
+              }
+            }
           }
         ],
         "description": "One event on the bus. It serializes with its name in `\"type\"`."

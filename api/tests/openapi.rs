@@ -144,6 +144,7 @@ fn document_matches_wire_shapes() {
             "app.lagged" => ["skipped"].into(),
             "application.created" | "application.updated" => ["application"].into(),
             "application.deleted" => ["id"].into(),
+            "run.updated" => ["run"].into(),
             _ => BTreeSet::new(),
         };
         assert_eq!(payload, want, "{name} payload");
@@ -163,6 +164,7 @@ fn document_matches_wire_shapes() {
         "application.created",
         "application.updated",
         "application.deleted",
+        "run.updated",
     ]
     .iter()
     .map(|n| n.to_string())

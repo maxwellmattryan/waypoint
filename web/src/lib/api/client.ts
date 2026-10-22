@@ -48,6 +48,22 @@ export type CaptureMethod = components['schemas']['CaptureMethod'];
 export type CaptureQueued = components['schemas']['CaptureQueued'];
 /** The 502 body of `POST /captures`: why the page couldn't be read. */
 export type CaptureFailure = components['schemas']['CaptureFailure'];
+/** One agent run, as `GET /runs` lists it and `run.updated` carries it. */
+export type Run = components['schemas']['Run'];
+/** The `GET /runs/{id}` body: the run with its steps and their tool calls. */
+export type RunDetail = components['schemas']['RunDetail'];
+/** One step of a run with its tool calls. */
+export type RunStepDetail = components['schemas']['RunStepDetail'];
+/** One tool call a step made. */
+export type ToolCall = components['schemas']['ToolCall'];
+/** Where a run is. */
+export type RunStatus = components['schemas']['RunStatus'];
+/** Where a step is. */
+export type StepStatus = components['schemas']['StepStatus'];
+/** How a tool call ended. */
+export type ToolCallStatus = components['schemas']['ToolCallStatus'];
+/** A tool's permission level. */
+export type Permission = components['schemas']['Permission'];
 /** Why a page couldn't be read. */
 export type CaptureFailureReason = components['schemas']['CaptureFailureReason'];
 
