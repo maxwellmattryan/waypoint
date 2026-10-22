@@ -49,6 +49,36 @@ impl<'r> FromRequest<'r> for LocalHost {
     }
 }
 
+/// Refuses a request a browser sent from another site (`Sec-Fetch-Site: cross-site`),
+/// so a page you visit can't change anything. `same-origin`, `same-site` (the web app on
+/// another localhost port), `none` and a missing header (curl) pass. Every handler that
+/// changes state takes it after [`LocalHost`].
+///
+/// It also refuses an HTML form body. Rocket rewrites a form `POST` whose first field is
+/// `_method=delete` into a `DELETE`, and any page can submit such a form without a CORS
+/// preflight, so the method alone doesn't prove the request came from Waypoint.
+pub struct NotCrossSite;
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for NotCrossSite {
+    type Error = ();
+
+    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, ()> {
+        let cross_site = req
+            .headers()
+            .get("Sec-Fetch-Site")
+            .any(|site| site.eq_ignore_ascii_case("cross-site"));
+        let form = req
+            .content_type()
+            .is_some_and(|ct| ct.is_form() || ct.is_form_data());
+        if cross_site || form {
+            Outcome::Error((Status::Forbidden, ()))
+        } else {
+            Outcome::Success(Self)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

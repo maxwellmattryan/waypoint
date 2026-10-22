@@ -4,6 +4,10 @@
 
 use utoipa::OpenApi;
 
+use crate::applications::{
+    self, Application, ApplicationInput, ApplicationStatus, FieldError, NewApplication,
+    StatusChange, ValidationErrors,
+};
 use crate::events::{self, Event};
 use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleStatus};
 use crate::health::{self, Health};
@@ -20,8 +24,28 @@ use crate::jobs::{self, Job};
         google::callback,
         google::status,
         google::disconnect,
+        applications::list,
+        applications::create,
+        applications::show,
+        applications::update,
+        applications::set_status,
+        applications::delete,
     ),
-    components(schemas(Health, Job, Event, GoogleStatus, ConnectionState, GoogleDisconnect))
+    components(schemas(
+        Health,
+        Job,
+        Event,
+        GoogleStatus,
+        ConnectionState,
+        GoogleDisconnect,
+        Application,
+        ApplicationStatus,
+        NewApplication,
+        ApplicationInput,
+        StatusChange,
+        ValidationErrors,
+        FieldError,
+    ))
 )]
 struct ApiDoc;
 

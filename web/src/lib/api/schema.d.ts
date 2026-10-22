@@ -4,6 +4,67 @@
  */
 
 export interface paths {
+    "/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every application, the most recently updated first. */
+        get: operations["list"];
+        put?: never;
+        /** Adds an application. */
+        post: operations["create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/applications/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One application. */
+        get: operations["show"];
+        /**
+         * Replaces an application's text fields. `status` and `status_changed_at` are left
+         *     alone, even when the body carries a `status`.
+         */
+        put: operations["update"];
+        post?: never;
+        /** Deletes an application permanently. */
+        delete: operations["delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/applications/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Sets an application's status. The single place status changes: `status_changed_at`
+         *     and `updated_at` move only when the status differs, so setting the same status is a
+         *     no-op that returns the row unchanged.
+         */
+        put: operations["set_status"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/google": {
         parameters: {
             query?: never;
@@ -117,6 +178,51 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One `applications` row: the body of every route that returns an application. */
+        Application: {
+            /** @description Compensation as free text, e.g. "$180k–$210k + equity". */
+            comp: string | null;
+            company: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            location: string | null;
+            notes: string | null;
+            /** @description Where the role came from as free text, e.g. "Referral". */
+            source: string | null;
+            status: components["schemas"]["ApplicationStatus"];
+            /**
+             * Format: date-time
+             * @description When `status` last changed (the creation time until then).
+             */
+            status_changed_at: string;
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description The job posting, an absolute http or https URL. */
+            url: string | null;
+        };
+        /**
+         * @description The `PUT /applications/{id}` body: every text field, replacing the stored ones. An
+         *     omitted optional field is cleared. Unknown keys, `status` included, are ignored.
+         */
+        ApplicationInput: {
+            comp?: string | null;
+            /** @description Required; a missing or blank value is a 422. */
+            company: string;
+            location?: string | null;
+            notes?: string | null;
+            source?: string | null;
+            /** @description Required; a missing or blank value is a 422. */
+            title: string;
+            url?: string | null;
+        };
+        /**
+         * @description Where an application is in the process.
+         * @enum {string}
+         */
+        ApplicationStatus: "sourced" | "applied" | "interviewing" | "offer" | "rejected";
         /**
          * @description Whether a Google account is connected.
          * @enum {string}
@@ -163,6 +269,12 @@ export interface components {
             skipped: number;
             /** @enum {string} */
             type: "app.lagged";
+        };
+        /** @description One rule a field broke. */
+        FieldError: {
+            /** @description The JSON field name, or `body` when the body itself didn't parse. */
+            field: string;
+            message: string;
         };
         /** @description The `DELETE /auth/google` body. */
         GoogleDisconnect: {
@@ -218,6 +330,30 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /**
+         * @description The `POST /applications` body: the [`ApplicationInput`] fields plus an optional
+         *     starting status (`sourced` when omitted).
+         */
+        NewApplication: {
+            comp?: string | null;
+            /** @description Required; a missing or blank value is a 422. */
+            company: string;
+            location?: string | null;
+            notes?: string | null;
+            source?: string | null;
+            status?: null | components["schemas"]["ApplicationStatus"];
+            /** @description Required; a missing or blank value is a 422. */
+            title: string;
+            url?: string | null;
+        };
+        /** @description The `PUT /applications/{id}/status` body. */
+        StatusChange: {
+            status: components["schemas"]["ApplicationStatus"];
+        };
+        /** @description The 400 and 422 body: every failing field at once. */
+        ValidationErrors: {
+            errors: components["schemas"]["FieldError"][];
+        };
     };
     responses: never;
     parameters: never;
@@ -227,6 +363,326 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every application, newest `updated_at` first, ties by `id` descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Application"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The applications could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewApplication"];
+            };
+        };
+        responses: {
+            /** @description The stored application */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
+            };
+            /** @description The body is not valid JSON for this route, or `status` is unknown */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description One or more fields are invalid */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The application could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    show: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The application */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The application could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationInput"];
+            };
+        };
+        responses: {
+            /** @description The updated application */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description One or more fields are invalid */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The application could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The application is deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The application could not be deleted */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusChange"];
+            };
+        };
+        responses: {
+            /** @description The application with its new status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
+            };
+            /** @description The body is not valid JSON for this route, or `status` is unknown */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The status could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     status: {
         parameters: {
             query?: never;

@@ -5,6 +5,307 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/applications": {
+      "get": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Every application, the most recently updated first.",
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "Every application, newest `updated_at` first, ties by `id` descending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Application"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The applications could not be read"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Adds an application.",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewApplication"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The stored application",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route, or `status` is unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "One or more fields are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The application could not be stored"
+          }
+        }
+      }
+    },
+    "/applications/{id}": {
+      "get": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "One application.",
+        "operationId": "show",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The application",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "500": {
+            "description": "The application could not be read"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Replaces an application's text fields. `status` and `status_changed_at` are left\nalone, even when the body carries a `status`.",
+        "operationId": "update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplicationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated application",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "One or more fields are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The application could not be stored"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Deletes an application permanently.",
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The application is deleted"
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "500": {
+            "description": "The application could not be deleted"
+          }
+        }
+      }
+    },
+    "/applications/{id}/status": {
+      "put": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Sets an application's status. The single place status changes: `status_changed_at`\nand `updated_at` move only when the status differs, so setting the same status is a\nno-op that returns the row unchanged.",
+        "operationId": "set_status",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The application with its new status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route, or `status` is unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "500": {
+            "description": "The status could not be stored"
+          }
+        }
+      }
+    },
     "/auth/google": {
       "get": {
         "tags": [
@@ -294,6 +595,144 @@
   },
   "components": {
     "schemas": {
+      "Application": {
+        "type": "object",
+        "description": "One `applications` row: the body of every route that returns an application.",
+        "required": [
+          "id",
+          "company",
+          "title",
+          "url",
+          "location",
+          "comp",
+          "source",
+          "notes",
+          "status",
+          "status_changed_at",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "comp": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Compensation as free text, e.g. \"$180k–$210k + equity\"."
+          },
+          "company": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the role came from as free text, e.g. \"Referral\"."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApplicationStatus"
+          },
+          "status_changed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When `status` last changed (the creation time until then)."
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The job posting, an absolute http or https URL."
+          }
+        }
+      },
+      "ApplicationInput": {
+        "type": "object",
+        "description": "The `PUT /applications/{id}` body: every text field, replacing the stored ones. An\nomitted optional field is cleared. Unknown keys, `status` included, are ignored.",
+        "required": [
+          "company",
+          "title"
+        ],
+        "properties": {
+          "comp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "company": {
+            "type": "string",
+            "description": "Required; a missing or blank value is a 422."
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "Required; a missing or blank value is a 422."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ApplicationStatus": {
+        "type": "string",
+        "description": "Where an application is in the process.",
+        "enum": [
+          "sourced",
+          "applied",
+          "interviewing",
+          "offer",
+          "rejected"
+        ]
+      },
       "ConnectionState": {
         "type": "string",
         "description": "Whether a Google account is connected.",
@@ -483,6 +922,23 @@
         ],
         "description": "One event on the bus. It serializes with its name in `\"type\"`."
       },
+      "FieldError": {
+        "type": "object",
+        "description": "One rule a field broke.",
+        "required": [
+          "field",
+          "message"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "The JSON field name, or `body` when the body itself didn't parse."
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
       "GoogleDisconnect": {
         "type": "object",
         "description": "The `DELETE /auth/google` body.",
@@ -612,6 +1068,91 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "NewApplication": {
+        "type": "object",
+        "description": "The `POST /applications` body: the [`ApplicationInput`] fields plus an optional\nstarting status (`sourced` when omitted).",
+        "required": [
+          "company",
+          "title"
+        ],
+        "properties": {
+          "comp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "company": {
+            "type": "string",
+            "description": "Required; a missing or blank value is a 422."
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApplicationStatus"
+              }
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "Required; a missing or blank value is a 422."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "StatusChange": {
+        "type": "object",
+        "description": "The `PUT /applications/{id}/status` body.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ApplicationStatus"
+          }
+        }
+      },
+      "ValidationErrors": {
+        "type": "object",
+        "description": "The 400 and 422 body: every failing field at once.",
+        "required": [
+          "errors"
+        ],
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            }
           }
         }
       }
