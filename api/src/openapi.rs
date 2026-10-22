@@ -4,6 +4,8 @@
 
 use utoipa::OpenApi;
 
+use crate::applications::stages::{self, NewStage, Stage, StageChange, StageOrder};
+use crate::applications::timeline::{self, ApplicationEvent, EntryKind, EventKind, NewEntry};
 use crate::applications::{
     self, Application, ApplicationInput, ApplicationStatus, FieldError, NewApplication,
     StatusChange, ValidationErrors,
@@ -37,6 +39,13 @@ use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
         resumes::show,
         resumes::pdf,
         resumes::delete,
+        stages::list,
+        stages::add,
+        stages::update,
+        stages::reorder,
+        stages::remove,
+        timeline::list_events,
+        timeline::add_entry,
     ),
     components(schemas(
         Health,
@@ -50,6 +59,14 @@ use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
         NewApplication,
         ApplicationInput,
         StatusChange,
+        Stage,
+        NewStage,
+        StageChange,
+        StageOrder,
+        ApplicationEvent,
+        EventKind,
+        NewEntry,
+        EntryKind,
         ValidationErrors,
         FieldError,
         ResumeVersion,

@@ -241,6 +241,124 @@
         }
       }
     },
+    "/applications/{id}/events": {
+      "get": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "An application's timeline, newest first.",
+        "operationId": "list_application_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every event of the application, newest `created_at` first, ties by `id` descending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApplicationEvent"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "500": {
+            "description": "The timeline could not be read"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Adds a note, or rejection feedback for a rejected application, to the timeline.",
+        "operationId": "add_application_entry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The stored event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationEvent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route, or `kind` is unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "`body` is blank or too long, or `kind` is `rejection_feedback` and the application isn't rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The entry could not be stored"
+          }
+        }
+      }
+    },
     "/applications/{id}/resume": {
       "put": {
         "tags": [
@@ -316,12 +434,342 @@
         }
       }
     },
+    "/applications/{id}/stage-order": {
+      "put": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Puts an application's stages in a new order. Records no event.",
+        "operationId": "reorder_application_stages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StageOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every stage of the application, in the new order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Stage"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "`stage_ids` is not exactly the application's stage ids, each once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The order could not be stored"
+          }
+        }
+      }
+    },
+    "/applications/{id}/stages": {
+      "get": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "An application's stages, in order.",
+        "operationId": "list_application_stages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every stage of the application, by `position`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Stage"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "500": {
+            "description": "The stages could not be read"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Appends a stage and records `stage_added`.",
+        "operationId": "add_application_stage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewStage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Every stage of the application, by `position`, the new one last",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Stage"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "`name` is blank or too long, or the application already has 50 stages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stage could not be stored"
+          }
+        }
+      }
+    },
+    "/applications/{id}/stages/{stage_id}": {
+      "put": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Completes or reopens a stage, recording `stage_completed` or `stage_reopened` when that\nchanges anything.",
+        "operationId": "update_application_stage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "stage_id",
+            "in": "path",
+            "description": "The stage's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StageChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every stage of the application, by `position`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Stage"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id, or it has no stage with this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "500": {
+            "description": "The stage could not be stored"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Removes a stage, closes the gap in positions and records `stage_removed`.",
+        "operationId": "remove_application_stage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "stage_id",
+            "in": "path",
+            "description": "The stage's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The remaining stages of the application, by `position`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Stage"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id, or it has no stage with this id"
+          },
+          "500": {
+            "description": "The stage could not be removed"
+          }
+        }
+      }
+    },
     "/applications/{id}/status": {
       "put": {
         "tags": [
           "applications"
         ],
-        "summary": "Sets an application's status. The single place status changes: `status_changed_at`\nand `updated_at` move only when the status differs, so setting the same status is a\nno-op that returns the row unchanged.",
+        "summary": "Sets an application's status. The single place status changes: when the status\ndiffers, `status_changed_at` and `updated_at` move and a `status_changed` event is\nwritten. Non-blank `feedback` (only with `rejected`) also writes a `rejection_feedback`\nevent and moves `updated_at`, even if the application was already rejected. The same\nstatus without feedback is a no-op that returns the row unchanged.",
         "operationId": "set_application_status",
         "parameters": [
           {
@@ -374,6 +822,16 @@
           },
           "415": {
             "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "`feedback` is too long, or given with a status other than `rejected`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
           },
           "500": {
             "description": "The status could not be stored"
@@ -984,6 +1442,73 @@
           }
         }
       },
+      "ApplicationEvent": {
+        "type": "object",
+        "description": "One `application_events` row. Which of the optional fields are set depends on `kind`.",
+        "required": [
+          "id",
+          "application_id",
+          "kind",
+          "from_status",
+          "to_status",
+          "stage_name",
+          "body",
+          "created_at"
+        ],
+        "properties": {
+          "application_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The text of a `note` or `rejection_feedback`."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "from_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApplicationStatus",
+                "description": "Set for `status_changed`."
+              }
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EventKind"
+          },
+          "stage_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The stage's name when the event was written, for the `stage_*` kinds."
+          },
+          "to_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApplicationStatus",
+                "description": "Set for `status_changed` and (except for backfilled rows) `created`."
+              }
+            ]
+          }
+        }
+      },
       "ApplicationInput": {
         "type": "object",
         "description": "The `PUT /applications/{id}` body: every text field, replacing the stored ones. An\nomitted optional field is cleared. Unknown keys, `status` included, are ignored.",
@@ -1050,6 +1575,14 @@
           "disconnected",
           "connected",
           "reconnect_required"
+        ]
+      },
+      "EntryKind": {
+        "type": "string",
+        "description": "The kinds of entry the user writes directly.",
+        "enum": [
+          "note",
+          "rejection_feedback"
         ]
       },
       "Event": {
@@ -1231,6 +1764,20 @@
           }
         ],
         "description": "One event on the bus. It serializes with its name in `\"type\"`."
+      },
+      "EventKind": {
+        "type": "string",
+        "description": "What an event records.",
+        "enum": [
+          "created",
+          "status_changed",
+          "stage_added",
+          "stage_completed",
+          "stage_reopened",
+          "stage_removed",
+          "note",
+          "rejection_feedback"
+        ]
       },
       "FieldError": {
         "type": "object",
@@ -1439,6 +1986,36 @@
           }
         }
       },
+      "NewEntry": {
+        "type": "object",
+        "description": "The `POST /applications/{id}/events` body.",
+        "required": [
+          "kind",
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Required; trimmed, at most 20,000 characters."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EntryKind"
+          }
+        }
+      },
+      "NewStage": {
+        "type": "object",
+        "description": "The `POST /applications/{id}/stages` body.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Required; trimmed, at most 200 characters."
+          }
+        }
+      },
       "ResumeLink": {
         "type": "object",
         "description": "The `PUT /applications/{id}/resume` body. `null` clears the link.",
@@ -1527,6 +2104,78 @@
         ],
         "description": "One resume version with its extracted text: the `GET /resumes/{id}` body."
       },
+      "Stage": {
+        "type": "object",
+        "description": "One `application_stages` row.",
+        "required": [
+          "id",
+          "application_id",
+          "name",
+          "position",
+          "completed_at",
+          "created_at"
+        ],
+        "properties": {
+          "application_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the stage was completed; null while it is open. Always serialized."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "description": "0 for the first stage, counting up without gaps."
+          }
+        }
+      },
+      "StageChange": {
+        "type": "object",
+        "description": "The `PUT /applications/{id}/stages/{stage_id}` body.",
+        "required": [
+          "completed"
+        ],
+        "properties": {
+          "completed": {
+            "type": "boolean",
+            "description": "`true` completes the stage, `false` reopens it."
+          }
+        }
+      },
+      "StageOrder": {
+        "type": "object",
+        "description": "The `PUT /applications/{id}/stage-order` body.",
+        "required": [
+          "stage_ids"
+        ],
+        "properties": {
+          "stage_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Every stage id of the application, each once, in the new order."
+          }
+        }
+      },
       "StatusChange": {
         "type": "object",
         "description": "The `PUT /applications/{id}/status` body.",
@@ -1534,6 +2183,13 @@
           "status"
         ],
         "properties": {
+          "feedback": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Rejection feedback, recorded as a `rejection_feedback` event. Allowed only with\n`rejected`; blank means none. At most 20,000 characters."
+          },
           "status": {
             "$ref": "#/components/schemas/ApplicationStatus"
           }

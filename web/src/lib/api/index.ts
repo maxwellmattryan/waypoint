@@ -3,9 +3,12 @@ export type {
 	ApiClient,
 	ApiClientOptions,
 	Application,
+	ApplicationEvent,
 	ApplicationInput,
 	ApplicationStatus,
+	EntryKind,
 	Event,
+	EventKind,
 	FieldError,
 	GoogleStatus,
 	Health,
@@ -14,6 +17,7 @@ export type {
 	ResumeLink,
 	ResumeVersion,
 	ResumeVersionDetail,
+	Stage,
 	ValidationErrors
 } from './client';
 export { startTestPrompt } from './dev';

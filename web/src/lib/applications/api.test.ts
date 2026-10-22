@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createApiClient, type Application } from '#lib/api';
+import { createApiClient, type Application, type ApplicationEvent, type Stage } from '#lib/api';
 import {
+	addEntry,
+	addStage,
 	createApplication,
 	deleteApplication,
 	getApplication,
 	listApplications,
 	setApplicationResume,
+	listEvents,
+	listStages,
+	removeStage,
+	reorderStages,
 	setApplicationStatus,
+	setStageCompleted,
 	updateApplication,
 	type Result
 } from './api';
@@ -25,6 +32,28 @@ const application: Application = {
 	created_at: '2026-10-22T00:00:00Z',
 	updated_at: '2026-10-22T00:00:00Z',
 	resume_version_id: null
+};
+
+const stages: Stage[] = [
+	{
+		id: 7,
+		application_id: 3,
+		name: 'Onsite',
+		position: 0,
+		completed_at: null,
+		created_at: '2026-10-22T00:00:00Z'
+	}
+];
+
+const note: ApplicationEvent = {
+	id: 9,
+	application_id: 3,
+	kind: 'note',
+	from_status: null,
+	to_status: null,
+	stage_name: null,
+	body: 'Called back',
+	created_at: '2026-10-22T00:00:00Z'
 };
 
 function json(body: unknown, status = 200) {
@@ -82,7 +111,12 @@ const calls: {
 	},
 	{
 		name: 'create',
-		call: (c) => createApplication(c, { company: 'Acme', title: 'Engineer', status: 'applied' }),
+		call: (c) =>
+			createApplication(c, {
+				company: 'Acme',
+				title: 'Engineer',
+				status: 'applied'
+			}),
 		ok: () => json(application, 201),
 		data: application,
 		method: 'POST',
@@ -91,7 +125,12 @@ const calls: {
 	},
 	{
 		name: 'update',
-		call: (c) => updateApplication(c, 3, { company: 'Acme', title: 'Staff', location: null }),
+		call: (c) =>
+			updateApplication(c, 3, {
+				company: 'Acme',
+				title: 'Staff',
+				location: null
+			}),
 		ok: () => json(application),
 		data: application,
 		method: 'PUT',
@@ -126,12 +165,81 @@ const calls: {
 		body: { resume_version_id: null }
 	},
 	{
+		name: 'set status with feedback',
+		call: (c) => setApplicationStatus(c, 3, 'rejected', 'Too junior'),
+		ok: () => json(application),
+		data: application,
+		method: 'PUT',
+		url: 'http://api.test/applications/3/status',
+		body: { status: 'rejected', feedback: 'Too junior' }
+	},
+	{
 		name: 'delete',
 		call: (c) => deleteApplication(c, 3),
 		ok: () => new Response(null, { status: 204 }),
 		data: undefined,
 		method: 'DELETE',
 		url: 'http://api.test/applications/3'
+	},
+	{
+		name: 'list stages',
+		call: (c) => listStages(c, 3),
+		ok: () => json(stages),
+		data: stages,
+		method: 'GET',
+		url: 'http://api.test/applications/3/stages'
+	},
+	{
+		name: 'add stage',
+		call: (c) => addStage(c, 3, 'Onsite'),
+		ok: () => json(stages, 201),
+		data: stages,
+		method: 'POST',
+		url: 'http://api.test/applications/3/stages',
+		body: { name: 'Onsite' }
+	},
+	{
+		name: 'complete stage',
+		call: (c) => setStageCompleted(c, 3, 7, true),
+		ok: () => json(stages),
+		data: stages,
+		method: 'PUT',
+		url: 'http://api.test/applications/3/stages/7',
+		body: { completed: true }
+	},
+	{
+		name: 'reorder stages',
+		call: (c) => reorderStages(c, 3, [8, 7]),
+		ok: () => json(stages),
+		data: stages,
+		method: 'PUT',
+		url: 'http://api.test/applications/3/stage-order',
+		body: { stage_ids: [8, 7] }
+	},
+	{
+		name: 'remove stage',
+		call: (c) => removeStage(c, 3, 7),
+		ok: () => json(stages),
+		data: stages,
+		method: 'DELETE',
+		url: 'http://api.test/applications/3/stages/7'
+	},
+	{
+		name: 'list events',
+		call: (c) => listEvents(c, 3),
+		ok: () => json([note]),
+		data: [note],
+		method: 'GET',
+		url: 'http://api.test/applications/3/events'
+	},
+	{
+		name: 'add entry',
+		call: (c) => addEntry(c, 3, 'note', 'Called back'),
+		ok: () => json(note, 201),
+		data: note,
+		method: 'POST',
+		url: 'http://api.test/applications/3/events',
+		body: { kind: 'note', body: 'Called back' }
 	}
 ];
 
@@ -172,5 +280,11 @@ describe('applications api', () => {
 		expect(await createApplication(client, { company: 'Acme', title: 'Engineer' })).toEqual({
 			kind: 'failed'
 		});
+		for (const call of [
+			() => addStage(client, 3, 'Onsite'),
+			() => addEntry(client, 3, 'note', 'x')
+		]) {
+			expect(await call()).toEqual({ kind: 'failed' });
+		}
 	});
 });

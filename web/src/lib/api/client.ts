@@ -28,6 +28,14 @@ export type ResumeVersionDetail = components['schemas']['ResumeVersionDetail'];
 export type ResumeLink = components['schemas']['ResumeLink'];
 /** One failing field in {@link ValidationErrors}. */
 export type FieldError = components['schemas']['FieldError'];
+/** One interview stage of an application, as every stage route returns it. */
+export type Stage = components['schemas']['Stage'];
+/** One entry in an application's timeline. */
+export type ApplicationEvent = components['schemas']['ApplicationEvent'];
+/** What a timeline entry records. */
+export type EventKind = components['schemas']['EventKind'];
+/** The kinds of timeline entry the user writes directly. */
+export type EntryKind = components['schemas']['EntryKind'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 

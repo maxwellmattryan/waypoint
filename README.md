@@ -47,15 +47,24 @@ The Applications page (`/applications`) lists every job application you're track
 
 An application has a company and a title (both required) and optional free-text fields: job posting URL, location, compensation (e.g. "$180k–$210k + equity"), source (e.g. "Referral") and notes. Its status is one of Sourced (the default), Applied, Interviewing, Offer and Rejected. The API trims every field and stores a blank optional field as `null`. Company, title, location, compensation and source are limited to 200 characters, the URL to 2048 and notes to 20,000, and the URL must be an absolute `http` or `https` URL.
 
+Each application also has its own interview **stages** (e.g. Recruiter screen, Onsite): on the detail page you add them, tick them off, move them up and down and remove them. A stage name is limited to 200 characters and an application to 50 stages. The **timeline** below them is an append-only log of what happened when: the application being added, every status change, every stage added, completed, reopened or removed, and the notes you add there (up to 20,000 characters). Choosing **Rejected** on the detail page asks for optional **rejection feedback** (what the company said) and records it in the timeline; once an application is rejected you can add more feedback later. Every timeline write also moves the application to the top of the list.
+
 | Route | Does |
 |---|---|
 | `GET /applications` | Lists every application, newest `updated_at` first |
 | `POST /applications` | Adds one (`company`, `title`, optional fields and `status`): 201 |
 | `GET /applications/<id>` | Reads one |
 | `PUT /applications/<id>` | Replaces the text fields; an omitted optional field is cleared and the status is left alone |
-| `PUT /applications/<id>/status` | Sets the status (`{"status": "applied"}`); `status_changed_at` moves only when it changes |
+| `PUT /applications/<id>/status` | Sets the status (`{"status": "applied"}`); `status_changed_at` moves only when it changes. With `rejected`, an optional `feedback` is also recorded as rejection feedback |
 | `PUT /applications/<id>/resume` | Links the [resume version](#resumes) sent with it (`{"resume_version_id": 3}`), or clears it with `null`; an unknown version is a 422 |
-| `DELETE /applications/<id>` | Deletes one permanently: 204 |
+| `DELETE /applications/<id>` | Deletes one permanently, with its stages and timeline: 204 |
+| `GET /applications/<id>/stages` | Lists its stages in order |
+| `POST /applications/<id>/stages` | Appends a stage (`{"name": "Onsite"}`): 201 with the whole list |
+| `PUT /applications/<id>/stages/<stage_id>` | Completes or reopens a stage (`{"completed": true}`); returns the whole list |
+| `PUT /applications/<id>/stage-order` | Reorders the stages (`{"stage_ids": [3, 1, 2]}`, every stage once); returns the whole list |
+| `DELETE /applications/<id>/stages/<stage_id>` | Removes a stage; later stages move up; returns the remaining list |
+| `GET /applications/<id>/events` | Lists its timeline, newest first |
+| `POST /applications/<id>/events` | Adds a note (`{"kind": "note", "body": "…"}`) or, for a rejected application, rejection feedback (`"kind": "rejection_feedback"`): 201 |
 
 Every application carries `resume_version_id` (`null` until set). Only `PUT /applications/<id>/resume` changes it, and `updated_at` moves only when the link changes. The detail page's **Resume** section picks the version from a "Resume sent" menu and links to it.
 

@@ -6,23 +6,37 @@
 	import {
 		createApiClient,
 		type Application,
+		type ApplicationEvent,
 		type ApplicationStatus,
-		type ResumeVersion
+		type ResumeVersion,
+		type Stage
 	} from '#lib/api';
 	import {
+		addEntry,
+		addStage,
 		deleteApplication,
 		getApplication,
 		setApplicationResume,
+		listEvents,
+		listStages,
+		removeStage,
+		reorderStages,
 		setApplicationStatus,
-		updateApplication
+		setStageCompleted,
+		updateApplication,
+		type Result
 	} from '#lib/applications/api.js';
 	import { listResumes } from '#lib/resumes/api.js';
 	import ResumeSelect from '#lib/components/resumes/ResumeSelect.svelte';
 	import { formatDate, isWebUrl } from '#lib/applications/format.js';
 	import { isStatus, statusLabel } from '#lib/applications/statuses.js';
 	import ApplicationFormDialog from '#lib/components/applications/ApplicationFormDialog.svelte';
+	import NoteComposer from '#lib/components/applications/NoteComposer.svelte';
+	import RejectionDialog from '#lib/components/applications/RejectionDialog.svelte';
+	import StageList from '#lib/components/applications/StageList.svelte';
 	import StatusBadge from '#lib/components/applications/StatusBadge.svelte';
 	import StatusSelect from '#lib/components/applications/StatusSelect.svelte';
+	import Timeline from '#lib/components/applications/Timeline.svelte';
 	import { Button, Card, Dialog, EmptyState, Link, Skeleton, toast } from '#lib/components/ui';
 	import { motionDuration } from '#lib/motion.js';
 
@@ -31,6 +45,9 @@
 		| { kind: 'not-found' }
 		| { kind: 'error' }
 		| { kind: 'loaded'; application: Application };
+
+	/** A card's list: stages or timeline events, loaded on their own. */
+	type List<T> = { kind: 'loading' } | { kind: 'error' } | { kind: 'loaded'; items: T[] };
 
 	const client = createApiClient();
 	const listHref = resolve('/applications');
@@ -44,6 +61,11 @@
 	let editing = $state(false);
 	let confirmingDelete = $state(false);
 	let deleting = $state(false);
+	let stages = $state<List<Stage>>({ kind: 'loading' });
+	let stagesBusy = $state(false);
+	let events = $state<List<ApplicationEvent>>({ kind: 'loading' });
+	let rejecting = $state(false);
+	let rejectionMode = $state<'status' | 'feedback-only'>('status');
 
 	/** Every resume version for the Resume section; its failure doesn't block the page. */
 	let resumes = $state<
@@ -90,10 +112,32 @@
 			return;
 		}
 		view = { kind: 'loading' };
+		void loadStages(target);
+		void loadEvents(target);
 		const result = await getApplication(client, target);
 		if (target !== id) return;
 		if (result.kind === 'ok') show(result.data);
 		else view = { kind: result.kind === 'not-found' ? 'not-found' : 'error' };
+	}
+
+	async function loadStages(target: number) {
+		stages = { kind: 'loading' };
+		const result = await listStages(client, target);
+		if (target !== id) return;
+		stages = result.kind === 'ok' ? { kind: 'loaded', items: result.data } : { kind: 'error' };
+	}
+
+	async function loadEvents(target: number) {
+		events = { kind: 'loading' };
+		await refreshEvents(target);
+	}
+
+	/** Re-reads the timeline after a write. A failed refresh keeps the list already shown. */
+	async function refreshEvents(target: number) {
+		const result = await listEvents(client, target);
+		if (target !== id) return;
+		if (result.kind === 'ok') events = { kind: 'loaded', items: result.data };
+		else if (events.kind !== 'loaded') events = { kind: 'error' };
 	}
 
 	$effect(() => {
@@ -103,16 +147,87 @@
 	async function changeStatus(application: Application, next: ApplicationStatus) {
 		const previous = application.status;
 		if (next === previous) return;
+		if (next === 'rejected') {
+			// Sent from the dialog, with the feedback; cancelling puts the Select back.
+			rejectionMode = 'status';
+			rejecting = true;
+			return;
+		}
 		savingStatus = true;
 		const result = await setApplicationStatus(client, application.id, next);
 		savingStatus = false;
 		if (result.kind === 'ok') {
 			show(result.data);
 			toast.success(`Status set to ${statusLabel[result.data.status]}`);
+			void refreshEvents(application.id);
 		} else {
 			status = previous;
 			toast.error("Couldn't change the status");
 		}
+	}
+
+	async function reject(application: Application, feedback: string): Promise<boolean> {
+		if (rejectionMode === 'feedback-only') {
+			const result = await addEntry(client, application.id, 'rejection_feedback', feedback);
+			if (result.kind !== 'ok') {
+				toast.error("Couldn't save the feedback");
+				return false;
+			}
+			toast.success('Feedback saved');
+		} else {
+			savingStatus = true;
+			const result = await setApplicationStatus(
+				client,
+				application.id,
+				'rejected',
+				feedback || undefined
+			);
+			savingStatus = false;
+			if (result.kind !== 'ok') {
+				toast.error("Couldn't change the status");
+				return false;
+			}
+			show(result.data);
+			toast.success(`Status set to ${statusLabel[result.data.status]}`);
+		}
+		void refreshEvents(application.id);
+		return true;
+	}
+
+	/** Runs one stage write; on success shows the list the server returned and refreshes the timeline. */
+	async function writeStages(
+		application: Application,
+		send: () => Promise<Result<Stage[]>>
+	): Promise<boolean> {
+		stagesBusy = true;
+		const result = await send();
+		stagesBusy = false;
+		if (result.kind !== 'ok') {
+			toast.error("Couldn't update the stages");
+			return false;
+		}
+		stages = { kind: 'loaded', items: result.data };
+		void refreshEvents(application.id);
+		return true;
+	}
+
+	function moveStage(application: Application, list: Stage[], stage: Stage, delta: -1 | 1) {
+		const ids = list.map((s) => s.id);
+		const from = ids.indexOf(stage.id);
+		const to = from + delta;
+		if (from < 0 || to < 0 || to >= ids.length) return;
+		[ids[from], ids[to]] = [ids[to], ids[from]];
+		void writeStages(application, () => reorderStages(client, application.id, ids));
+	}
+
+	async function addNote(application: Application, body: string): Promise<boolean> {
+		const result = await addEntry(client, application.id, 'note', body);
+		if (result.kind !== 'ok') {
+			toast.error("Couldn't add the note");
+			return false;
+		}
+		void refreshEvents(application.id);
+		return true;
 	}
 
 	async function remove(application: Application) {
@@ -277,7 +392,83 @@
 					</section>
 				</div>
 			</Card>
+
+			{#snippet loadError(message: string, retry: () => void)}
+				<div class="flex flex-wrap items-center gap-4" in:fade={{ duration: motionDuration('base') }}>
+					<p class="text-sm text-danger">{message}</p>
+					<Button variant="secondary" size="sm" onclick={retry}>Try again</Button>
+				</div>
+			{/snippet}
+
+			{#snippet skeletonRows(label: string)}
+				<div class="flex flex-col gap-2" aria-busy="true" aria-label={label}>
+					<Skeleton class="h-8" />
+					<Skeleton class="h-8" />
+					<Skeleton class="h-8 w-2/3" />
+				</div>
+			{/snippet}
+
+			<Card>
+				<section class="flex flex-col gap-4" aria-labelledby="stages-heading">
+					<h2 id="stages-heading" class="text-sm font-semibold text-fg">Stages</h2>
+					{#if stages.kind === 'loading'}
+						{@render skeletonRows('Loading stages')}
+					{:else if stages.kind === 'error'}
+						{@render loadError("Couldn't load the stages", () => loadStages(application.id))}
+					{:else}
+						{@const list = stages.items}
+						<StageList
+							stages={list}
+							busy={stagesBusy}
+							onadd={(name) => writeStages(application, () => addStage(client, application.id, name))}
+							ontoggle={(stage, completed) =>
+								writeStages(application, () =>
+									setStageCompleted(client, application.id, stage.id, completed)
+								)}
+							onmove={(stage, delta) => moveStage(application, list, stage, delta)}
+							onremove={(stage) =>
+								void writeStages(application, () => removeStage(client, application.id, stage.id))}
+						/>
+					{/if}
+				</section>
+			</Card>
+
+			<Card>
+				<section class="flex flex-col gap-4" aria-labelledby="timeline-heading">
+					<h2 id="timeline-heading" class="text-sm font-semibold text-fg">Timeline</h2>
+					<NoteComposer send={(body) => addNote(application, body)}>
+						{#snippet actions()}
+							{#if application.status === 'rejected'}
+								<Button
+									variant="secondary"
+									onclick={() => {
+										rejectionMode = 'feedback-only';
+										rejecting = true;
+									}}
+								>
+									Add rejection feedback
+								</Button>
+							{/if}
+						{/snippet}
+					</NoteComposer>
+					{#if events.kind === 'loading'}
+						{@render skeletonRows('Loading timeline')}
+					{:else if events.kind === 'error'}
+						{@render loadError("Couldn't load the timeline", () => loadEvents(application.id))}
+					{:else}
+						<Timeline events={events.items} />
+					{/if}
+				</section>
+			</Card>
 		</div>
+
+		<RejectionDialog
+			bind:open={rejecting}
+			mode={rejectionMode}
+			description="{application.company} · {application.title}"
+			submit={(feedback) => reject(application, feedback)}
+			oncancel={() => (status = application.status)}
+		/>
 
 		<ApplicationFormDialog
 			bind:open={editing}
