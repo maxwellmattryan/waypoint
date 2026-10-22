@@ -1,0 +1,362 @@
+# Forge configuration. Every key is documented in docs/CONFIG.md of the Forge plugin.
+# Re-run `/forge init` to change answers interactively, or edit this file directly.
+schemaVersion: 29
+project:
+  name: Waypoint
+  description: "Personal job-search assistant: application tracking, resume versions, recruiter-email status updates, role sourcing and one-click application prep."
+  kinds:
+    - web-ui
+    - sveltekit
+    - rust
+    - postgres
+    - agents
+  instructions:
+    - AGENTS.md
+  notes: "Greenfield: SvelteKit (Svelte 5, TS, Tailwind) static SPA + Rust Rocket API with sqlx/PostgreSQL, local only. The plan is ROADMAP.md and the GitHub milestones. Model calls go only through `claude -p` (never --bare, never the Anthropic API/SDK)."
+git:
+  base: develop
+  remote: origin
+  branchPrefix: forge/
+worktrees:
+  root: ../{repo}.worktrees
+  copy: []
+  setup: []
+  cleanup: on-merge
+  cargo:
+    sharedTarget: true
+    targetDir: null
+  generated: []
+  generatedBy: build
+commands:
+  setup: null
+  build: null
+  test: null
+  lint: null
+  format: null
+  typecheck: null
+  dev: null
+  e2e: null
+verify:
+  - build
+  - lint
+  - test
+verifyE2e:
+  when: ui
+  paths:
+    - "*.html"
+    - "*.css"
+    - "*.scss"
+    - "*.sass"
+    - "*.less"
+    - "*.svelte"
+    - "*.vue"
+    - "*.jsx"
+    - "*.tsx"
+    - "*.astro"
+verifyIntegrity: warn
+verifySecrets: block
+ports:
+  base: 4100
+  span: 100
+runtime:
+  provider: anthropic
+  host: claude-code
+  maxParallelJobs: 3
+  diversity: false
+  effort: null
+  efforts:
+    planner: null
+    spec-writer: null
+    designer: null
+    builder: null
+    reviewer: null
+    approver: null
+    integrator: null
+    retro: null
+    judge: null
+    assistant: null
+  effortByComplexity:
+    low: null
+    medium: null
+    high: null
+  models:
+    orchestrator: inherit
+    planner: opus
+    spec-writer: opus
+    designer: sonnet
+    builder: opus
+    reviewer: sonnet
+    approver: sonnet
+    integrator: sonnet
+    retro: opus
+    judge: opus
+    verifier: haiku
+    assistant: sonnet
+  modelByComplexity:
+    low: null
+    medium: null
+    high: null
+  reworkModel: null
+tracker:
+  kind: github
+  local:
+    path: .forge/backlog.md
+  github:
+    repo: maxwellmattryan/waypoint
+    ready:
+      labels: []
+      excludeLabels: []
+      assignee: "@me"
+      milestone: null
+      projectStatus: null
+    claim:
+      assign: true
+    comments: collaborators
+    statusSync: labels
+    labels:
+      prefix: "forge:"
+    project:
+      config: .github/project-config.yml
+      owner: null
+      number: null
+      statusField: Status
+      statusMap: {}
+pipeline:
+  plan: auto
+  split: ask
+  specApproval: large
+  design: none
+  maxRounds: 3
+  maxTotalRounds: null
+  budget:
+    tokens: null
+    usd: null
+    minutes: null
+    changedLines: null
+    verifyRetries: 2
+review:
+  blockOn:
+    - blocker
+    - major
+  panel:
+    - name: code
+      always: true
+    - name: tests
+      always: true
+    - name: security
+      model: opus
+      when: OAuth, Gmail/Calendar access, secrets, agent tool handlers and approval gates, spawning the claude CLI, input handling, network, dependencies, file or process access
+    - name: docs
+      when: documentation and instruction-file changes
+      paths:
+        - "*.md"
+        - docs/**
+    - name: design
+      when: user-visible UI changes
+      paths:
+        - "*.svelte"
+        - "*.css"
+  onPrFeedback: changed
+  onRework: narrow
+approver:
+  alwaysEscalate:
+    - changes to CI/CD, deploy, release or infrastructure config
+    - database or data migrations
+    - new or upgraded dependencies
+    - public API or protocol breaking changes
+    - anything touching credentials, auth or permissions
+pr:
+  enabled: true
+  draft: false
+  closeIssue: true
+  labels: []
+  reviewers: []
+  conflicts: ask
+  updateStrategy: merge
+  integrationReview: code-only
+  maxCiReworks: 3
+merge:
+  auto: true
+  method: squash
+  autoWhen:
+    - any change the approver approves that no alwaysEscalate class or protected path covers
+aiAttribution: forbid
+release:
+  interim: local
+  versioning: null
+  mechanism: null
+  command: null
+  registry: null
+  cadence: null
+  publish: null
+resources: []
+components: []
+repos: []
+checkout: []
+backing: []
+secrets: {}
+downstream:
+  enabled: true
+  max: 5
+  skip: []
+infra:
+  mode: human
+  allowed: []
+  notes: null
+usage:
+  track: true
+  pricing: {}
+improve:
+  retroEvery: 10
+  maxLearnings: 30
+  experiments:
+    minJobs: 5
+    maxJobs: 10
+evals:
+  testPattern: null
+  recall:
+    paths:
+      - agents/
+      - reviewers/
+      - lib/brief.ts
+dashboard:
+  port: 7400
+daemon:
+  enabled: true
+  command: claude -p --input-format stream-json --output-format stream-json --verbose --plugin-dir {pluginRoot} {session} --permission-mode default --allowedTools {allowedTools}
+  allowedTools:
+    - Agent
+    - Skill
+    - Read
+    - Glob
+    - Grep
+    - Edit
+    - Write
+    - Bash(forge:*)
+    - Bash(git rev-parse:*)
+    - Bash(git merge --abort:*)
+    - Bash(git rebase --abort:*)
+    - Bash(gh pr view:*)
+    - Bash(gh pr list:*)
+    - Bash(gh pr checks:*)
+    - Bash(gh run view:*)
+  maxConcurrent: 3
+  idleStopMinutes: 30
+  turnTimeoutMinutes: 60
+  auth: subscription
+  jobBudget:
+    tokens: 600000000
+    usd: 150
+foreman:
+  enabled: false
+  decides:
+    - spec-approval
+    - split-approval
+    - escalation
+    - rounds-exhausted
+    - conflicts
+    - pr-feedback
+  reserved:
+    - credential
+    - credentials
+    - secret
+    - secrets
+    - token
+    - tokens
+    - password
+    - auth
+    - authentication
+    - authorization
+    - oauth
+    - permission
+    - permissions
+    - security
+    - CI
+    - CI/CD
+    - workflow
+    - workflows
+    - GitHub Actions
+    - payment
+    - payments
+    - PII
+    - crypto
+    - cryptography
+    - encryption
+    - gate:release
+  ship: propose
+policy:
+  protectedPaths:
+    - paths:
+        - .github/**
+        - CODEOWNERS
+        - .gitlab-ci.yml
+        - Jenkinsfile
+        - .circleci/**
+      action: escalate
+      reason: CI/CD and GitHub repository configuration
+    - paths:
+        - AGENTS.md
+        - .claude/**
+        - .mcp.json
+        - .forge/notes/**
+        - .forge/reviewers/**
+        - .forge/verifiers/**
+      action: escalate
+      reason: agent instructions and tooling config steer future agents
+    - paths:
+        - build.rs
+        - Cargo.lock
+        - package-lock.json
+        - pnpm-lock.yaml
+        - yarn.lock
+        - bun.lock
+        - bun.lockb
+      action: escalate
+      reason: build scripts and lockfiles change what runs and what ships
+    - paths:
+        - Dockerfile*
+        - "**/*.tf"
+        - docker-compose*.yml
+        - docker-compose*.yaml
+        - compose*.yml
+        - compose*.yaml
+      action: escalate
+      reason: infrastructure (Docker, Compose, Terraform)
+    - paths:
+        - "**/migrations/**"
+      action: escalate
+      reason: database migrations
+    - paths:
+        - "**/.env*"
+      action: escalate
+      reason: environment files can hold credentials
+    - paths:
+        - "**/*.pem"
+      action: refuse
+      reason: private keys and certificates are never committed by Forge
+    - paths:
+        - .forge/config.yml
+        - .forge/secrets-allow.txt
+        - .forge/trackers/**
+        - .forge/ci/**
+      action: refuse
+      reason: Forge's own policy changes only by a human on the base branch
+retention:
+  jobsDays: null
+  logsDays: null
+  logMaxBytes: null
+environments:
+  maxRunning: null
+outcomes:
+  windowDays: 14
+scoring:
+  sample: 0
+  model: null
+notify:
+  webhooks: []
+  command: null
+budget:
+  usdPerDay: null
+  usdPerMonth: null
+  tokensPerMonth: null
+  onExceeded: hold
