@@ -12,12 +12,26 @@ use crate::host::LocalHost;
 
 const DB_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Serialize)]
+/// The `GET /health` body.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Health {
+    /// `ok` or `degraded`.
     pub status: &'static str,
+    /// `ok` or `unavailable`.
     pub db: &'static str,
 }
 
+/// Reports whether the API can reach Postgres.
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "health",
+    responses(
+        (status = 200, description = "The API and its database are reachable", body = Health),
+        (status = 503, description = "The database check failed or timed out", body = Health),
+        (status = 403, description = "The `Host` header is not a local address"),
+    )
+)]
 #[rocket::get("/health")]
 pub async fn health(_host: LocalHost, pool: &State<PgPool>) -> (Status, Json<Health>) {
     let check = tokio::time::timeout(

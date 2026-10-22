@@ -25,11 +25,12 @@ use crate::host::LocalHost;
 pub const TEST_PROMPT: &str = "test_prompt";
 
 /// One `jobs` row. This is also the `GET /jobs/<id>` body; the payload is not echoed.
-#[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct Job {
     pub id: i64,
     pub kind: String,
     #[serde(skip)]
+    #[schema(ignore)]
     pub payload: Value,
     /// `queued`, `running`, `succeeded` or `failed`.
     pub status: String,
@@ -37,10 +38,16 @@ pub struct Job {
     pub max_attempts: i32,
     /// The earliest time the job may start.
     pub run_at: DateTime<Utc>,
+    // The `Option` fields are always serialized (as `null` when empty), so they are
+    // required in the schema.
+    #[schema(required = true)]
     pub last_error: Option<String>,
+    /// Any JSON value the job produced.
+    #[schema(required = true)]
     pub result: Option<Value>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[schema(required = true)]
     pub finished_at: Option<DateTime<Utc>>,
 }
 
@@ -260,6 +267,18 @@ fn millis(duration: Duration) -> i64 {
 }
 
 /// `GET /jobs/<id>`: one job's current state.
+#[utoipa::path(
+    get,
+    path = "/jobs/{id}",
+    tag = "jobs",
+    params(("id" = i64, Path, description = "The job's id")),
+    responses(
+        (status = 200, description = "The job's current state", body = Job),
+        (status = 403, description = "The `Host` header is not a local address"),
+        (status = 404, description = "No job has this id"),
+        (status = 500, description = "The job could not be read"),
+    )
+)]
 #[rocket::get("/jobs/<id>")]
 pub async fn show(_host: LocalHost, id: i64, pool: &State<PgPool>) -> Result<Json<Job>, Status> {
     match get(pool, id).await {
