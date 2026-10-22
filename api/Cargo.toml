@@ -1,0 +1,15 @@
+[package]
+name = "waypoint-api"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+dotenvy = "0.15"
+rocket = { version = "0.5.1", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "macros", "migrate"] }
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+serde_json = "1"
