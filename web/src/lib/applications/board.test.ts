@@ -13,6 +13,7 @@ function application(id: number, updated_at: string): Application {
 		comp: null,
 		source: null,
 		notes: null,
+		resume_version_id: null,
 		status: 'sourced',
 		status_changed_at: updated_at,
 		created_at: updated_at,

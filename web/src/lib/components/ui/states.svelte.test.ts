@@ -8,6 +8,7 @@ import {
 	Card,
 	Checkbox,
 	EmptyState,
+	FileInput,
 	IconButton,
 	Input,
 	Link,
@@ -126,6 +127,15 @@ const interactiveRows: Row[] = [
 		component: Checkbox,
 		props: { label: 'Remote' },
 		find: (c) => c.querySelector('input'),
+		pointer: true,
+		disabledProps: { disabled: true },
+		disabledClass: 'disabled:cursor-not-allowed'
+	},
+	{
+		name: 'FileInput',
+		component: FileInput,
+		props: { label: 'PDF file', accept: 'application/pdf,.pdf' },
+		find: (c) => c.querySelector('input[type="file"]'),
 		pointer: true,
 		disabledProps: { disabled: true },
 		disabledClass: 'disabled:cursor-not-allowed'

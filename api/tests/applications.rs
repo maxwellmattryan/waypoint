@@ -654,6 +654,19 @@ async fn mutations_publish_application_events(pool: PgPool) {
         assert_eq!(data["application"], moved);
         assert_eq!(data["application"]["status"], "applied");
 
+        let response = send(
+            &client,
+            Method::Put,
+            &format!("{path}/resume"),
+            &json!({"resume_version_id": null}),
+        )
+        .await;
+        assert_eq!(response.status(), Status::Ok);
+        let linked = json_body(response).await;
+        let (event, data) = next_event(&mut stream).await;
+        assert_eq!(event, "application.updated");
+        assert_eq!(data["application"], linked);
+
         let response = client.delete(path).header(host()).dispatch().await;
         assert_eq!(response.status(), Status::NoContent);
         let (event, data) = next_event(&mut stream).await;

@@ -15,6 +15,7 @@ function row(id: number, status: ApplicationStatus, overrides: Partial<Applicati
 		comp: null,
 		source: null,
 		notes: null,
+		resume_version_id: null,
 		status,
 		status_changed_at: '2026-10-22T00:00:00Z',
 		created_at: '2026-10-22T00:00:00Z',

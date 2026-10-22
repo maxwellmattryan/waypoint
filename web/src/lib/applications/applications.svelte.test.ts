@@ -14,6 +14,7 @@ function row(id: number, overrides: Partial<Application> = {}): Application {
 		comp: null,
 		source: null,
 		notes: null,
+		resume_version_id: null,
 		status: 'sourced',
 		status_changed_at: '2026-10-22T00:00:00Z',
 		created_at: '2026-10-22T00:00:00Z',
