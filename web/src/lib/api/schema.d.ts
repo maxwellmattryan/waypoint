@@ -445,6 +445,19 @@ export interface components {
             skipped: number;
             /** @enum {string} */
             type: "app.lagged";
+        } | {
+            application: components["schemas"]["Application"];
+            /** @enum {string} */
+            type: "application.created";
+        } | {
+            application: components["schemas"]["Application"];
+            /** @enum {string} */
+            type: "application.updated";
+        } | {
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            type: "application.deleted";
         };
         /**
          * @description What an event records.

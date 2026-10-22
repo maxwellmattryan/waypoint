@@ -1,6 +1,8 @@
 //! Job applications: one `applications` row per role the user is tracking, with CRUD
 //! routes, a status route and a resume-link route. Creating an application and changing its
 //! status also write to its timeline ([`timeline`]); its interview stages live in [`stages`].
+//! Each successful write publishes an `application.*` event on the [`EventBus`] once its
+//! write has committed; a refused or failed request publishes nothing.
 //!
 //! Input is normalised here and nowhere else: text is trimmed, a blank optional field
 //! becomes `null`, lengths are counted in characters and `url` must be an absolute http or
@@ -23,6 +25,7 @@ use sqlx::error::BoxDynError;
 use sqlx::postgres::{PgTypeInfo, PgValueRef};
 use sqlx::{Decode, PgPool, Postgres, Type};
 
+use crate::events::{Event, EventBus};
 use crate::host::{LocalHost, NotCrossSite};
 use crate::resumes::ResumeLink;
 use timeline::EventKind;
@@ -443,6 +446,7 @@ pub async fn create(
     _site: NotCrossSite,
     _json: JsonContent,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
     body: Result<Json<NewApplication>, json::Error<'_>>,
 ) -> Result<(Status, Json<Application>), ApiError> {
     let body = parsed(body)?;
@@ -490,6 +494,9 @@ pub async fn create(
     tx.commit()
         .await
         .map_err(internal("store an application"))?;
+    bus.publish(Event::ApplicationCreated {
+        application: application.clone(),
+    });
     Ok((Status::Created, Json(application)))
 }
 
@@ -548,10 +555,11 @@ pub async fn update(
     _json: JsonContent,
     id: i64,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
     body: Result<Json<ApplicationInput>, json::Error<'_>>,
 ) -> Result<Json<Application>, ApiError> {
     let fields = validate(&parsed(body)?).map_err(ApiError::Invalid)?;
-    sqlx::query_as(&format!(
+    let application: Application = sqlx::query_as(&format!(
         "UPDATE applications SET company = $2, title = $3, url = $4, location = $5, \
          comp = $6, source = $7, notes = $8, updated_at = now() \
          WHERE id = $1 RETURNING {COLUMNS}"
@@ -567,8 +575,11 @@ pub async fn update(
     .fetch_optional(pool.inner())
     .await
     .map_err(internal("update an application"))?
-    .map(Json)
-    .ok_or(ApiError::NotFound)
+    .ok_or(ApiError::NotFound)?;
+    bus.publish(Event::ApplicationUpdated {
+        application: application.clone(),
+    });
+    Ok(Json(application))
 }
 
 /// Sets an application's status. The single place status changes: when the status
@@ -600,6 +611,7 @@ pub async fn set_status(
     _json: JsonContent,
     id: i64,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
     body: Result<Json<StatusChange>, json::Error<'_>>,
 ) -> Result<Json<Application>, ApiError> {
     let StatusChange { status, feedback } = parsed(body)?;
@@ -658,14 +670,19 @@ pub async fn set_status(
         .await
         .map_err(internal("record rejection feedback"))?;
     }
-    let application = sqlx::query_as(&format!("SELECT {COLUMNS} FROM applications WHERE id = $1"))
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(internal("read an application"))?;
+    let application: Application =
+        sqlx::query_as(&format!("SELECT {COLUMNS} FROM applications WHERE id = $1"))
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(internal("read an application"))?;
     tx.commit()
         .await
         .map_err(internal("set an application's status"))?;
+    // Published even when the status didn't change: clients just apply the same row.
+    bus.publish(Event::ApplicationUpdated {
+        application: application.clone(),
+    });
     Ok(Json(application))
 }
 
@@ -695,10 +712,11 @@ pub async fn set_resume(
     _json: JsonContent,
     id: i64,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
     body: Result<Json<ResumeLink>, json::Error<'_>>,
 ) -> Result<Json<Application>, ApiError> {
     let ResumeLink { resume_version_id } = parsed(body)?;
-    sqlx::query_as(&format!(
+    let application: Application = sqlx::query_as(&format!(
         "UPDATE applications SET resume_version_id = $2, \
          updated_at = CASE WHEN resume_version_id IS NOT DISTINCT FROM $2 \
          THEN updated_at ELSE now() END \
@@ -720,8 +738,11 @@ pub async fn set_resume(
             internal("set an application's resume")(err)
         }
     })?
-    .map(Json)
-    .ok_or(ApiError::NotFound)
+    .ok_or(ApiError::NotFound)?;
+    bus.publish(Event::ApplicationUpdated {
+        application: application.clone(),
+    });
+    Ok(Json(application))
 }
 
 /// Deletes an application permanently.
@@ -744,6 +765,7 @@ pub async fn delete(
     _site: NotCrossSite,
     id: i64,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
 ) -> Result<Status, ApiError> {
     let done = sqlx::query("DELETE FROM applications WHERE id = $1")
         .bind(id)
@@ -753,6 +775,7 @@ pub async fn delete(
     if done.rows_affected() == 0 {
         Err(ApiError::NotFound)
     } else {
+        bus.publish(Event::ApplicationDeleted { id });
         Ok(Status::NoContent)
     }
 }

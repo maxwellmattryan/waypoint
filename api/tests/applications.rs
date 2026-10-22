@@ -1,5 +1,7 @@
 //! The applications routes: create, read, list, update, status change and delete, their
-//! validation and the guards on every mutating route.
+//! validation, the guards on every mutating route and the `application.*` events.
+
+mod common;
 
 use std::time::Duration;
 
@@ -7,7 +9,10 @@ use rocket::http::{ContentType, Header, Method, Status};
 use rocket::local::asynchronous::{Client, LocalResponse};
 use serde_json::{Value, json};
 use sqlx::PgPool;
+use tokio::io::BufReader;
 use waypoint_api::claude::ClaudeRunner;
+
+use common::next_message;
 
 fn host() -> Header<'static> {
     Header::new("Host", "127.0.0.1")
@@ -591,4 +596,128 @@ async fn guards_refuse_foreign_requests(pool: PgPool) {
         events_before,
         "nothing was recorded"
     );
+}
+
+/// Opens `GET /events` and reads past its `app.connected`.
+async fn open_events(client: &Client) -> BufReader<LocalResponse<'_>> {
+    let stream = client.get("/events").header(host()).dispatch().await;
+    assert_eq!(stream.status(), Status::Ok);
+    let mut stream = BufReader::new(stream);
+    let (event, _) = next_message(&mut stream).await;
+    assert_eq!(event, "app.connected");
+    stream
+}
+
+/// The next SSE message, checking that its `event:` field equals its `type`.
+async fn next_event(stream: &mut BufReader<LocalResponse<'_>>) -> (String, Value) {
+    let (event, data) = next_message(stream).await;
+    assert_eq!(data["type"], event.as_str(), "the SSE event is the type");
+    (event, data)
+}
+
+#[sqlx::test]
+async fn mutations_publish_application_events(pool: PgPool) {
+    let client = client(pool).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut stream = open_events(&client).await;
+
+        let created = create(&client, json!({"company": "Acme", "title": "Engineer"})).await;
+        let (event, data) = next_event(&mut stream).await;
+        assert_eq!(event, "application.created");
+        assert_eq!(data["application"], created);
+
+        let path = format!("/applications/{}", id(&created));
+        let response = send(
+            &client,
+            Method::Put,
+            &path,
+            &json!({"company": "Acme", "title": "Senior Engineer"}),
+        )
+        .await;
+        assert_eq!(response.status(), Status::Ok);
+        let updated = json_body(response).await;
+        let (event, data) = next_event(&mut stream).await;
+        assert_eq!(event, "application.updated");
+        assert_eq!(data["application"], updated);
+
+        let response = send(
+            &client,
+            Method::Put,
+            &format!("{path}/status"),
+            &json!({"status": "applied"}),
+        )
+        .await;
+        assert_eq!(response.status(), Status::Ok);
+        let moved = json_body(response).await;
+        let (event, data) = next_event(&mut stream).await;
+        assert_eq!(event, "application.updated");
+        assert_eq!(data["application"], moved);
+        assert_eq!(data["application"]["status"], "applied");
+
+        let response = send(
+            &client,
+            Method::Put,
+            &format!("{path}/resume"),
+            &json!({"resume_version_id": null}),
+        )
+        .await;
+        assert_eq!(response.status(), Status::Ok);
+        let linked = json_body(response).await;
+        let (event, data) = next_event(&mut stream).await;
+        assert_eq!(event, "application.updated");
+        assert_eq!(data["application"], linked);
+
+        let response = client.delete(path).header(host()).dispatch().await;
+        assert_eq!(response.status(), Status::NoContent);
+        let (event, data) = next_event(&mut stream).await;
+        assert_eq!(event, "application.deleted");
+        assert_eq!(
+            data,
+            json!({"type": "application.deleted", "id": id(&created)})
+        );
+
+        // Each mutation published exactly one event: the next one is this create's.
+        let other = create(&client, json!({"company": "Globex", "title": "Staff"})).await;
+        let (event, data) = next_event(&mut stream).await;
+        assert_eq!(event, "application.created");
+        assert_eq!(data["application"], other);
+    })
+    .await
+    .expect("every event arrives within 10s");
+}
+
+#[sqlx::test]
+async fn failed_mutations_publish_nothing(pool: PgPool) {
+    let client = client(pool).await;
+    let existing = create(&client, json!({"company": "Acme", "title": "Engineer"})).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut stream = open_events(&client).await;
+
+        let response = send(
+            &client,
+            Method::Put,
+            "/applications/999999/status",
+            &json!({"status": "offer"}),
+        )
+        .await;
+        assert_eq!(response.status(), Status::NotFound);
+
+        let response = send(&client, Method::Post, "/applications", &json!({})).await;
+        assert_eq!(response.status(), Status::UnprocessableEntity);
+
+        let response = client
+            .delete(format!("/applications/{}", id(&existing)))
+            .header(host())
+            .header(Header::new("Sec-Fetch-Site", "cross-site"))
+            .dispatch()
+            .await;
+        assert_eq!(response.status(), Status::Forbidden);
+
+        let created = create(&client, json!({"company": "Globex", "title": "Staff"})).await;
+        let (event, data) = next_event(&mut stream).await;
+        assert_eq!(event, "application.created");
+        assert_eq!(data["application"], created);
+    })
+    .await
+    .expect("the create's event arrives within 10s");
 }

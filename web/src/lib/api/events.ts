@@ -15,7 +15,10 @@ export const EVENT_TYPES = [
 	'job.succeeded',
 	'job.failed',
 	'queue.paused',
-	'queue.resumed'
+	'queue.resumed',
+	'application.created',
+	'application.updated',
+	'application.deleted'
 ] as const satisfies readonly Event['type'][];
 
 export interface EventHandlers {

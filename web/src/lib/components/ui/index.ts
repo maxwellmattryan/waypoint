@@ -18,6 +18,12 @@ export { default as Drawer, type DrawerProps } from './Drawer.svelte';
 export { default as Tooltip, type TooltipProps,
 	type TooltipTriggerProps
 } from './Tooltip.svelte';
+export {
+	default as Menu,
+	type MenuProps,
+	type MenuItem,
+	type MenuTriggerProps
+} from './Menu.svelte';
 export { default as Toaster } from './Toaster.svelte';
 export { toast, type ToastItem, type ToastOptions } from './toast.svelte';
 export type {
@@ -26,6 +32,7 @@ export type {
 	ButtonVariant,
 	DialogSize,
 	DrawerSide,
+	MenuPlacement,
 	SkeletonShape,
 	ToastTone,
 	TooltipPlacement

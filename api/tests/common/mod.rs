@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rocket::{Build, Rocket};
+use serde_json::Value;
 use sqlx::PgPool;
 use tempfile::TempDir;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use waypoint_api::claude::ClaudeRunner;
 use waypoint_api::events::{Event, Subscriber};
 use waypoint_api::jobs;
@@ -92,4 +94,25 @@ pub async fn events(
     })
     .await;
     seen
+}
+
+/// The next SSE message as `(event, data)`, skipping heartbeat comments.
+pub async fn next_message(reader: &mut (impl AsyncBufRead + Unpin)) -> (String, Value) {
+    let mut event = None;
+    let mut data = None;
+    loop {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line).await.expect("read the stream");
+        assert!(read > 0, "the stream ended");
+        let line = line.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            if let (Some(event), Some(data)) = (event.take(), data.take()) {
+                return (event, data);
+            }
+        } else if let Some(name) = line.strip_prefix("event:") {
+            event = Some(name.trim().to_owned());
+        } else if let Some(json) = line.strip_prefix("data:") {
+            data = Some(serde_json::from_str(json.trim()).expect("data is JSON"));
+        }
+    }
 }

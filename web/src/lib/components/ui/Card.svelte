@@ -1,14 +1,20 @@
 <script lang="ts" module>
 	import type { HTMLAnchorAttributes, HTMLAttributes } from 'svelte/elements';
 
-	export type CardProps = HTMLAttributes<HTMLDivElement> &
-		Pick<HTMLAnchorAttributes, 'href' | 'target' | 'rel'>;
+	export type CardProps = Omit<HTMLAttributes<HTMLDivElement>, 'draggable'> &
+		Pick<HTMLAnchorAttributes, 'href' | 'target' | 'rel'> & {
+			/**
+			 * Makes the card a drag source with the grab cursor. Ignored when `href` is set:
+			 * a link card stays a link.
+			 */
+			draggable?: boolean;
+		};
 </script>
 
 <script lang="ts">
 	import { focusRing } from './styles';
 
-	let { href, class: className, children, ...rest }: CardProps = $props();
+	let { href, draggable = false, class: className, children, ...rest }: CardProps = $props();
 
 	const base = 'block rounded-lg border border-border bg-surface p-4 text-fg shadow-sm';
 </script>
@@ -31,7 +37,16 @@
 	</a>
 	<!-- eslint-enable svelte/no-navigation-without-resolve -->
 {:else}
-	<div class={[base, className]} {...rest}>
+	<!-- One element either way, so toggling `draggable` keeps the node (and its focus). -->
+	<div
+		draggable={draggable ? 'true' : undefined}
+		class={[
+			base,
+			draggable && 'cursor-grab transition-colors hover:border-border-strong active:cursor-grabbing',
+			className
+		]}
+		{...rest}
+	>
 		{@render children?.()}
 	</div>
 {/if}
