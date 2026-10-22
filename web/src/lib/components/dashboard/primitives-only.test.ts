@@ -2,9 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 // AGENTS.md invariants for screens: interactive elements come from the primitives (which bake in
 // cursor and state styles), and spacing stays on the 4px grid. Covers the app shell, the dashboard
-// cards and the root layout and page.
+// cards, the applications components and pages, and the root layout and page.
 const sources = import.meta.glob(
-	['../app/*.svelte', './*.svelte', '/src/routes/+layout.svelte', '/src/routes/+page.svelte'],
+	[
+		'../app/*.svelte',
+		'./*.svelte',
+		'../applications/*.svelte',
+		'/src/routes/+layout.svelte',
+		'/src/routes/+page.svelte',
+		'/src/routes/applications/**/*.svelte'
+	],
 	{ query: '?raw', import: 'default', eager: true }
 ) as Record<string, string>;
 
@@ -14,7 +21,7 @@ const rawInteractive = /<(button|a|input|select|textarea|dialog)[\s>]/g;
 const cursor = /\bcursor-/g;
 
 describe('primitives only', () => {
-	it('dashboard uses only primitives', () => {
+	it('screens use only primitives', () => {
 		const files = Object.keys(sources);
 		expect(files).toEqual(
 			expect.arrayContaining([
@@ -22,8 +29,15 @@ describe('primitives only', () => {
 				'/src/lib/components/dashboard/ClaudeCard.svelte',
 				'/src/lib/components/dashboard/GoogleCard.svelte',
 				'/src/lib/components/dashboard/SystemCard.svelte',
+				'/src/lib/components/applications/ApplicationForm.svelte',
+				'/src/lib/components/applications/ApplicationFormDialog.svelte',
+				'/src/lib/components/applications/ApplicationListItem.svelte',
+				'/src/lib/components/applications/StatusBadge.svelte',
+				'/src/lib/components/applications/StatusSelect.svelte',
 				'/src/routes/+layout.svelte',
-				'/src/routes/+page.svelte'
+				'/src/routes/+page.svelte',
+				'/src/routes/applications/+page.svelte',
+				'/src/routes/applications/[id]/+page.svelte'
 			])
 		);
 		const offenders = files.flatMap((file) =>

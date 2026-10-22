@@ -2,7 +2,6 @@
 	import ClaudeCard from '#lib/components/dashboard/ClaudeCard.svelte';
 	import GoogleCard from '#lib/components/dashboard/GoogleCard.svelte';
 	import SystemCard from '#lib/components/dashboard/SystemCard.svelte';
-	import { EmptyState } from '#lib/components/ui';
 	import { getDashboard } from '#lib/dashboard/dashboard.svelte.js';
 
 	const dashboard = getDashboard();
@@ -25,9 +24,4 @@
 			ontest={() => dashboard.runTest()}
 		/>
 	</div>
-
-	<EmptyState
-		title="No applications yet"
-		description="Application tracking arrives in the next milestone."
-	/>
 </div>

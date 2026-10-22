@@ -20,7 +20,11 @@ test('dashboard smoke: health, google, test claude', async ({ page }) => {
 	await expect(google.getByText('Not configured')).toBeVisible();
 	await expect(google.getByRole('button', { name: 'Connect Google' })).toBeDisabled();
 
-	await expect(page.getByText('No applications yet')).toBeVisible();
+	// The placeholder is gone; applications live on their own page now.
+	await expect(page.getByText('No applications yet')).toHaveCount(0);
+	await expect(
+		page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Applications' })
+	).toBeVisible();
 
 	// The job events arrive over SSE through the dev server's /api proxy; no reload.
 	const claude = page.getByRole('region', { name: 'Claude' });
