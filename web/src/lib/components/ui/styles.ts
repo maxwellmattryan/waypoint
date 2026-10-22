@@ -68,8 +68,11 @@ export const skeletonShapes = {
 
 export type SkeletonShape = keyof typeof skeletonShapes;
 
-/** Stacking order: overlays (Dialog, Drawer) sit under toasts and tooltips. */
-export const layers = { overlay: 'z-40', toast: 'z-50', tooltip: 'z-50' } as const;
+/**
+ * Stacking order: menus sit under overlays (Dialog, Drawer), which sit under toasts and
+ * tooltips. A Menu inside a Dialog stacks within the Dialog's own layer.
+ */
+export const layers = { menu: 'z-30', overlay: 'z-40', toast: 'z-50', tooltip: 'z-50' } as const;
 
 /** Surface for overlay panels and toasts. */
 export const overlaySurface = 'bg-surface border border-border rounded-lg shadow-lg';
@@ -104,3 +107,15 @@ export const tooltipPlacements = {
 } as const;
 
 export type TooltipPlacement = keyof typeof tooltipPlacements;
+
+/** Menu panel position under its trigger: aligned to the trigger's end or start edge. */
+export const menuPlacements = {
+	'bottom-end': 'top-full right-0 mt-1',
+	'bottom-start': 'top-full left-0 mt-1'
+} as const;
+
+export type MenuPlacement = keyof typeof menuPlacements;
+
+/** A Menu item: full-width row with the shared hover, active and disabled states. */
+export const menuItem =
+	'flex h-8 w-full items-center px-3 text-left text-sm whitespace-nowrap text-fg enabled:hover:bg-surface-raised enabled:active:bg-border';
