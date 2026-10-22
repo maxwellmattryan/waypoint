@@ -2,7 +2,10 @@
 # Stand-in for the `claude` CLI in tests. It records how it was called, then plays a mode.
 # Usage: fake-claude.sh <mode> <record_dir> <claude args...>
 #   <mode>.jsonl  print that fixture from this directory and exit 0
+#   slow          sleep 1s, then play success.jsonl
 #   hang          sleep until killed
+#   hang_tree     start a background `sleep` (its pid goes to <record_dir>/grandchild),
+#                 then sleep until killed
 #   exit1         write to stderr and exit 1 without a result
 #   garbage       print a line that is not JSON
 #   flood         print 17 MiB with no newline (more than the runner reads)
@@ -28,7 +31,16 @@ fi
 cat >"$record/stdin"
 
 case $mode in
+slow)
+	sleep 1
+	cat "$fixtures/success.jsonl"
+	;;
 hang) exec sleep 60 ;;
+hang_tree)
+	sleep 60 &
+	echo $! >"$record/grandchild"
+	exec sleep 60
+	;;
 exit1)
 	echo "fake claude: something broke" >&2
 	exit 1

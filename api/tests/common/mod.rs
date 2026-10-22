@@ -1,18 +1,26 @@
-//! Test helpers shared by the integration tests that drive the Claude runner.
+//! Test helpers shared by the integration tests that drive the Claude runner, the job
+//! queue and the HTTP API. Each test crate uses only some of them.
+#![allow(dead_code)]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use rocket::{Build, Rocket};
+use sqlx::PgPool;
 use tempfile::TempDir;
 use waypoint_api::claude::ClaudeRunner;
+use waypoint_api::events::{Event, Subscriber};
+use waypoint_api::jobs;
+
+/// The `Host` header every HTTP test sends; the API rejects requests without one.
+pub const HOST: &str = "127.0.0.1";
 
 /// A runner pointed at `fake-claude.sh` in one mode, with the directory the fake records
 /// its argv, cwd, cwd listing, env and stdin into.
 pub struct Fake {
     pub runner: ClaudeRunner,
-    #[allow(dead_code)]
     pub record: PathBuf,
     _dir: TempDir,
 }
@@ -40,4 +48,42 @@ pub fn fake(mode: &str, timeout: Duration) -> Fake {
         record,
         _dir: dir,
     }
+}
+
+/// The API with Rocket's default test config.
+pub fn app(pool: PgPool, runner: ClaudeRunner, config: jobs::Config) -> Rocket<Build> {
+    waypoint_api::rocket(rocket::Config::figment(), pool, runner, config)
+}
+
+/// Queue settings that keep tests fast: 50ms polls and retries, a 60s usage-limit pause.
+pub fn fast_config() -> jobs::Config {
+    jobs::Config {
+        concurrency: 2,
+        poll_interval: Duration::from_millis(50),
+        retry_base: Duration::from_millis(50),
+        retry_cap: Duration::from_secs(1),
+        usage_limit_pause: Duration::from_secs(60),
+        max_attempts: 3,
+    }
+}
+
+/// Collects events until `done` holds for the last one, or `timeout` passes. Returns
+/// everything received either way.
+pub async fn events(
+    subscriber: &mut Subscriber,
+    timeout: Duration,
+    mut done: impl FnMut(&Event) -> bool,
+) -> Vec<Event> {
+    let mut seen = Vec::new();
+    let _ = tokio::time::timeout(timeout, async {
+        while let Some(event) = subscriber.next().await {
+            let finished = done(&event);
+            seen.push(event);
+            if finished {
+                break;
+            }
+        }
+    })
+    .await;
+    seen
 }

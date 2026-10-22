@@ -27,7 +27,7 @@ docker compose down
 
 Waypoint calls Claude through your Claude subscription, not the API. Every call spawns the [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI (`claude -p`) in an empty temp directory with no tools and no saved session, and logs the model, tokens, duration and reported cost to the `claude_calls` table. Install the CLI and log in once with `claude` before using any model-backed feature.
 
-The runner removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and the `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY` switches from the CLI's environment, so nothing in your shell moves billing or traffic away from the subscription. It also withholds Waypoint's own settings (`DATABASE_URL`, `POSTGRES_*`, `WAYPOINT_*`). `WAYPOINT_CLAUDE_BIN` (default `claude` on `PATH`) and `WAYPOINT_CLAUDE_TIMEOUT_SECS` (default 300) are optional; see `.env.example`.
+The runner removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and the `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY` switches from the CLI's environment, so nothing in your shell moves billing or traffic away from the subscription. It also withholds Waypoint's own settings (`DATABASE_URL`, `POSTGRES_*`, `WAYPOINT_*`). `WAYPOINT_CLAUDE_BIN` (default `claude` on `PATH`) and `WAYPOINT_CLAUDE_TIMEOUT_SECS` (default 300) are optional; see `.env.example`. The CLI runs in its own process group, and when a call ends, times out or is cancelled the runner kills that whole group, so nothing the CLI started outlives the call.
 
 To check the round trip, start the app with `./scripts/dev.sh` and, in another terminal:
 
@@ -37,6 +37,30 @@ docker compose exec db psql -U waypoint -c 'select status, model, input_tokens, 
 ```
 
 The ping should answer `pong` with the model and token counts. `/dev/claude/ping` exists only in debug builds (`cargo run`); release builds don't serve it. It answers 403 without the `X-Waypoint-Dev: 1` header or when a browser sends it from another site, so a web page you visit can't spend your usage.
+
+The API only answers requests whose `Host` header is `127.0.0.1`, `localhost` or `[::1]` (any port), and returns 403 to everything else, so a site that re-resolves its own domain to `127.0.0.1` (DNS rebinding) can't reach it.
+
+## Jobs and live events
+
+Background work, including every model call, runs through a job queue in Postgres (the `jobs` table). An in-process worker runs at most `WAYPOINT_JOB_CONCURRENCY` jobs at once (default 2) and retries failures with exponential backoff (10s, doubling, up to 10 minutes; 3 attempts). When the Claude subscription's usage limit is hit, the job goes back in the queue without using up an attempt and the whole queue pauses for `WAYPOINT_JOB_USAGE_LIMIT_PAUSE_SECS` (default 900). Jobs left running when the API stopped are requeued on the next start.
+
+`GET /events` streams job and queue events as server-sent events (`job.queued`, `job.started`, `job.retrying`, `job.deferred`, `job.succeeded`, `job.failed`, `queue.paused`, `queue.resumed`), starting with `app.connected`. There is no replay, so a client that reconnects reads the current state from `GET /jobs/<id>`.
+
+To watch a test job, start the app with `./scripts/dev.sh`, then in one terminal:
+
+```sh
+curl -N -H 'Host: 127.0.0.1' http://127.0.0.1:8000/events
+```
+
+and in another:
+
+```sh
+curl -s -X POST -H 'X-Waypoint-Dev: 1' http://127.0.0.1:8000/dev/jobs/test-prompt   # {"job_id":1}
+curl -s http://127.0.0.1:8000/jobs/1                                                # result.text is "pong"
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.example' http://127.0.0.1:8000/health   # 403
+```
+
+The stream shows `job.queued`, `job.started` and `job.succeeded` for the job. Like the ping, `/dev/jobs/test-prompt` exists only in debug builds and needs the `X-Waypoint-Dev: 1` header.
 
 ## Checks and tests
 
