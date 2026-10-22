@@ -1,5 +1,6 @@
 //! Waypoint's HTTP API.
 
+pub mod applications;
 pub mod claude;
 pub mod config;
 pub mod crypto;
@@ -57,6 +58,12 @@ pub fn rocket(
             rocket::routes![
                 health::health,
                 events::events,
+                applications::list,
+                applications::create,
+                applications::show,
+                applications::update,
+                applications::set_status,
+                applications::delete,
                 jobs::show,
                 google::connect,
                 google::callback,

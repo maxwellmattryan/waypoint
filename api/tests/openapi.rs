@@ -168,11 +168,19 @@ fn document_matches_wire_shapes() {
         paths["/events"]["get"]["responses"]["200"]["content"]["text/event-stream"].is_object(),
         "/events streams text/event-stream"
     );
+    // openapi-typescript keys `operations` by operationId, so a duplicate silently gives one
+    // route another's types.
+    let mut operation_ids = BTreeSet::new();
     for (path, item) in paths.as_object().unwrap() {
         for (method, operation) in item.as_object().unwrap() {
             assert!(
                 operation["responses"]["403"].is_object(),
                 "{method} {path} documents 403"
+            );
+            let operation_id = operation["operationId"].as_str().expect("operationId");
+            assert!(
+                operation_ids.insert(operation_id.to_string()),
+                "{method} {path}: operationId {operation_id:?} is used twice; set operation_id"
             );
         }
     }
@@ -203,6 +211,64 @@ fn document_matches_wire_shapes() {
         property_names(&schemas["GoogleDisconnect"]),
         BTreeSet::from(["revoked".to_string()])
     );
+
+    let application = &schemas["Application"];
+    let fields: BTreeSet<String> = [
+        "id",
+        "company",
+        "title",
+        "url",
+        "location",
+        "comp",
+        "source",
+        "notes",
+        "status",
+        "status_changed_at",
+        "created_at",
+        "updated_at",
+    ]
+    .iter()
+    .map(|f| f.to_string())
+    .collect();
+    assert_eq!(property_names(application), fields, "Application fields");
+    let required: BTreeSet<String> = application["required"]
+        .as_array()
+        .expect("required")
+        .iter()
+        .map(|f| f.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(required, fields, "every Application field is always sent");
+    for nullable in ["url", "location", "comp", "source", "notes"] {
+        assert_eq!(
+            application["properties"][nullable]["type"],
+            serde_json::json!(["string", "null"]),
+            "{nullable} is a nullable string"
+        );
+    }
+    for timestamp in ["status_changed_at", "created_at", "updated_at"] {
+        assert_eq!(
+            application["properties"][timestamp]["format"], "date-time",
+            "{timestamp}"
+        );
+    }
+    assert_eq!(
+        schemas["ApplicationStatus"]["enum"],
+        serde_json::json!(["sourced", "applied", "interviewing", "offer", "rejected"])
+    );
+    for operation in [
+        &paths["/applications"]["get"],
+        &paths["/applications"]["post"],
+        &paths["/applications/{id}"]["get"],
+        &paths["/applications/{id}"]["put"],
+        &paths["/applications/{id}"]["delete"],
+        &paths["/applications/{id}/status"]["put"],
+    ] {
+        assert!(operation["responses"]["403"].is_object(), "{operation}");
+        assert_eq!(operation["tags"], serde_json::json!(["applications"]));
+    }
+    assert!(paths["/applications"]["post"]["responses"]["201"].is_object());
+    assert!(paths["/applications"]["post"]["responses"]["422"].is_object());
+    assert!(paths["/applications/{id}"]["delete"]["responses"]["204"].is_object());
 
     let google = &paths["/auth/google"];
     assert!(google["get"]["responses"]["200"].is_object());

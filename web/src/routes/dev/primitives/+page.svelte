@@ -10,6 +10,7 @@
 		IconButton,
 		Input,
 		Link,
+		NavLink,
 		Select,
 		Skeleton,
 		Tabs,
@@ -137,6 +138,15 @@
 			<Link href="https://github.com" external>External link</Link>
 			<Link href="#link" disabled>Disabled link</Link>
 		</p>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="navlink">
+		<h2 id="navlink" class="text-lg font-semibold text-fg">NavLink</h2>
+		<nav aria-label="NavLink states" class="flex flex-wrap items-center gap-1">
+			<NavLink href="#navlink" current>Current</NavLink>
+			<NavLink href="#navlink">Default</NavLink>
+			<NavLink href="#navlink" disabled>Disabled</NavLink>
+		</nav>
 	</section>
 
 	<section class="flex flex-col gap-4" aria-labelledby="fields">

@@ -10,6 +10,18 @@ export type Job = components['schemas']['Job'];
 export type Event = components['schemas']['Event'];
 /** The `GET /auth/google` body: whether Google is configured and connected. */
 export type GoogleStatus = components['schemas']['GoogleStatus'];
+/** One tracked job application, as every `/applications` route returns it. */
+export type Application = components['schemas']['Application'];
+/** Where an application is in the process. */
+export type ApplicationStatus = components['schemas']['ApplicationStatus'];
+/** The `POST /applications` body. */
+export type NewApplication = components['schemas']['NewApplication'];
+/** The `PUT /applications/{id}` body: the text fields, replacing the stored ones. */
+export type ApplicationInput = components['schemas']['ApplicationInput'];
+/** The 400 and 422 body of the applications routes. */
+export type ValidationErrors = components['schemas']['ValidationErrors'];
+/** One failing field in {@link ValidationErrors}. */
+export type FieldError = components['schemas']['FieldError'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 

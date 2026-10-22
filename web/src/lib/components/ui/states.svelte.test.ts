@@ -10,6 +10,7 @@ import {
 	IconButton,
 	Input,
 	Link,
+	NavLink,
 	Select,
 	Skeleton,
 	Tabs,
@@ -67,6 +68,24 @@ const interactiveRows: Row[] = [
 		find: (c) => c.querySelector('a'),
 		pointer: true,
 		disabledProps: { disabled: true },
+		disabledClass: 'cursor-not-allowed'
+	},
+	{
+		name: 'NavLink',
+		component: NavLink,
+		props: { href: '/x', children: text('Go') },
+		find: (c) => c.querySelector('a'),
+		pointer: true,
+		disabledProps: { disabled: true },
+		disabledClass: 'cursor-not-allowed'
+	},
+	{
+		name: 'Current NavLink',
+		component: NavLink,
+		props: { href: '/x', current: true, children: text('Go') },
+		find: (c) => c.querySelector('a[aria-current="page"]'),
+		pointer: true,
+		disabledProps: { current: true, disabled: true },
 		disabledClass: 'cursor-not-allowed'
 	},
 	{

@@ -1,5 +1,18 @@
 export { createApiClient } from './client';
-export type { ApiClient, ApiClientOptions, Event, GoogleStatus, Health, Job } from './client';
+export type {
+	ApiClient,
+	ApiClientOptions,
+	Application,
+	ApplicationInput,
+	ApplicationStatus,
+	Event,
+	FieldError,
+	GoogleStatus,
+	Health,
+	Job,
+	NewApplication,
+	ValidationErrors
+} from './client';
 export { startTestPrompt } from './dev';
 export type { StartTestPromptOptions, StartTestPromptResult } from './dev';
 export { connectEvents, EVENT_TYPES } from './events';

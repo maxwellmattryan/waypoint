@@ -2,6 +2,7 @@
 export { default as Button, type ButtonProps } from './Button.svelte';
 export { default as IconButton, type IconButtonProps } from './IconButton.svelte';
 export { default as Link, type LinkProps } from './Link.svelte';
+export { default as NavLink, type NavLinkProps } from './NavLink.svelte';
 export { default as Input, type InputProps } from './Input.svelte';
 export { default as Textarea, type TextareaProps } from './Textarea.svelte';
 export { default as Select, type SelectProps, type SelectOption } from './Select.svelte';
