@@ -2,6 +2,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
+use waypoint_api::claude::ClaudeRunner;
 use waypoint_api::{MIGRATOR, config};
 
 #[rocket::main]
@@ -19,6 +20,7 @@ async fn run() -> Result<(), String> {
     dotenvy::dotenv().ok();
 
     let port = config::parse_port(std::env::var("WAYPOINT_API_PORT").ok().as_deref())?;
+    let claude = ClaudeRunner::from_env()?;
     let database_url = std::env::var("DATABASE_URL")
         .ok()
         .filter(|url| !url.trim().is_empty())
@@ -37,7 +39,7 @@ async fn run() -> Result<(), String> {
         .map_err(|err| format!("database migrations failed: {err}"))?;
 
     let figment = config::figment(rocket::Config::figment(), port);
-    waypoint_api::rocket(figment, pool)
+    waypoint_api::rocket(figment, pool, claude)
         .launch()
         .await
         .map_err(|err| format!("server failed: {err}"))?;

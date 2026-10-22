@@ -5,9 +5,12 @@ use rocket::local::asynchronous::Client;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use waypoint_api::claude::ClaudeRunner;
 
 async fn client(pool: PgPool) -> Client {
-    let rocket = waypoint_api::rocket(rocket::Config::figment(), pool);
+    // The health check never calls the runner.
+    let claude = ClaudeRunner::new("claude", Duration::from_secs(1));
+    let rocket = waypoint_api::rocket(rocket::Config::figment(), pool, claude);
     Client::tracked(rocket).await.expect("valid rocket")
 }
 
