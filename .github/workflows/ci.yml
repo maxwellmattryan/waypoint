@@ -44,7 +44,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # rust-toolchain.toml is the source of truth for the channel and components.
+      # rust-toolchain.toml is the source of truth for the channel (a pinned dated
+      # nightly) and components. rust-cache keys on `rustc -vV`, so bumping the
+      # date invalidates the cache.
       - name: Install Rust toolchain
         run: rustup toolchain install && rustup show
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

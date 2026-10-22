@@ -4,7 +4,7 @@ Waypoint is a personal job-search assistant that runs on your own machine. It tr
 
 ## Prerequisites
 
-- Rust stable. `rust-toolchain.toml` pins the channel, so `rustup` installs it on first use.
+- Rust nightly, pinned to a dated build by `rust-toolchain.toml`. `rustup` installs it on first use, and it overrides your default toolchain in this repo. To bump it, set `channel` to a newer `nightly-YYYY-MM-DD` whose rustfmt and clippy are available (see the [rustup components history](https://rust-lang.github.io/rustup-components-history/)), then fix what fmt, clippy and the tests report.
 - Node 22 or newer, with npm.
 - Docker with Compose, running.
 
