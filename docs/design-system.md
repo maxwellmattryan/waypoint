@@ -74,6 +74,10 @@ For Svelte transitions, use the helper so reduced motion is honoured:
 
 `motionDuration(name, reduced?)` returns the token's ms value, or `0` when `reduced` is true. `reduced` defaults to `prefersReducedMotion.current` from `svelte/motion`.
 
+## App shell
+
+Every route renders inside `AppShell` (`web/src/lib/components/app/AppShell.svelte`), which the root layout wraps around the page: a top bar with the "Waypoint" wordmark and a live-connection Badge (Connecting, Live, Reconnecting), then the page in a centred `main` (`max-w-5xl`, `px-4 py-8`, `sm:px-8`). Pages don't add their own `main` or outer padding. Screens are composed from the primitives only: `primitives-only.test.ts` in `web/src/lib/components/dashboard/` fails if the shell, the root page or a dashboard card uses a raw interactive tag, a `cursor-*` class or a half spacing step.
+
 ## Primitives
 
 Every primitive accepts `class`, merged after its own classes, and spreads other attributes onto its root interactive element (for Input, Textarea, Select and Checkbox, that's the control itself, not the wrapper). Interactive primitives own their cursor, hover, `focus-visible`, active and disabled styles, so call sites never add `cursor-pointer` or focus styles. Shared class strings live in `web/src/lib/components/ui/styles.ts`.

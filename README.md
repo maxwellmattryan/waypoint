@@ -23,13 +23,31 @@ Postgres keeps running after the script exits, and its data persists in the `way
 docker compose down
 ```
 
+## Dashboard
+
+The web app opens on a dashboard inside the app shell. The top bar shows whether the live event stream is connected (Connecting, Live, Reconnecting). Below it are three cards and an empty applications list:
+
+- **System**: whether the API and its database are reachable (`GET /health`), re-checked each time the event stream (re)connects.
+- **Google**: the Google connection (`GET /auth/google`). Until the three Google settings are in `.env` it reads "Not configured" and the Connect button is disabled; see [Google account](#google-account).
+- **Claude**: a **Test Claude** button that enqueues a test prompt through `claude -p` and follows the job live until it shows the reply.
+
+The browser only talks to its own origin. In development, Vite proxies `/api/*` to the API (`VITE_API_URL`, default <http://127.0.0.1:8000>) with the `/api` prefix stripped, passing `Host`, `Origin` and `Sec-Fetch-Site` through unchanged, so the API's local-host and same-origin guards still apply and the API needs no CORS headers. Vite's own CORS is turned off (`server.cors: false`): by default it answers any `localhost` or `127.0.0.1` origin on any port, which would let a page on another local port read job errors and the event stream through the proxy. The proxy exists only in `vite dev`; the built SPA isn't served or proxied yet.
+
+The end-to-end test starts the real API (with a fake `claude` that answers `pong` after a second) and the dev server, then drives the dashboard in Chromium and checks that the proxy sends no CORS headers to other origins. It runs locally, not in CI. It needs the Compose Postgres, a `.env`, Chromium installed once, and ports 8000 and 5173 free:
+
+```sh
+docker compose up -d --wait db
+npx --prefix web playwright install chromium   # once
+npm --prefix web run test:e2e
+```
+
 ## Model calls
 
 Waypoint calls Claude through your Claude subscription, not the API. Every call spawns the [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI (`claude -p`) in an empty temp directory with no tools and no saved session, and logs the model, tokens, duration and reported cost to the `claude_calls` table. Install the CLI and log in once with `claude` before using any model-backed feature.
 
 The runner removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and the `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY` switches from the CLI's environment, so nothing in your shell moves billing or traffic away from the subscription. It also withholds Waypoint's own settings (`DATABASE_URL`, `POSTGRES_*`, `WAYPOINT_*`). `WAYPOINT_CLAUDE_BIN` (default `claude` on `PATH`) and `WAYPOINT_CLAUDE_TIMEOUT_SECS` (default 300) are optional; see `.env.example`. The CLI runs in its own process group, and when a call ends, times out or is cancelled the runner kills that whole group, so nothing the CLI started outlives the call.
 
-To check the round trip, start the app with `./scripts/dev.sh` and, in another terminal:
+To check the round trip, start the app with `./scripts/dev.sh`, open <http://127.0.0.1:5173> and click **Test Claude** on the dashboard: the card shows Queued, Running and then Succeeded with the reply `pong`. Or, in another terminal:
 
 ```sh
 curl -s -X POST -H 'X-Waypoint-Dev: 1' http://127.0.0.1:8000/dev/claude/ping
