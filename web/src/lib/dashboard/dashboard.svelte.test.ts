@@ -268,6 +268,68 @@ describe('Dashboard', () => {
 		expect(dashboard.google).toEqual({ kind: 'error' });
 	});
 
+	it('forwards every event to subscribers and ignores application events', async () => {
+		const { dashboard, source, fetch } = setup({
+			'/health': () => json({ status: 'ok', db: 'ok' }),
+			'/dev/jobs/test-prompt': () => json({ job_id: 7 }, 202),
+			'/jobs/7': () => json(job())
+		});
+		source.emit('app.connected');
+		await settle();
+		await dashboard.runTest();
+		const state = () =>
+			JSON.parse(
+				JSON.stringify({
+					connection: dashboard.connection,
+					health: dashboard.health,
+					google: dashboard.google,
+					test: dashboard.test,
+					queuePausedUntil: dashboard.queuePausedUntil
+				})
+			);
+		const before = state();
+		const fetches = fetch.mock.calls.length;
+
+		const seen: string[] = [];
+		const unsubscribe = dashboard.subscribe((event) => seen.push(event.type));
+		// Same id and a later updated_at than the tracked job, so a misrouted event would show.
+		const application = {
+			id: 7,
+			company: 'Acme',
+			title: 'Engineer',
+			url: null,
+			location: null,
+			comp: null,
+			source: null,
+			notes: null,
+			status: 'applied',
+			status_changed_at: '2026-10-22T00:00:09Z',
+			created_at: '2026-10-22T00:00:00Z',
+			updated_at: '2026-10-22T00:00:09Z'
+		};
+		source.emit('application.created', { application });
+		source.emit('application.updated', { application });
+		source.emit('application.deleted', { id: 7 });
+		await settle();
+		expect(state()).toEqual(before);
+		expect(fetch.mock.calls.length).toBe(fetches);
+
+		source.emit('app.lagged', { skipped: 2 });
+		source.emit('app.connected');
+		expect(seen).toEqual([
+			'application.created',
+			'application.updated',
+			'application.deleted',
+			'app.lagged',
+			'app.connected'
+		]);
+
+		unsubscribe();
+		source.emit('application.deleted', { id: 7 });
+		expect(seen).toHaveLength(5);
+		await settle();
+	});
+
 	it('connection state', () => {
 		const { dashboard, source } = setup({ '/health': () => json({ status: 'ok', db: 'ok' }) });
 		expect(dashboard.connection).toBe('connecting');
