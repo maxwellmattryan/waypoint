@@ -249,6 +249,13 @@ async fn failures_are_typed_and_logged(pool: PgPool) {
     let err = garbage.runner.call(&pool, &req).await.expect_err("garbage");
     assert!(matches!(err, ClaudeError::Protocol { .. }), "{err:?}");
 
+    let flood = common::fake("flood", TIMEOUT);
+    let err = flood.runner.call(&pool, &req).await.expect_err("flood");
+    let ClaudeError::Protocol { message } = &err else {
+        panic!("expected Protocol, got {err:?}");
+    };
+    assert!(message.contains("more than"), "{message}");
+
     let cli = common::fake("cli_error", TIMEOUT);
     let err = cli.runner.call(&pool, &req).await.expect_err("cli error");
     let ClaudeError::Cli { subtype, message } = &err else {
@@ -269,11 +276,12 @@ async fn failures_are_typed_and_logged(pool: PgPool) {
             "timeout",
             "process_failed",
             "protocol_error",
+            "protocol_error",
             "cli_error",
             "process_failed"
         ]
     );
     assert!(rows.iter().all(|row| row.error_message.is_some()));
     assert!(rows[0].duration_ms >= 1000, "{:?}", rows[0]);
-    assert_eq!(rows[3].model.as_deref(), Some("claude-haiku-5-5"));
+    assert_eq!(rows[4].model.as_deref(), Some("claude-haiku-5-5"));
 }

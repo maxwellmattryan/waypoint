@@ -6,6 +6,7 @@ mod args;
 mod log;
 mod stream;
 
+use std::ffi::OsString;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -25,11 +26,23 @@ use self::stream::Completed;
 pub const DEFAULT_BIN: &str = "claude";
 /// Timeout used when `WAYPOINT_CLAUDE_TIMEOUT_SECS` is unset.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
-/// Environment variables removed from the child so a stray key can't switch billing to
-/// the API.
-const SCRUBBED_ENV: [&str; 2] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
+/// Environment variables removed from the child: keys and switches that would move
+/// billing or traffic away from the subscription, and Waypoint's database URL.
+const SCRUBBED_ENV: [&str; 7] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "DATABASE_URL",
+];
+/// Prefixes of Waypoint's own settings and secrets, also withheld from the child.
+const SCRUBBED_ENV_PREFIXES: [&str; 2] = ["POSTGRES_", "WAYPOINT_"];
 /// How much stderr (its tail) and how much of an error message are kept.
 const MAX_ERROR_BYTES: usize = 2048;
+/// Most stdout read from one call; more is a protocol error and the child is killed.
+const MAX_STDOUT_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Runs isolated `claude -p` calls.
 #[derive(Debug, Clone)]
@@ -292,7 +305,7 @@ impl ClaudeRunner {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        for key in SCRUBBED_ENV {
+        for key in scrubbed_env(std::env::vars_os().map(|(key, _)| key)) {
             command.env_remove(key);
         }
         command
@@ -316,20 +329,36 @@ impl ClaudeRunner {
             stdin.shutdown().await
             // `stdin` is dropped here, closing the pipe so the CLI sees EOF.
         };
-        let read_stdout = async {
-            let mut lines = BufReader::new(stdout).lines();
+        let kill = &mut child;
+        let read_stdout = async move {
+            let mut lines = BufReader::new(stdout.take(MAX_STDOUT_BYTES + 1)).lines();
             let mut collected = Vec::new();
-            while let Some(line) = lines.next_line().await? {
-                collected.push(line);
+            let read = async {
+                while let Some(line) = lines.next_line().await? {
+                    collected.push(line);
+                }
+                Ok::<_, io::Error>(())
+            };
+            if let Err(err) = read.await {
+                return Err(ClaudeError::Process {
+                    message: format!("cannot read claude's output: {err}"),
+                });
             }
-            Ok::<_, io::Error>(collected)
+            if lines.into_inner().into_inner().limit() == 0 {
+                // Kill it so stderr closes and the join below doesn't wait for the timeout.
+                let _ = kill.start_kill();
+                return Err(ClaudeError::Protocol {
+                    message: format!("claude wrote more than {MAX_STDOUT_BYTES} bytes"),
+                });
+            }
+            Ok(collected)
         };
         let (written, lines, stderr_tail) = tokio::join!(write, read_stdout, tail(stderr));
         let status = child.wait().await;
 
         let lines = match lines {
             Ok(lines) => lines,
-            Err(err) => return process_error(format!("cannot read claude's output: {err}")),
+            Err(err) => return (Meta::default(), Err(err)),
         };
         let parsed = match stream::parse(lines.iter().map(String::as_str)) {
             Ok(parsed) => parsed,
@@ -367,6 +396,19 @@ impl ClaudeRunner {
             format!("cannot start {}: {err}", self.bin.display())
         }
     }
+}
+
+/// The variables to remove from the child, given the names in the API's environment.
+fn scrubbed_env(present: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+    let mut keys: Vec<OsString> = SCRUBBED_ENV.iter().map(OsString::from).collect();
+    keys.extend(present.into_iter().filter(|key| {
+        key.to_str().is_some_and(|key| {
+            SCRUBBED_ENV_PREFIXES
+                .iter()
+                .any(|prefix| key.starts_with(prefix))
+        })
+    }));
+    keys
 }
 
 fn process_error(message: String) -> Outcome {
@@ -437,6 +479,34 @@ mod tests {
         assert_eq!(std.get_current_dir(), Some(cwd));
         assert_eq!(std.get_program(), "claude");
         assert!(!std.get_args().any(|arg| arg == "--bare"));
+    }
+
+    #[test]
+    fn scrubbed_env_covers_billing_switches_and_waypoint_settings() {
+        let present = [
+            "PATH",
+            "HOME",
+            "POSTGRES_PASSWORD",
+            "WAYPOINT_API_PORT",
+            "PGHOST",
+        ];
+        let keys = scrubbed_env(present.map(OsString::from));
+        for key in [
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "DATABASE_URL",
+            "POSTGRES_PASSWORD",
+            "WAYPOINT_API_PORT",
+        ] {
+            assert!(keys.contains(&OsString::from(key)), "{key} is removed");
+        }
+        for kept in ["PATH", "HOME", "PGHOST"] {
+            assert!(!keys.contains(&OsString::from(kept)), "{kept} is kept");
+        }
     }
 
     #[test]

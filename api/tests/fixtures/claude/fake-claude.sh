@@ -5,6 +5,7 @@
 #   hang          sleep until killed
 #   exit1         write to stderr and exit 1 without a result
 #   garbage       print a line that is not JSON
+#   flood         print 17 MiB with no newline (more than the runner reads)
 set -eu
 
 mode=$1
@@ -33,5 +34,6 @@ exit1)
 	exit 1
 	;;
 garbage) echo "not json" ;;
+flood) exec head -c 17825792 /dev/zero ;;
 *) cat "$fixtures/$mode.jsonl" ;;
 esac
