@@ -10,4 +10,21 @@ export { default as Card, type CardProps } from './Card.svelte';
 export { default as Badge, type BadgeProps } from './Badge.svelte';
 export { default as EmptyState, type EmptyStateProps } from './EmptyState.svelte';
 export { default as Skeleton, type SkeletonProps } from './Skeleton.svelte';
-export type { BadgeTone, ButtonSize, ButtonVariant, SkeletonShape } from './styles';
+export { default as Tabs, type TabsProps, type TabItem } from './Tabs.svelte';
+export { default as Dialog, type DialogProps } from './Dialog.svelte';
+export { default as Drawer, type DrawerProps } from './Drawer.svelte';
+export { default as Tooltip, type TooltipProps,
+	type TooltipTriggerProps
+} from './Tooltip.svelte';
+export { default as Toaster } from './Toaster.svelte';
+export { toast, type ToastItem, type ToastOptions } from './toast.svelte';
+export type {
+	BadgeTone,
+	ButtonSize,
+	ButtonVariant,
+	DialogSize,
+	DrawerSide,
+	SkeletonShape,
+	ToastTone,
+	TooltipPlacement
+} from './styles';

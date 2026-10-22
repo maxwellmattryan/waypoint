@@ -12,7 +12,9 @@ import {
 	Link,
 	Select,
 	Skeleton,
-	Textarea
+	Tabs,
+	Textarea,
+	Tooltip
 } from './index';
 import { text } from './__fixtures__/snippets';
 
@@ -34,6 +36,10 @@ type Row = {
 };
 
 const options = [{ value: 'a', label: 'A' }];
+const tabItems = [
+	{ value: 'a', label: 'A' },
+	{ value: 'b', label: 'B' }
+];
 
 const interactiveRows: Row[] = [
 	{
@@ -107,6 +113,15 @@ const interactiveRows: Row[] = [
 		pointer: true,
 		disabledProps: { 'aria-disabled': 'true' },
 		disabledClass: 'aria-disabled:cursor-not-allowed'
+	},
+	{
+		name: 'Tab',
+		component: Tabs,
+		props: { label: 'Sections', items: tabItems, children: text('Panel') },
+		find: (c) => c.querySelector('[role="tab"]'),
+		pointer: true,
+		disabledProps: { items: [{ ...tabItems[0], disabled: true }, tabItems[1]] },
+		disabledClass: 'disabled:cursor-not-allowed'
 	}
 ];
 
@@ -133,7 +148,8 @@ const staticRows: { name: string; component: AnyComponent; props: Record<string,
 	{ name: 'Badge', component: Badge, props: { children: text('New') } },
 	{ name: 'EmptyState', component: EmptyState, props: { title: 'Nothing here' } },
 	{ name: 'Skeleton', component: Skeleton, props: {} },
-	{ name: 'Card without href', component: Card, props: { children: text('Card') } }
+	{ name: 'Card without href', component: Card, props: { children: text('Card') } },
+	{ name: 'Tooltip', component: Tooltip, props: { content: 'Hint', children: text('Trigger') } }
 ];
 
 describe('non-interactive primitives have no pointer cursor', () => {
