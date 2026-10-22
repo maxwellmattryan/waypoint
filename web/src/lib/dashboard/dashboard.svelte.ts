@@ -141,10 +141,11 @@ export class Dashboard {
 			case 'queue.resumed':
 				this.queuePausedUntil = null;
 				return;
-			// Subscribers such as the applications store handle these.
+			// Subscribers such as the applications and runs stores handle these.
 			case 'application.created':
 			case 'application.updated':
 			case 'application.deleted':
+			case 'run.updated':
 				return;
 			default:
 				this.#applyJob(event.job, phaseOfEvent(event.type), true);

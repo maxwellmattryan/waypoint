@@ -2,17 +2,19 @@ import { describe, expect, it } from 'vitest';
 
 // AGENTS.md invariants for screens: interactive elements come from the primitives (which bake in
 // cursor and state styles), and spacing stays on the 4px grid. Covers the app shell, the dashboard
-// cards, the applications and resumes components and pages, and the root layout and page.
+// cards, the applications, resumes and runs components and pages, and the root layout and page.
 const sources = import.meta.glob(
 	[
 		'../app/*.svelte',
 		'./*.svelte',
 		'../applications/*.svelte',
 		'../resumes/*.svelte',
+		'../runs/*.svelte',
 		'/src/routes/+layout.svelte',
 		'/src/routes/+page.svelte',
 		'/src/routes/applications/**/*.svelte',
-		'/src/routes/resumes/**/*.svelte'
+		'/src/routes/resumes/**/*.svelte',
+		'/src/routes/runs/**/*.svelte'
 	],
 	{ query: '?raw', import: 'default', eager: true }
 ) as Record<string, string>;
@@ -53,7 +55,20 @@ describe('primitives only', () => {
 				'/src/lib/components/resumes/ResumeSelect.svelte',
 				'/src/lib/components/resumes/ResumeUploadDialog.svelte',
 				'/src/routes/resumes/+page.svelte',
-				'/src/routes/resumes/[id]/+page.svelte'
+				'/src/routes/resumes/[id]/+page.svelte',
+				'/src/lib/components/runs/MemoriesUsed.svelte',
+				'/src/lib/components/runs/PermissionBadge.svelte',
+				'/src/lib/components/runs/RunDetailView.svelte',
+				'/src/lib/components/runs/RunError.svelte',
+				'/src/lib/components/runs/RunListItem.svelte',
+				'/src/lib/components/runs/RunStatusBadge.svelte',
+				'/src/lib/components/runs/RunSummary.svelte',
+				'/src/lib/components/runs/StepItem.svelte',
+				'/src/lib/components/runs/StepStatusBadge.svelte',
+				'/src/lib/components/runs/ToolCallItem.svelte',
+				'/src/lib/components/runs/ToolCallStatusBadge.svelte',
+				'/src/routes/runs/+page.svelte',
+				'/src/routes/runs/[id]/+page.svelte'
 			])
 		);
 		const offenders = files.flatMap((file) =>

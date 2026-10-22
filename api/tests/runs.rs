@@ -733,10 +733,15 @@ async fn unknown_workflow_fails_run(pool: PgPool) {
         Harness::start(&pool, "success", common::fast_config(), Runtime::default());
     let started = harness.start_run(&runtime, "two_step", json!({})).await;
     let job_id = started.job_id.expect("job_id");
-    until_finished(&mut subscriber, job_id).await;
+    let events = until_finished(&mut subscriber, job_id).await;
 
     let failed = run(&pool, started.id).await;
     assert_eq!(failed.status, RunStatus::Failed);
+    assert_eq!(
+        run_updates(&events, started.id).last(),
+        Some(&failed),
+        "the failure is published"
+    );
     assert!(failed.error.as_deref().unwrap_or("").contains("two_step"));
     assert!(failed.finished_at.is_some());
     let job = jobs::get(&pool, job_id).await.expect("get").expect("job");
@@ -995,6 +1000,41 @@ async fn tool_invocations_are_recorded(pool: PgPool) {
     let output = done.output.expect("output");
     assert_eq!(output[0], json!({"answer": "HI"}));
     assert_eq!(output[1], json!("no tool has this name"));
+}
+
+/// The `run.updated` events for run `id`, in order.
+fn run_updates(events: &[Event], id: i64) -> Vec<Run> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            Event::RunUpdated { run } if run.id == id => Some(run.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[sqlx::test]
+async fn run_updated_events_follow_the_run(pool: PgPool) {
+    let mut tools = Registry::default();
+    tools
+        .register(Lookup(ToolCounts::default()))
+        .expect("lookup");
+    let workflow = Tooling(vec![("lookup", json!({"q": "hi"}))]);
+    let runtime = runtime_of(vec![Arc::new(workflow)], tools);
+    let (harness, mut subscriber) =
+        Harness::start(&pool, "success", common::fast_config(), runtime.clone());
+    let started = harness.start_run(&runtime, "tooling", json!({})).await;
+    let events = until_finished(&mut subscriber, started.job_id.expect("job_id")).await;
+
+    let updates = run_updates(&events, started.id);
+    let statuses: Vec<RunStatus> = updates.iter().map(|run| run.status).collect();
+    use RunStatus::{Queued, Running, Succeeded};
+    assert_eq!(
+        statuses,
+        [Queued, Running, Running, Running, Running, Succeeded],
+        "start, run running, step running, tool returned, step succeeded, run succeeded"
+    );
+    assert_eq!(updates.last(), Some(&run(&pool, started.id).await));
 }
 
 /// A client for the API whose worker finds no ready jobs: tests seed runs first, then mark

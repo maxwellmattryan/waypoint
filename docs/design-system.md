@@ -78,7 +78,7 @@ For Svelte transitions, use the helper so reduced motion is honoured:
 
 Every route renders inside `AppShell` (`web/src/lib/components/app/AppShell.svelte`), which the root layout wraps around the page: a top bar with the "Waypoint" wordmark, the main nav and a live-connection Badge (Connecting, Live, Reconnecting), then the page in a centred `main` (`max-w-5xl`, `px-4 py-8`, `sm:px-8`). Pages don't add their own `main` or outer padding.
 
-The main nav (`<nav aria-label="Main">`) is three [NavLinks](#navlink): Dashboard (`/`), Applications (`/applications`) and Resumes (`/resumes`). The shell marks the current section from `page.url.pathname`: Dashboard only on `/`, Applications on `/applications` and every `/applications/<id>`, Resumes on `/resumes` and every `/resumes/<id>`. Below `sm` the nav wraps onto its own row under the wordmark and badge.
+The main nav (`<nav aria-label="Main">`) is four [NavLinks](#navlink): Dashboard (`/`), Applications (`/applications`), Resumes (`/resumes`) and Runs (`/runs`). The shell marks the current section from `page.url.pathname`: Dashboard only on `/`, Applications on `/applications` and every `/applications/<id>`, Resumes on `/resumes` and every `/resumes/<id>`, Runs on `/runs` and every `/runs/<id>`. Below `sm` the nav wraps onto its own row under the wordmark and badge.
 
 Screens are composed from the primitives only: `primitives-only.test.ts` in `web/src/lib/components/dashboard/` fails if the shell, the root layout or page, a dashboard card, a component in `components/applications` or `components/resumes`, or a page under `routes/applications` or `routes/resumes` uses a raw interactive tag, a `cursor-*` class or a half spacing step.
 
@@ -198,6 +198,33 @@ A placeholder block. `shape`: `rect` (default) | `text` | `circle`. It's `aria-h
 ```svelte
 <Skeleton shape="text" class="w-1/2" />
 <Skeleton shape="circle" class="size-10" />
+```
+
+### Stat
+
+A non-interactive tile for one figure: a small muted `label`, a large tabular-nums `value` and an optional `detail` line. `tone` (a Badge tone, default `neutral`) colours the value; `neutral` keeps the body text colour.
+
+```svelte
+<Stat label="Cost" value="$0.04" />
+<Stat label="Status" value="Failed" tone="danger" detail="after 3 attempts" />
+```
+
+### KeyValue
+
+A `<dl>` of label and value pairs in two columns (`grid-cols-[max-content_1fr]`). `items: { key: string; value: string | Snippet }[]`; a snippet value renders richer content such as a Badge or a JsonView. Keys must be unique.
+
+```svelte
+{#snippet permission()}<Badge>read</Badge>{/snippet}
+<KeyValue items={[{ key: 'Tool', value: 'lookup' }, { key: 'Permission', value: permission }]} />
+```
+
+### JsonView
+
+Pretty-prints any JSON value (`JSON.stringify(value, null, 2)`) as the text of a `<pre>`. It never renders markup: a string such as `"<img src=x>"` shows as its characters. `label` is required and becomes the block's `aria-label`. The block scrolls past `max-h-80`, so it is focusable (`tabindex="0"`) with the focus-visible ring. For `null` or `undefined` it shows the `empty` text (default "None") in muted style instead.
+
+```svelte
+<JsonView value={step.input} label="Step input" />
+<JsonView value={run.output} label="Run output" empty="No output yet" />
 ```
 
 ### Tabs
