@@ -225,7 +225,7 @@ async fn dispatch(ctx: &Context, job: &Job) -> JobOutcome {
     match job.kind.as_str() {
         TEST_PROMPT => test_prompt(ctx, &job.payload).await,
         CAPTURE_EXTRACT => capture_extract(ctx, &job.payload).await,
-        AGENT_RUN => runs::execute(&ctx.pool, &ctx.runner, &ctx.runtime, job)
+        AGENT_RUN => runs::execute(&ctx.pool, &ctx.runner, &ctx.runtime, &ctx.bus, job)
             .await
             .into(),
         other => JobOutcome::Fail(format!("unknown job kind {other:?}")),
