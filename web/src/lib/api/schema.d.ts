@@ -343,6 +343,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /runs`: runs newest first, a page at a time. */
+        get: operations["list_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /runs/{id}`: one run with its steps and their tool calls. */
+        get: operations["get_run"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -614,6 +648,11 @@ export interface components {
             /** @description Required; trimmed, at most 200 characters. */
             name: string;
         };
+        /**
+         * @description What a tool may do.
+         * @enum {string}
+         */
+        Permission: "read" | "write" | "external";
         /** @description The `PUT /applications/{id}/resume` body. `null` clears the link. */
         ResumeLink: {
             /** Format: int64 */
@@ -645,6 +684,103 @@ export interface components {
         ResumeVersionDetail: components["schemas"]["ResumeVersion"] & {
             /** @description The extracted text, or `null` when none could be extracted. */
             text: string | null;
+        };
+        /** @description One `agent_runs` row. */
+        Run: {
+            /**
+             * Format: double
+             * @description Sum of the steps' reported cost in US dollars.
+             */
+            cost_usd: number;
+            /** Format: date-time */
+            created_at: string;
+            /** @description The latest step error; cleared when the run succeeds. */
+            error: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** Format: int64 */
+            id: number;
+            /** @description The JSON the run was started with; the first step's input. */
+            input: unknown;
+            /**
+             * Format: int64
+             * @description Sum of the steps' input tokens (including cache tokens).
+             */
+            input_tokens: number;
+            /**
+             * Format: int64
+             * @description The latest `agent_run` job.
+             */
+            job_id: number | null;
+            /** @description The last step's output, once the run has succeeded. */
+            output: unknown;
+            /** Format: int64 */
+            output_tokens: number;
+            /** Format: date-time */
+            started_at: string | null;
+            status: components["schemas"]["RunStatus"];
+            /** Format: date-time */
+            updated_at: string;
+            /** @description The registered workflow's name. */
+            workflow: string;
+        };
+        /** @description The `GET /runs/{id}` body: the run with its steps in order. */
+        RunDetail: components["schemas"]["Run"] & {
+            steps: components["schemas"]["RunStepDetail"][];
+        };
+        /**
+         * @description Where a run is.
+         * @enum {string}
+         */
+        RunStatus: "queued" | "running" | "succeeded" | "failed";
+        /** @description One `run_steps` row. */
+        RunStep: {
+            /**
+             * Format: int32
+             * @description How many times the step has started.
+             */
+            attempts: number;
+            /**
+             * Format: int64
+             * @description The step's most recent successful model call.
+             */
+            claude_call_id: number | null;
+            /** Format: double */
+            cost_usd: number;
+            /** Format: date-time */
+            created_at: string;
+            error: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** Format: int64 */
+            id: number;
+            /** @description The previous step's output (the run's input for the first step), once started. */
+            input: unknown;
+            /**
+             * Format: int64
+             * @description Tokens and cost of the step's model and tool calls, across attempts.
+             */
+            input_tokens: number;
+            name: string;
+            /**
+             * Format: int32
+             * @description The step's position in the workflow, from 0.
+             */
+            ordinal: number;
+            output: unknown;
+            /** Format: int64 */
+            output_tokens: number;
+            /** Format: int64 */
+            run_id: number;
+            /** Format: date-time */
+            started_at: string | null;
+            status: components["schemas"]["StepStatus"];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description A step with its tool calls, oldest first. */
+        RunStepDetail: components["schemas"]["RunStep"] & {
+            tool_calls: components["schemas"]["ToolCall"][];
         };
         /** @description One `application_stages` row. */
         Stage: {
@@ -685,6 +821,50 @@ export interface components {
             feedback?: string | null;
             status: components["schemas"]["ApplicationStatus"];
         };
+        /**
+         * @description Where a step is.
+         * @enum {string}
+         */
+        StepStatus: "pending" | "running" | "succeeded" | "failed";
+        /** @description One `tool_calls` row. */
+        ToolCall: {
+            /**
+             * Format: int64
+             * @description The model call that asked for the tool, if any.
+             */
+            claude_call_id: number | null;
+            /** Format: double */
+            cost_usd: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            duration_ms: number | null;
+            error: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** Format: int64 */
+            id: number;
+            input: unknown;
+            /**
+             * Format: int64
+             * @description Tokens and cost of the model calls the tool made.
+             */
+            input_tokens: number;
+            output: unknown;
+            /** Format: int64 */
+            output_tokens: number;
+            permission: null | components["schemas"]["Permission"];
+            /** Format: int64 */
+            run_step_id: number;
+            status: components["schemas"]["ToolCallStatus"];
+            /** @description The tool's name as the caller gave it. */
+            tool: string;
+        };
+        /**
+         * @description How a tool call ended.
+         * @enum {string}
+         */
+        ToolCallStatus: "running" | "succeeded" | "failed" | "invalid_input" | "invalid_output" | "unknown_tool";
         /** @description The 400 and 422 body: every failing field at once. */
         ValidationErrors: {
             errors: components["schemas"]["FieldError"][];
@@ -2125,6 +2305,89 @@ export interface operations {
                 content?: never;
             };
             /** @description The PDF could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_runs: {
+        parameters: {
+            query?: {
+                /** @description Most runs to return; default 50, clamped to 1..=200 */
+                limit?: number;
+                /** @description Only runs with an `id` below this one, for the next page */
+                before?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Runs, `id` descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The runs could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The run's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run, its steps by `ordinal` and each step's tool calls by `id` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No run has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run could not be read */
             500: {
                 headers: {
                     [name: string]: unknown;

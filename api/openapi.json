@@ -1430,6 +1430,100 @@
           }
         }
       }
+    },
+    "/runs": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`GET /runs`: runs newest first, a page at a time.",
+        "operationId": "list_runs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Most runs to return; default 50, clamped to 1..=200",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only runs with an `id` below this one, for the next page",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Runs, `id` descending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Run"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The runs could not be read"
+          }
+        }
+      }
+    },
+    "/runs/{id}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`GET /runs/{id}`: one run with its steps and their tool calls.",
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The run's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run, its steps by `ordinal` and each step's tool calls by `id`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No run has this id"
+          },
+          "500": {
+            "description": "The run could not be read"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2279,6 +2373,15 @@
           }
         }
       },
+      "Permission": {
+        "type": "string",
+        "description": "What a tool may do.",
+        "enum": [
+          "read",
+          "write",
+          "external"
+        ]
+      },
       "ResumeLink": {
         "type": "object",
         "description": "The `PUT /applications/{id}/resume` body. `null` clears the link.",
@@ -2366,6 +2469,252 @@
           }
         ],
         "description": "One resume version with its extracted text: the `GET /resumes/{id}` body."
+      },
+      "Run": {
+        "type": "object",
+        "description": "One `agent_runs` row.",
+        "required": [
+          "id",
+          "workflow",
+          "status",
+          "input",
+          "output",
+          "error",
+          "input_tokens",
+          "output_tokens",
+          "cost_usd",
+          "job_id",
+          "created_at",
+          "updated_at",
+          "started_at",
+          "finished_at"
+        ],
+        "properties": {
+          "cost_usd": {
+            "type": "number",
+            "format": "double",
+            "description": "Sum of the steps' reported cost in US dollars."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The latest step error; cleared when the run succeeds."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "input": {
+            "description": "The JSON the run was started with; the first step's input."
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of the steps' input tokens (including cache tokens)."
+          },
+          "job_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The latest `agent_run` job."
+          },
+          "output": {
+            "description": "The last step's output, once the run has succeeded."
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workflow": {
+            "type": "string",
+            "description": "The registered workflow's name."
+          }
+        }
+      },
+      "RunDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Run"
+          },
+          {
+            "type": "object",
+            "required": [
+              "steps"
+            ],
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RunStepDetail"
+                }
+              }
+            }
+          }
+        ],
+        "description": "The `GET /runs/{id}` body: the run with its steps in order."
+      },
+      "RunStatus": {
+        "type": "string",
+        "description": "Where a run is.",
+        "enum": [
+          "queued",
+          "running",
+          "succeeded",
+          "failed"
+        ]
+      },
+      "RunStep": {
+        "type": "object",
+        "description": "One `run_steps` row.",
+        "required": [
+          "id",
+          "run_id",
+          "ordinal",
+          "name",
+          "status",
+          "attempts",
+          "input",
+          "output",
+          "error",
+          "input_tokens",
+          "output_tokens",
+          "cost_usd",
+          "claude_call_id",
+          "created_at",
+          "updated_at",
+          "started_at",
+          "finished_at"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times the step has started."
+          },
+          "claude_call_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The step's most recent successful model call."
+          },
+          "cost_usd": {
+            "type": "number",
+            "format": "double"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "input": {
+            "description": "The previous step's output (the run's input for the first step), once started."
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tokens and cost of the step's model and tool calls, across attempts."
+          },
+          "name": {
+            "type": "string"
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The step's position in the workflow, from 0."
+          },
+          "output": {},
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StepStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RunStepDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunStep"
+          },
+          {
+            "type": "object",
+            "required": [
+              "tool_calls"
+            ],
+            "properties": {
+              "tool_calls": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ToolCall"
+                }
+              }
+            }
+          }
+        ],
+        "description": "A step with its tool calls, oldest first."
       },
       "Stage": {
         "type": "object",
@@ -2457,6 +2806,124 @@
             "$ref": "#/components/schemas/ApplicationStatus"
           }
         }
+      },
+      "StepStatus": {
+        "type": "string",
+        "description": "Where a step is.",
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "failed"
+        ]
+      },
+      "ToolCall": {
+        "type": "object",
+        "description": "One `tool_calls` row.",
+        "required": [
+          "id",
+          "run_step_id",
+          "tool",
+          "permission",
+          "status",
+          "input",
+          "output",
+          "error",
+          "input_tokens",
+          "output_tokens",
+          "cost_usd",
+          "claude_call_id",
+          "duration_ms",
+          "created_at",
+          "finished_at"
+        ],
+        "properties": {
+          "claude_call_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The model call that asked for the tool, if any."
+          },
+          "cost_usd": {
+            "type": "number",
+            "format": "double"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "input": {},
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tokens and cost of the model calls the tool made."
+          },
+          "output": {},
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "permission": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Permission",
+                "description": "The tool's permission level; `null` for an unknown tool."
+              }
+            ]
+          },
+          "run_step_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ToolCallStatus"
+          },
+          "tool": {
+            "type": "string",
+            "description": "The tool's name as the caller gave it."
+          }
+        }
+      },
+      "ToolCallStatus": {
+        "type": "string",
+        "description": "How a tool call ended.",
+        "enum": [
+          "running",
+          "succeeded",
+          "failed",
+          "invalid_input",
+          "invalid_output",
+          "unknown_tool"
+        ]
       },
       "ValidationErrors": {
         "type": "object",

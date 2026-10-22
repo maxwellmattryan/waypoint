@@ -11,10 +11,11 @@ use sqlx::PgPool;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
-use super::{CAPTURE_EXTRACT, Config, Job, TEST_PROMPT};
+use super::{AGENT_RUN, CAPTURE_EXTRACT, Config, Job, TEST_PROMPT};
 use crate::capture::{self, llm::LlmError};
 use crate::claude::{ClaudeError, ClaudeRequest, ClaudeRunner};
 use crate::events::{Event, EventBus};
+use crate::runs;
 
 /// The delay before retry number `attempt` (1-based): `base * 2^(attempt-1)`, capped at
 /// `cap`. It saturates instead of overflowing.
@@ -32,6 +33,8 @@ pub struct Worker {
     pub config: Config,
     /// Notified by `enqueue`, so a new job starts without waiting for the next poll.
     pub wake: Arc<Notify>,
+    /// The workflows and tools `agent_run` jobs can use.
+    pub runtime: runs::Runtime,
 }
 
 /// What a handler decided about one attempt.
@@ -53,6 +56,7 @@ struct Context {
     runner: ClaudeRunner,
     bus: EventBus,
     config: Config,
+    runtime: runs::Runtime,
     /// Tells the loop to pause until this time.
     pause: mpsc::UnboundedSender<DateTime<Utc>>,
 }
@@ -78,6 +82,7 @@ impl Worker {
             runner: self.runner.clone(),
             bus: self.bus.clone(),
             config: self.config.clone(),
+            runtime: self.runtime.clone(),
             pause: pause_tx,
         };
         let poll = self.config.poll_interval;
@@ -220,6 +225,9 @@ async fn dispatch(ctx: &Context, job: &Job) -> JobOutcome {
     match job.kind.as_str() {
         TEST_PROMPT => test_prompt(ctx, &job.payload).await,
         CAPTURE_EXTRACT => capture_extract(ctx, &job.payload).await,
+        AGENT_RUN => runs::execute(&ctx.pool, &ctx.runner, &ctx.runtime, job)
+            .await
+            .into(),
         other => JobOutcome::Fail(format!("unknown job kind {other:?}")),
     }
 }
@@ -266,12 +274,21 @@ async fn capture_extract(ctx: &Context, payload: &Value) -> JobOutcome {
     }
 }
 
-/// A usage limit defers the job; every other runner error is worth a retry.
-fn claude_failure(err: &ClaudeError) -> JobOutcome {
-    match err {
-        ClaudeError::UsageLimit { .. } => JobOutcome::UsageLimit(err.to_string()),
-        _ => JobOutcome::Retry(err.to_string()),
+impl From<runs::Outcome> for JobOutcome {
+    fn from(outcome: runs::Outcome) -> Self {
+        match outcome {
+            runs::Outcome::Done(result) => Self::Done(result),
+            runs::Outcome::Retry(error) => Self::Retry(error),
+            runs::Outcome::UsageLimit(error) => Self::UsageLimit(error),
+            runs::Outcome::Fail(error) => Self::Fail(error),
+        }
     }
+}
+
+/// A usage limit defers the job; every other runner error is worth a retry. The mapping
+/// lives in `runs::StepError`, so jobs and run steps treat runner errors alike.
+fn claude_failure(err: &ClaudeError) -> JobOutcome {
+    runs::Outcome::from(runs::StepError::from(err.clone())).into()
 }
 
 #[cfg(test)]

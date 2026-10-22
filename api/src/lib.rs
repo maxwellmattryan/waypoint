@@ -14,6 +14,8 @@ pub mod host;
 pub mod jobs;
 pub mod openapi;
 pub mod resumes;
+pub mod runs;
+pub mod tools;
 
 use rocket::fairing::AdHoc;
 use rocket::figment::Figment;
@@ -49,6 +51,8 @@ pub fn rocket(
         bus: bus.clone(),
         config: jobs,
         wake: wake.0.clone(),
+        // No workflows or tools are registered yet.
+        runtime: runs::Runtime::default(),
     };
 
     let rocket = rocket::custom(figment)
@@ -84,6 +88,8 @@ pub fn rocket(
                 applications::timeline::add_entry,
                 capture::capture,
                 jobs::show,
+                runs::list,
+                runs::show,
                 google::connect,
                 google::callback,
                 google::status,
