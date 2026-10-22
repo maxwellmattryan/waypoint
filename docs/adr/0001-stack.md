@@ -40,6 +40,6 @@ The constraints that shape the choice:
 - Everything binds localhost: the API forces its address to `127.0.0.1` in code regardless of Rocket config, and Compose publishes Postgres on `127.0.0.1:5433` (5433 avoids a locally installed Postgres on 5432).
 - `scripts/dev.sh` needs Docker running and a `.env` copied from `.env.example`. Postgres keeps running after the script exits; `docker compose down` stops it.
 - Builds and lints never need a database; tests that touch Postgres need the Compose database and `DATABASE_URL`.
-- The frontend's TypeScript API types will be generated from the API's OpenAPI spec in a later job rather than written by hand.
+- The frontend's TypeScript API types are generated from the API's OpenAPI spec rather than written by hand: utoipa builds `api/openapi.json` from the Rocket handlers, and openapi-typescript and openapi-fetch turn it into types and a typed client. See "API contract" in the README.
 - Model calls depend on the `claude` CLI being installed and logged in with the user's subscription. `--bare` is never used because it bills the API, and evals that call `claude` run locally rather than in CI.
 - There is no deployment pipeline to maintain; anything that would expose Waypoint beyond localhost needs a new ADR.
