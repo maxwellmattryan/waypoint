@@ -1,0 +1,227 @@
+/*
+ * Waypoint design tokens. See docs/design-system.md.
+ *
+ * Runtime values are plain `--wp-*` custom properties so the theme and reduced-motion
+ * overrides below can swap them. `@theme inline` maps them into Tailwind's namespaces,
+ * so utilities such as `bg-surface` read the variable at runtime.
+ *
+ * The motion values must stay in sync with `durations` in src/lib/motion.ts.
+ */
+
+/* Light theme (default). */
+:root {
+	color-scheme: light;
+
+	--wp-bg: #fafafa; /* neutral-50 */
+	--wp-surface: #ffffff;
+	--wp-surface-raised: #f5f5f5; /* neutral-100 */
+	--wp-border: #e5e5e5; /* neutral-200 */
+	--wp-border-strong: #d4d4d4; /* neutral-300 */
+	--wp-fg: #171717; /* neutral-900 */
+	--wp-fg-muted: #525252; /* neutral-600 */
+	--wp-fg-subtle: #737373; /* neutral-500 */
+
+	--wp-primary: #4f46e5; /* indigo-600 */
+	--wp-primary-hover: #4338ca; /* indigo-700 */
+	--wp-primary-active: #3730a3; /* indigo-800 */
+	--wp-primary-fg: #ffffff;
+	--wp-danger: #dc2626; /* red-600 */
+	--wp-danger-hover: #b91c1c; /* red-700 */
+	--wp-danger-active: #991b1b; /* red-800 */
+	--wp-danger-fg: #ffffff;
+	--wp-focus: #6366f1; /* indigo-500 */
+
+	--wp-neutral-soft: #f5f5f5; /* neutral-100 */
+	--wp-neutral-soft-fg: #404040; /* neutral-700 */
+	--wp-primary-soft: #e0e7ff; /* indigo-100 */
+	--wp-primary-soft-fg: #3730a3; /* indigo-800 */
+	--wp-success-soft: #dcfce7; /* green-100 */
+	--wp-success-soft-fg: #166534; /* green-800 */
+	--wp-warning-soft: #fef3c7; /* amber-100 */
+	--wp-warning-soft-fg: #92400e; /* amber-800 */
+	--wp-danger-soft: #fee2e2; /* red-100 */
+	--wp-danger-soft-fg: #991b1b; /* red-800 */
+	--wp-info-soft: #e0f2fe; /* sky-100 */
+	--wp-info-soft-fg: #075985; /* sky-800 */
+
+	--wp-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+	--wp-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+	--wp-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+	/* Motion. Keep in sync with src/lib/motion.ts. */
+	--wp-duration-fast: 120ms;
+	--wp-duration-base: 200ms;
+	--wp-duration-slow: 320ms;
+	--duration-fast: var(--wp-duration-fast);
+	--duration-base: var(--wp-duration-base);
+	--duration-slow: var(--wp-duration-slow);
+}
+
+/* Dark theme, following the OS unless light is forced. */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light']) {
+		color-scheme: dark;
+
+		--wp-bg: #0a0a0a; /* neutral-950 */
+		--wp-surface: #171717; /* neutral-900 */
+		--wp-surface-raised: #262626; /* neutral-800 */
+		--wp-border: #262626; /* neutral-800 */
+		--wp-border-strong: #404040; /* neutral-700 */
+		--wp-fg: #fafafa; /* neutral-50 */
+		--wp-fg-muted: #d4d4d4; /* neutral-300 */
+		--wp-fg-subtle: #a3a3a3; /* neutral-400 */
+
+		--wp-primary: #818cf8; /* indigo-400 */
+		--wp-primary-hover: #a5b4fc; /* indigo-300 */
+		--wp-primary-active: #c7d2fe; /* indigo-200 */
+		--wp-primary-fg: #1e1b4b; /* indigo-950 */
+		--wp-danger: #f87171; /* red-400 */
+		--wp-danger-hover: #fca5a5; /* red-300 */
+		--wp-danger-active: #fecaca; /* red-200 */
+		--wp-danger-fg: #450a0a; /* red-950 */
+		--wp-focus: #818cf8; /* indigo-400 */
+
+		--wp-neutral-soft: #262626; /* neutral-800 */
+		--wp-neutral-soft-fg: #d4d4d4; /* neutral-300 */
+		--wp-primary-soft: #1e1b4b; /* indigo-950 */
+		--wp-primary-soft-fg: #c7d2fe; /* indigo-200 */
+		--wp-success-soft: #052e16; /* green-950 */
+		--wp-success-soft-fg: #bbf7d0; /* green-200 */
+		--wp-warning-soft: #451a03; /* amber-950 */
+		--wp-warning-soft-fg: #fde68a; /* amber-200 */
+		--wp-danger-soft: #450a0a; /* red-950 */
+		--wp-danger-soft-fg: #fecaca; /* red-200 */
+		--wp-info-soft: #082f49; /* sky-950 */
+		--wp-info-soft-fg: #bae6fd; /* sky-200 */
+
+		--wp-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+		--wp-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.5);
+		--wp-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+	}
+}
+
+/* Dark theme, forced. Same values as the media query above. */
+:root[data-theme='dark'] {
+	color-scheme: dark;
+
+	--wp-bg: #0a0a0a;
+	--wp-surface: #171717;
+	--wp-surface-raised: #262626;
+	--wp-border: #262626;
+	--wp-border-strong: #404040;
+	--wp-fg: #fafafa;
+	--wp-fg-muted: #d4d4d4;
+	--wp-fg-subtle: #a3a3a3;
+
+	--wp-primary: #818cf8;
+	--wp-primary-hover: #a5b4fc;
+	--wp-primary-active: #c7d2fe;
+	--wp-primary-fg: #1e1b4b;
+	--wp-danger: #f87171;
+	--wp-danger-hover: #fca5a5;
+	--wp-danger-active: #fecaca;
+	--wp-danger-fg: #450a0a;
+	--wp-focus: #818cf8;
+
+	--wp-neutral-soft: #262626;
+	--wp-neutral-soft-fg: #d4d4d4;
+	--wp-primary-soft: #1e1b4b;
+	--wp-primary-soft-fg: #c7d2fe;
+	--wp-success-soft: #052e16;
+	--wp-success-soft-fg: #bbf7d0;
+	--wp-warning-soft: #451a03;
+	--wp-warning-soft-fg: #fde68a;
+	--wp-danger-soft: #450a0a;
+	--wp-danger-soft-fg: #fecaca;
+	--wp-info-soft: #082f49;
+	--wp-info-soft-fg: #bae6fd;
+
+	--wp-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+	--wp-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.5);
+	--wp-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+}
+
+:root[data-theme='light'] {
+	color-scheme: light;
+}
+
+/* Reduced motion: every duration collapses to 0ms. */
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--wp-duration-fast: 0ms;
+		--wp-duration-base: 0ms;
+		--wp-duration-slow: 0ms;
+	}
+}
+
+@theme inline {
+	--color-bg: var(--wp-bg);
+	--color-surface: var(--wp-surface);
+	--color-surface-raised: var(--wp-surface-raised);
+	--color-border: var(--wp-border);
+	--color-border-strong: var(--wp-border-strong);
+	--color-fg: var(--wp-fg);
+	--color-fg-muted: var(--wp-fg-muted);
+	--color-fg-subtle: var(--wp-fg-subtle);
+
+	--color-primary: var(--wp-primary);
+	--color-primary-hover: var(--wp-primary-hover);
+	--color-primary-active: var(--wp-primary-active);
+	--color-primary-fg: var(--wp-primary-fg);
+	--color-danger: var(--wp-danger);
+	--color-danger-hover: var(--wp-danger-hover);
+	--color-danger-active: var(--wp-danger-active);
+	--color-danger-fg: var(--wp-danger-fg);
+	--color-focus: var(--wp-focus);
+
+	--color-neutral-soft: var(--wp-neutral-soft);
+	--color-neutral-soft-fg: var(--wp-neutral-soft-fg);
+	--color-primary-soft: var(--wp-primary-soft);
+	--color-primary-soft-fg: var(--wp-primary-soft-fg);
+	--color-success-soft: var(--wp-success-soft);
+	--color-success-soft-fg: var(--wp-success-soft-fg);
+	--color-warning-soft: var(--wp-warning-soft);
+	--color-warning-soft-fg: var(--wp-warning-soft-fg);
+	--color-danger-soft: var(--wp-danger-soft);
+	--color-danger-soft-fg: var(--wp-danger-soft-fg);
+	--color-info-soft: var(--wp-info-soft);
+	--color-info-soft-fg: var(--wp-info-soft-fg);
+
+	--shadow-sm: var(--wp-shadow-sm);
+	--shadow-md: var(--wp-shadow-md);
+	--shadow-lg: var(--wp-shadow-lg);
+
+	/* A bare `transition-colors` uses the motion tokens. */
+	--default-transition-duration: var(--duration-fast);
+	--default-transition-timing-function: var(--ease-standard);
+}
+
+@theme static {
+	/* 4px grid: `p-1` = 4px, `p-2` = 8px, ... */
+	--spacing: 0.25rem;
+
+	--radius-sm: 4px;
+	--radius-md: 8px;
+	--radius-lg: 12px;
+	--radius-full: 9999px;
+
+	--font-sans:
+		ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+		sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+	--font-mono:
+		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+		monospace;
+
+	/* Easings. Keep in sync with `easings` in src/lib/motion.ts. */
+	--ease-standard: cubic-bezier(0.2, 0, 0, 1);
+	--ease-enter: cubic-bezier(0, 0, 0.2, 1);
+	--ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@layer base {
+	body {
+		background-color: var(--wp-bg);
+		color: var(--wp-fg);
+		font-family: var(--font-sans);
+	}
+}

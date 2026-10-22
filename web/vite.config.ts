@@ -25,7 +25,28 @@ export default defineConfig({
 	},
 	test: {
 		expect: { requireAssertions: true },
-		environment: 'node',
-		include: ['src/**/*.test.ts']
+		projects: [
+			{
+				// Component tests: mount Svelte components in a jsdom DOM.
+				extends: true,
+				resolve: { conditions: ['browser'] },
+				test: {
+					name: 'client',
+					environment: 'jsdom',
+					include: ['src/**/*.svelte.test.ts'],
+					setupFiles: ['./vitest-setup-client.ts']
+				}
+			},
+			{
+				// Plain TypeScript tests: no DOM.
+				extends: true,
+				test: {
+					name: 'server',
+					environment: 'node',
+					include: ['src/**/*.test.ts'],
+					exclude: ['src/**/*.svelte.test.ts']
+				}
+			}
+		]
 	}
 });
