@@ -21,10 +21,18 @@ export type {
 	Health,
 	Job,
 	NewApplication,
+	Permission,
 	ResumeLink,
 	ResumeVersion,
 	ResumeVersionDetail,
+	Run,
+	RunDetail,
+	RunStatus,
+	RunStepDetail,
 	Stage,
+	StepStatus,
+	ToolCall,
+	ToolCallStatus,
 	ValidationErrors
 } from './client';
 export { startTestPrompt } from './dev';

@@ -150,6 +150,7 @@ export function watchJob(
 				case 'application.created':
 				case 'application.updated':
 				case 'application.deleted':
+				case 'run.updated':
 					return;
 				default:
 					apply(event.job, phaseOfEvent(event.type), true);
