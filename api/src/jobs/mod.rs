@@ -13,7 +13,7 @@ use rocket::http::Status;
 use rocket::serde::json::Json;
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use tokio::sync::Notify;
 
 pub use self::worker::{Worker, backoff};
@@ -26,6 +26,9 @@ pub const TEST_PROMPT: &str = "test_prompt";
 /// The `capture_extract` job kind: payload `{"url": string, "text": string}`, one
 /// structured `claude -p` call whose `result` is a `Capture` (see `capture::llm`).
 pub const CAPTURE_EXTRACT: &str = "capture_extract";
+/// The `agent_run` job kind: payload `{"run_id": integer}`, runs the steps of one
+/// `agent_runs` row that haven't succeeded yet (see `runs::execute`).
+pub const AGENT_RUN: &str = "agent_run";
 
 /// One `jobs` row. This is also the `GET /jobs/<id>` body; the payload is not echoed.
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, utoipa::ToSchema)]
@@ -157,20 +160,34 @@ pub async fn enqueue_with(
     payload: Value,
     max_attempts: i32,
 ) -> Result<Job, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let job = enqueue_tx(&mut tx, bus, kind, payload, max_attempts).await?;
+    tx.commit().await?;
+    wake.0.notify_one();
+    Ok(job)
+}
+
+/// Inserts a `queued` job inside `tx` and publishes `job.queued`. The caller commits, then
+/// wakes the worker. If the transaction rolls back, the event was published for a job that
+/// never existed; callers keep the work after this call to writes that rarely fail.
+pub async fn enqueue_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
+    kind: &str,
+    payload: Value,
+    max_attempts: i32,
+) -> Result<Job, sqlx::Error> {
     // `job.queued` goes out before the commit, so the worker can't claim the row (and
     // publish `job.started`) first.
-    let mut tx = pool.begin().await?;
     let job: Job = sqlx::query_as(&format!(
         "INSERT INTO jobs (kind, payload, max_attempts) VALUES ($1, $2, $3) RETURNING {COLUMNS}"
     ))
     .bind(kind)
     .bind(payload)
     .bind(max_attempts)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     bus.publish(Event::JobQueued { job: job.clone() });
-    tx.commit().await?;
-    wake.0.notify_one();
     Ok(job)
 }
 
