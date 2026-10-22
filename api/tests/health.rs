@@ -19,6 +19,7 @@ async fn client(pool: PgPool) -> Client {
         pool,
         claude,
         waypoint_api::jobs::Config::default(),
+        waypoint_api::google::Config::default(),
     );
     Client::tracked(rocket).await.expect("valid rocket")
 }

@@ -2,9 +2,11 @@
 
 pub mod claude;
 pub mod config;
+pub mod crypto;
 #[cfg(debug_assertions)]
 mod dev;
 pub mod events;
+pub mod google;
 mod health;
 pub mod host;
 pub mod jobs;
@@ -23,14 +25,15 @@ use crate::jobs::{Wake, Worker};
 /// Migrations embedded from `api/migrations`, applied on startup.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
-/// Builds the Rocket instance with the given configuration, database pool, Claude runner
-/// and queue settings. The job worker starts at liftoff and stops at shutdown. Debug
+/// Builds the Rocket instance with the given configuration, database pool, Claude runner,
+/// queue settings and Google OAuth settings. The job worker starts at liftoff and stops at shutdown. Debug
 /// builds also mount the `/dev` routes. Every route takes [`host::LocalHost`].
 pub fn rocket(
     figment: Figment,
     pool: PgPool,
     claude: ClaudeRunner,
     jobs: jobs::Config,
+    google: google::Config,
 ) -> Rocket<Build> {
     let bus = EventBus::new();
     let wake = Wake::default();
@@ -48,9 +51,18 @@ pub fn rocket(
         .manage(claude)
         .manage(bus)
         .manage(wake)
+        .manage(google::Google::new(google))
         .mount(
             "/",
-            rocket::routes![health::health, events::events, jobs::show],
+            rocket::routes![
+                health::health,
+                events::events,
+                jobs::show,
+                google::connect,
+                google::callback,
+                google::status,
+                google::disconnect,
+            ],
         )
         .attach(AdHoc::on_liftoff("job worker", move |_| {
             Box::pin(async move {

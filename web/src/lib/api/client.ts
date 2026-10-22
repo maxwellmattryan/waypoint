@@ -8,6 +8,8 @@ export type Health = components['schemas']['Health'];
 export type Job = components['schemas']['Job'];
 /** One server-sent event from `GET /events`, discriminated by `type`. */
 export type Event = components['schemas']['Event'];
+/** The `GET /auth/google` body: whether Google is configured and connected. */
+export type GoogleStatus = components['schemas']['GoogleStatus'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 

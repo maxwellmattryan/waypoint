@@ -36,6 +36,7 @@ async fn every_mounted_route_is_documented() {
         pool,
         ClaudeRunner::new("claude", Duration::from_secs(1)),
         waypoint_api::jobs::Config::default(),
+        waypoint_api::google::Config::default(),
     );
     let doc = document();
     let paths = doc["paths"].as_object().expect("paths");
@@ -176,4 +177,45 @@ fn document_matches_wire_shapes() {
         }
     }
     assert!(paths["/jobs/{id}"]["get"]["responses"]["404"].is_object());
+
+    let status = &schemas["GoogleStatus"];
+    let fields: BTreeSet<String> = ["configured", "state", "scopes", "connected_at"]
+        .iter()
+        .map(|f| f.to_string())
+        .collect();
+    assert_eq!(property_names(status), fields, "GoogleStatus fields");
+    let required: BTreeSet<String> = status["required"]
+        .as_array()
+        .expect("required")
+        .iter()
+        .map(|f| f.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(required, fields, "every GoogleStatus field is always sent");
+    assert_eq!(
+        status["properties"]["connected_at"]["format"], "date-time",
+        "connected_at"
+    );
+    assert_eq!(
+        schemas["ConnectionState"]["enum"],
+        serde_json::json!(["disconnected", "connected", "reconnect_required"])
+    );
+    assert_eq!(
+        property_names(&schemas["GoogleDisconnect"]),
+        BTreeSet::from(["revoked".to_string()])
+    );
+
+    let google = &paths["/auth/google"];
+    assert!(google["get"]["responses"]["200"].is_object());
+    assert!(google["delete"]["responses"]["404"].is_object());
+    let connect = &paths["/auth/google/connect"]["get"]["responses"];
+    assert!(connect["303"].is_object(), "connect redirects with 303");
+    assert!(
+        connect["503"]["content"]["text/plain"].is_object(),
+        "connect answers 503 text/plain when not configured"
+    );
+    assert!(
+        paths["/auth/google/callback"]["get"]["responses"]["200"]["content"]["text/html"]
+            .is_object(),
+        "the callback answers text/html"
+    );
 }
