@@ -78,6 +78,12 @@ export type PendingAction = components['schemas']['PendingAction'];
 export type AgentAction = components['schemas']['AgentAction'];
 /** A result a step wasn't confident enough to apply. */
 export type ReviewItem = components['schemas']['ReviewItem'];
+/** One learning signal: an approval, rejection or dismissal the user made. */
+export type MemorySignal = components['schemas']['MemorySignal'];
+/** What decision a learning signal records. */
+export type SignalKind = components['schemas']['SignalKind'];
+/** One entry of an approval's diff from the drafted to the approved input. */
+export type SignalChange = components['schemas']['SignalChange'];
 /** The `POST /applications/{id}/tidy` body that starts the sample workflow. */
 export type TidyRequest = components['schemas']['TidyRequest'];
 /** One thing Waypoint knows about the user, as every `/memories` route returns it. */

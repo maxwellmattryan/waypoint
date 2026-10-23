@@ -3,14 +3,21 @@ import {
 	createApiClient,
 	type AgentAction,
 	type Event,
+	type MemorySignal,
 	type PendingAction,
 	type ReviewItem,
 	type Run
 } from '#lib/api';
 import { toast } from '#lib/components/ui';
 import { PAGE_SIZE } from '#lib/runs/api.js';
-import type { ListActionsOptions, Result } from './api';
-import { ActionLogStore, agentsPaused, QueueStore, queueKey } from './review.svelte';
+import type { ListActionsOptions, ListSignalsOptions, Result } from './api';
+import {
+	ActionLogStore,
+	agentsPaused,
+	QueueStore,
+	queueKey,
+	SignalLogStore
+} from './review.svelte';
 
 function pending(id: number, overrides: Partial<PendingAction> = {}): PendingAction {
 	return {
@@ -95,7 +102,7 @@ function setupQueue(
 	const approve =
 		vi.fn<(c: unknown, id: number, input?: Record<string, unknown>) => Promise<Result<PendingAction>>>();
 	const reject = vi.fn<(c: unknown, id: number) => Promise<Result<PendingAction>>>();
-	const dismiss = vi.fn<(c: unknown, id: number) => Promise<Result<ReviewItem>>>();
+	const dismiss = vi.fn<(c: unknown, id: number, reason?: string) => Promise<Result<ReviewItem>>>();
 	const store = new QueueStore({
 		client,
 		listPending,
@@ -178,16 +185,20 @@ describe('QueueStore', () => {
 	});
 
 	it('removes a rejected action and a dismissed item with their toasts', async () => {
-		const { store, reject, dismiss } = setupQueue([ok([pending(1)])], [ok([review(2)])]);
+		const { store, reject, dismiss } = setupQueue([ok([pending(1)])], [ok([review(2), review(3)])]);
 		await store.load();
 		reject.mockResolvedValueOnce(ok(pending(1, { status: 'rejected' })));
 		dismiss.mockResolvedValueOnce(ok(review(2, { status: 'dismissed' })));
+		dismiss.mockResolvedValueOnce(ok(review(3, { status: 'dismissed' })));
 		await store.reject(1);
-		await store.dismiss(2);
-		expect(dismiss).toHaveBeenCalledWith(client, 2);
+		await store.dismiss(2, 'Not relevant');
+		await store.dismiss(3);
+		expect(dismiss).toHaveBeenNthCalledWith(1, client, 2, 'Not relevant');
+		expect(dismiss).toHaveBeenNthCalledWith(2, client, 3, undefined);
 		expect(store.items).toEqual([]);
 		expect(toasts()).toEqual([
 			['success', 'Rejected', 'Run #11 ended.'],
+			['success', 'Dismissed', undefined],
 			['success', 'Dismissed', undefined]
 		]);
 	});
@@ -392,5 +403,111 @@ describe('ActionLogStore', () => {
 		expect(store.hasMore).toBe(false);
 		await settle();
 		expect(list).toHaveBeenCalledTimes(2);
+	});
+});
+
+function signal(id: number, overrides: Partial<MemorySignal> = {}): MemorySignal {
+	return {
+		id,
+		kind: 'rejection',
+		run_id: 40 + id,
+		pending_action_id: id,
+		review_item_id: null,
+		subject: 'draft_follow_up',
+		drafted: { message: 'Thanks' },
+		approved: null,
+		changes: null,
+		reason: null,
+		created_at: '2026-10-22T00:00:00Z',
+		...overrides
+	};
+}
+
+/** `count` signals counting down from `top`. */
+function signalPage(top: number, count: number): MemorySignal[] {
+	return Array.from({ length: count }, (_, i) => signal(top - i));
+}
+
+function setupSignals(...results: Result<MemorySignal[]>[]) {
+	const list = vi.fn<(c: unknown, options?: ListSignalsOptions) => Promise<Result<MemorySignal[]>>>();
+	for (const result of results) list.mockResolvedValueOnce(result);
+	const store = new SignalLogStore({ client, list });
+	return { store, list };
+}
+
+const signalIds = (store: SignalLogStore) => store.signals.map((s) => s.id);
+
+describe('SignalLogStore', () => {
+	it('loads newest first and loads more with before', async () => {
+		const { store, list } = setupSignals(ok(signalPage(120, PAGE_SIZE)), ok(signalPage(70, 3)));
+		expect(store.state).toEqual({ kind: 'loading' });
+		await store.load();
+		expect(list).toHaveBeenCalledWith(client, { limit: PAGE_SIZE });
+		expect(store.state).toEqual({ kind: 'loaded' });
+		expect(signalIds(store).slice(0, 2)).toEqual([120, 119]);
+		expect(store.hasMore).toBe(true);
+		await store.loadMore();
+		expect(list).toHaveBeenLastCalledWith(client, { limit: PAGE_SIZE, before: 71 });
+		expect(signalIds(store).slice(-3)).toEqual([70, 69, 68]);
+		expect(store.hasMore).toBe(false);
+	});
+
+	it('is error when the first load fails', async () => {
+		const { store } = setupSignals({ kind: 'failed' });
+		await store.load();
+		expect(store.state).toEqual({ kind: 'error' });
+	});
+
+	it('toasts and keeps the list when loading more fails', async () => {
+		const { store } = setupSignals(ok(signalPage(120, PAGE_SIZE)), { kind: 'failed' });
+		await store.load();
+		await store.loadMore();
+		expect(store.signals).toHaveLength(PAGE_SIZE);
+		expect(store.loadingMore).toBe(false);
+		expect(toasts()).toEqual([['danger', "Couldn't load more signals", undefined]]);
+	});
+
+	it('merges a refresh by id and keeps older pages', async () => {
+		const { store, list } = setupSignals(
+			ok(signalPage(120, PAGE_SIZE)),
+			ok(signalPage(70, 2)),
+			ok([signal(122, { kind: 'dismissal', reason: 'Wrong role' }), signal(121), signal(120)])
+		);
+		await store.load();
+		await store.loadMore();
+		store.handle(runUpdated);
+		await settle();
+		expect(list).toHaveBeenCalledTimes(3);
+		expect(signalIds(store).slice(0, 3)).toEqual([122, 121, 120]);
+		expect(store.signals[0].reason).toBe('Wrong role');
+		expect(signalIds(store).slice(-2)).toEqual([70, 69]);
+		expect(new Set(signalIds(store)).size).toBe(store.signals.length);
+	});
+
+	it.each(['app.connected', 'app.lagged'] as const)('refetches silently on %s', async (type) => {
+		const { store } = setupSignals(ok([]), ok([signal(1)]));
+		await store.load();
+		store.handle({ type } as Event);
+		expect(store.state).toEqual({ kind: 'loaded' });
+		await settle();
+		expect(signalIds(store)).toEqual([1]);
+	});
+
+	it('clears on data.deleted, then refreshes', async () => {
+		const { store, list } = setupSignals(ok(signalPage(120, PAGE_SIZE)), ok([]));
+		await store.load();
+		store.handle({ type: 'data.deleted' } as Event);
+		expect(store.signals).toEqual([]);
+		expect(store.hasMore).toBe(false);
+		await settle();
+		expect(list).toHaveBeenCalledTimes(2);
+		expect(store.signals).toEqual([]);
+	});
+
+	it('ignores refreshes before the first load', async () => {
+		const { store, list } = setupSignals(ok([]));
+		store.handle(runUpdated);
+		await store.refresh();
+		expect(list).not.toHaveBeenCalled();
 	});
 });
