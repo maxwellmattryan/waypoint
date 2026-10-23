@@ -382,6 +382,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Memories matching every given filter. */
+        get: operations["list_memories"];
+        put?: never;
+        /** Adds a memory the user wrote: confirmed now, source `manual`. */
+        post: operations["create_memory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memories/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One memory. */
+        get: operations["get_memory"];
+        /**
+         * Replaces a memory's kind, topic, content and tags. Its status, `confirmed_at` and
+         *     provenance are kept.
+         */
+        put: operations["update_memory"];
+        post?: never;
+        /** Deletes a memory permanently. */
+        delete: operations["delete_memory"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memories/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirms a proposed memory. An already confirmed memory is returned unchanged. */
+        post: operations["confirm_memory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pending-actions": {
         parameters: {
             query?: never;
@@ -865,6 +922,60 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description One `memories` row: the body of every route that returns a memory. */
+        Memory: {
+            /**
+             * Format: date-time
+             * @description When the memory became confirmed; `null` while proposed.
+             */
+            confirmed_at: string | null;
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["MemoryKind"];
+            source_kind: components["schemas"]["SourceKind"];
+            /** @description A human label for the source, e.g. "Resume · Staff Eng v3". */
+            source_label: string | null;
+            /** @description An id in the source as text: a resume version id, a run id, a message id. */
+            source_ref: string | null;
+            status: components["schemas"]["MemoryStatus"];
+            /** @description Normalised: lowercase, single-spaced, no blanks or duplicates. */
+            tags: string[];
+            topic: components["schemas"]["MemoryTopic"];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description The `POST /memories` and `PUT /memories/{id}` body. Unknown keys, `status` and the
+         *     provenance fields included, are ignored.
+         */
+        MemoryInput: {
+            /** @description Required; a missing or blank value is a 422. At most 5,000 characters. */
+            content: string;
+            kind: components["schemas"]["MemoryKind"];
+            /** @description At most 20 tags of at most 50 characters each, normalised on write. */
+            tags?: string[];
+            /** @description Must be one of the kind's topics. */
+            topic: components["schemas"]["MemoryTopic"];
+        };
+        /**
+         * @description What sort of thing a memory is.
+         * @enum {string}
+         */
+        MemoryKind: "fact" | "preference" | "answer";
+        /**
+         * @description Whether the user has confirmed a memory.
+         * @enum {string}
+         */
+        MemoryStatus: "proposed" | "confirmed";
+        /**
+         * @description What a memory is about. Which topics are allowed depends on the kind
+         *     ([`MemoryKind::topics`]); `other` is allowed for every kind.
+         * @enum {string}
+         */
+        MemoryTopic: "position" | "skill" | "education" | "target_role" | "seniority" | "location" | "comp_floor" | "industry" | "deal_breaker" | "work_authorization" | "notice_period" | "salary_expectation" | "why_leaving" | "other";
         /**
          * @description The `POST /applications` body: the [`ApplicationInput`] fields plus an optional
          *     starting status (`sourced` when omitted).
@@ -1099,6 +1210,11 @@ export interface components {
         SetKillSwitch: {
             paused: boolean;
         };
+        /**
+         * @description Where a memory came from.
+         * @enum {string}
+         */
+        SourceKind: "manual" | "resume" | "linkedin" | "run" | "email";
         /** @description One `application_stages` row. */
         Stage: {
             /** Format: int64 */
@@ -2699,6 +2815,324 @@ export interface operations {
                 content?: never;
             };
             /** @description The kill switch could not be changed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_memories: {
+        parameters: {
+            query?: {
+                /** @description Only memories of this kind; blank means any */
+                kind?: components["schemas"]["MemoryKind"];
+                /** @description Only memories with this status; blank means any */
+                status?: components["schemas"]["MemoryStatus"];
+                /** @description Only memories carrying this tag, normalised like stored tags; blank means any */
+                tag?: string;
+                /** @description Full-text search over content, topic and tags (`websearch_to_tsquery('english', q)`); blank means no search */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matching memories: with `q`, best match first, then newest `updated_at` first, ties by `id` descending; without `q`, newest `updated_at` first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Memory"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `kind` or `status` is not a known value */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The memories could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryInput"];
+            };
+        };
+        responses: {
+            /** @description The stored memory, confirmed, with source `manual` */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Memory"];
+                };
+            };
+            /** @description The body is not valid JSON for this route, or `kind` or `topic` is unknown */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description One or more fields are invalid */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The memory could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The memory's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The memory */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Memory"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No memory has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The memory could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The memory's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryInput"];
+            };
+        };
+        responses: {
+            /** @description The updated memory */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Memory"];
+                };
+            };
+            /** @description The body is not valid JSON for this route, or `kind` or `topic` is unknown */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No memory has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description One or more fields are invalid */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The memory could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The memory's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The memory is deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No memory has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The memory could not be deleted */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    confirm_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The memory's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The confirmed memory */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Memory"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No memory has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The memory could not be confirmed */
             500: {
                 headers: {
                     [name: string]: unknown;

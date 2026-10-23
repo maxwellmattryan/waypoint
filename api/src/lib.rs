@@ -15,6 +15,7 @@ pub mod host;
 pub mod jobs;
 pub mod kill_switch;
 pub mod mcp;
+pub mod memories;
 pub mod openapi;
 pub mod resumes;
 pub mod runs;
@@ -84,6 +85,12 @@ pub fn rocket(
                 resumes::show,
                 resumes::pdf,
                 resumes::delete,
+                memories::list,
+                memories::create,
+                memories::show,
+                memories::update,
+                memories::confirm,
+                memories::delete,
                 applications::stages::list,
                 applications::stages::add,
                 applications::stages::update,

@@ -286,6 +286,95 @@ fn document_matches_wire_shapes() {
     }
     assert!(paths["/applications/{id}/resume"]["put"]["responses"]["422"].is_object());
 
+    let memory = &schemas["Memory"];
+    let fields: BTreeSet<String> = [
+        "id",
+        "kind",
+        "topic",
+        "content",
+        "tags",
+        "status",
+        "confirmed_at",
+        "source_kind",
+        "source_ref",
+        "source_label",
+        "created_at",
+        "updated_at",
+    ]
+    .iter()
+    .map(|f| f.to_string())
+    .collect();
+    assert_eq!(property_names(memory), fields, "Memory fields");
+    let required: BTreeSet<String> = memory["required"]
+        .as_array()
+        .expect("required")
+        .iter()
+        .map(|f| f.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(required, fields, "every Memory field is always sent");
+    for nullable in ["source_ref", "source_label"] {
+        assert_eq!(
+            memory["properties"][nullable]["type"],
+            serde_json::json!(["string", "null"]),
+            "{nullable} is a nullable string"
+        );
+    }
+    assert_eq!(
+        memory["properties"]["confirmed_at"]["type"],
+        serde_json::json!(["string", "null"]),
+        "confirmed_at is a nullable timestamp"
+    );
+    for timestamp in ["confirmed_at", "created_at", "updated_at"] {
+        assert_eq!(
+            memory["properties"][timestamp]["format"], "date-time",
+            "{timestamp}"
+        );
+    }
+    assert_eq!(
+        schemas["MemoryKind"]["enum"],
+        serde_json::json!(["fact", "preference", "answer"])
+    );
+    assert_eq!(
+        schemas["MemoryTopic"]["enum"],
+        serde_json::json!([
+            "position",
+            "skill",
+            "education",
+            "target_role",
+            "seniority",
+            "location",
+            "comp_floor",
+            "industry",
+            "deal_breaker",
+            "work_authorization",
+            "notice_period",
+            "salary_expectation",
+            "why_leaving",
+            "other"
+        ])
+    );
+    assert_eq!(
+        schemas["MemoryStatus"]["enum"],
+        serde_json::json!(["proposed", "confirmed"])
+    );
+    assert_eq!(
+        schemas["SourceKind"]["enum"],
+        serde_json::json!(["manual", "resume", "linkedin", "run", "email"])
+    );
+    for operation in [
+        &paths["/memories"]["get"],
+        &paths["/memories"]["post"],
+        &paths["/memories/{id}"]["get"],
+        &paths["/memories/{id}"]["put"],
+        &paths["/memories/{id}"]["delete"],
+        &paths["/memories/{id}/confirm"]["post"],
+    ] {
+        assert_eq!(operation["tags"], serde_json::json!(["memories"]));
+    }
+    assert!(paths["/memories"]["get"]["responses"]["422"].is_object());
+    assert!(paths["/memories"]["post"]["responses"]["201"].is_object());
+    assert!(paths["/memories/{id}"]["delete"]["responses"]["204"].is_object());
+
     for operation in [
         &paths["/resumes"]["get"],
         &paths["/resumes"]["post"],

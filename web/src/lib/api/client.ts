@@ -80,6 +80,18 @@ export type AgentAction = components['schemas']['AgentAction'];
 export type ReviewItem = components['schemas']['ReviewItem'];
 /** The `POST /applications/{id}/tidy` body that starts the sample workflow. */
 export type TidyRequest = components['schemas']['TidyRequest'];
+/** One thing Waypoint knows about the user, as every `/memories` route returns it. */
+export type Memory = components['schemas']['Memory'];
+/** The `POST /memories` and `PUT /memories/{id}` body. */
+export type MemoryInput = components['schemas']['MemoryInput'];
+/** What sort of thing a memory is. */
+export type MemoryKind = components['schemas']['MemoryKind'];
+/** What a memory is about; which topics are allowed depends on the kind. */
+export type MemoryTopic = components['schemas']['MemoryTopic'];
+/** Whether the user has confirmed a memory. */
+export type MemoryStatus = components['schemas']['MemoryStatus'];
+/** Where a memory came from. */
+export type SourceKind = components['schemas']['SourceKind'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 

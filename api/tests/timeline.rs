@@ -237,7 +237,7 @@ async fn backfill_adds_created_events(pool: PgPool) {
         .map(|entry| entry.expect("entry").path())
         .collect();
     files.sort();
-    assert_eq!(files.len(), 10);
+    assert_eq!(files.len(), 11);
     for file in &files[..5] {
         std::fs::copy(file, dir.path().join(file.file_name().unwrap())).expect("copy");
     }

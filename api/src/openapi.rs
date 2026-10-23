@@ -19,6 +19,9 @@ use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleRevocation, G
 use crate::health::{self, Health};
 use crate::jobs::{self, Job};
 use crate::kill_switch::{self, DataDeletion, DeleteAllData, KillSwitch, SetKillSwitch};
+use crate::memories::{
+    self, Memory, MemoryInput, MemoryKind, MemoryStatus, MemoryTopic, SourceKind,
+};
 use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
 use crate::runs::actions::{self, AgentAction};
 use crate::runs::approvals::{self, ApproveAction, PendingAction, PendingActionStatus};
@@ -52,6 +55,12 @@ use crate::workflows::tidy::{self, TidyRequest};
         resumes::show,
         resumes::pdf,
         resumes::delete,
+        memories::list,
+        memories::create,
+        memories::show,
+        memories::update,
+        memories::confirm,
+        memories::delete,
         stages::list,
         stages::add,
         stages::update,
@@ -106,6 +115,12 @@ use crate::workflows::tidy::{self, TidyRequest};
         ResumeVersion,
         ResumeVersionDetail,
         ResumeLink,
+        Memory,
+        MemoryInput,
+        MemoryKind,
+        MemoryTopic,
+        MemoryStatus,
+        SourceKind,
         Run,
         RunStatus,
         RunDetail,
