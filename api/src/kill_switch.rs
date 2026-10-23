@@ -44,6 +44,8 @@ pub const USER_TABLES: &[&str] = &[
     "agent_actions",
     "review_items",
     "run_memories",
+    "emails",
+    "email_threads",
     "claude_calls",
     "jobs",
     "google_accounts",
