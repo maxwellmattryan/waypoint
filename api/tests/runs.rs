@@ -829,14 +829,14 @@ impl Tool for Broken {
     }
 }
 
-/// An `external` tool whose output breaks its own schema.
+/// A `read` tool whose output breaks its own schema.
 struct Liar(ToolCounts);
 
 #[rocket::async_trait]
 impl Tool for Liar {
     const NAME: &'static str = "liar";
     const DESCRIPTION: &'static str = "Returns the wrong shape";
-    const PERMISSION: Permission = Permission::External;
+    const PERMISSION: Permission = Permission::Read;
     type Input = Value;
     type Output = Value;
 
@@ -971,7 +971,7 @@ async fn tool_invocations_are_recorded(pool: PgPool) {
         ),
         (
             "liar",
-            Some("external"),
+            Some("read"),
             "invalid_output",
             json!({}),
             Some(json!({"n": "seven"})),

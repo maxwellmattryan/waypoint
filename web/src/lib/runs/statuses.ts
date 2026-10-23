@@ -12,14 +12,17 @@ export const runStatusBadge = {
 	running: { label: 'Running', tone: 'info' },
 	paused: { label: 'Paused', tone: 'warning' },
 	succeeded: { label: 'Succeeded', tone: 'success' },
-	failed: { label: 'Failed', tone: 'danger' }
+	failed: { label: 'Failed', tone: 'danger' },
+	awaiting_approval: { label: 'Awaiting approval', tone: 'warning' },
+	rejected: { label: 'Rejected', tone: 'neutral' }
 } as const satisfies Record<RunStatus, BadgeSpec>;
 
 export const stepStatusBadge = {
 	pending: { label: 'Pending', tone: 'neutral' },
 	running: { label: 'Running', tone: 'info' },
 	succeeded: { label: 'Succeeded', tone: 'success' },
-	failed: { label: 'Failed', tone: 'danger' }
+	failed: { label: 'Failed', tone: 'danger' },
+	awaiting_approval: { label: 'Awaiting approval', tone: 'warning' }
 } as const satisfies Record<StepStatus, BadgeSpec>;
 
 export const toolCallStatusBadge = {
@@ -28,7 +31,8 @@ export const toolCallStatusBadge = {
 	failed: { label: 'Failed', tone: 'danger' },
 	invalid_input: { label: 'Invalid input', tone: 'warning' },
 	invalid_output: { label: 'Invalid output', tone: 'warning' },
-	unknown_tool: { label: 'Unknown tool', tone: 'danger' }
+	unknown_tool: { label: 'Unknown tool', tone: 'danger' },
+	awaiting_approval: { label: 'Awaiting approval', tone: 'warning' }
 } as const satisfies Record<ToolCallStatus, BadgeSpec>;
 
 /** Permission levels: `read` is neutral, `write` a warning, `external` leaves Waypoint. */

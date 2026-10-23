@@ -5,6 +5,113 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/actions": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`GET /actions`: the action log, newest first, a page at a time.",
+        "operationId": "list_actions",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "query",
+            "description": "Only this run's actions",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Most actions to return; default 50, clamped to 1..=200",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only actions with an `id` below this one, for the next page",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Actions, `id` descending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentAction"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The actions could not be read"
+          }
+        }
+      }
+    },
+    "/actions/{id}/undo": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`POST /actions/{id}/undo`: reverts one action.",
+        "operationId": "undo_action",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The action's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The undone action, with `undone_at` set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentAction"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No action has this id"
+          },
+          "409": {
+            "description": "The action is already undone, has no undo data, its tool isn't registered, or the record changed or is gone"
+          },
+          "500": {
+            "description": "The undo could not be stored"
+          }
+        }
+      }
+    },
     "/applications": {
       "get": {
         "tags": [
@@ -839,6 +946,81 @@
         }
       }
     },
+    "/applications/{id}/tidy": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Starts the `tidy_application` sample workflow for an application.",
+        "operationId": "start_tidy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The application's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TidyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The queued `tidy_application` run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No application has this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "`note` or `message` is blank or too long, or `confidence` is outside 0..=1",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The run could not be started"
+          }
+        }
+      }
+    },
     "/auth/google": {
       "get": {
         "tags": [
@@ -1334,6 +1516,159 @@
         }
       }
     },
+    "/pending-actions": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`GET /pending-actions`: the actions waiting for the user's decision.",
+        "operationId": "list_pending_actions",
+        "responses": {
+          "200": {
+            "description": "Up to 200 `pending` actions, `id` ascending (oldest first)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PendingAction"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The pending actions could not be read"
+          }
+        }
+      }
+    },
+    "/pending-actions/{id}/approve": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`POST /pending-actions/{id}/approve`: approves an action, optionally with an edited\ninput. Approving the run's last pending action queues the run again.",
+        "operationId": "approve_pending_action",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The pending action's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveAction"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The approved action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingAction"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No pending action has this id"
+          },
+          "409": {
+            "description": "The action is not `pending`, its run is not `awaiting_approval`, or its tool is no longer registered"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "The edited `input` breaks the tool's input schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The decision could not be stored"
+          }
+        }
+      }
+    },
+    "/pending-actions/{id}/reject": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`POST /pending-actions/{id}/reject`: rejects an action, which ends its run `rejected`.",
+        "operationId": "reject_pending_action",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The pending action's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rejected action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingAction"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No pending action has this id"
+          },
+          "409": {
+            "description": "The action is not `pending` or its run is not `awaiting_approval`"
+          },
+          "500": {
+            "description": "The decision could not be stored"
+          }
+        }
+      }
+    },
     "/resumes": {
       "get": {
         "tags": [
@@ -1560,6 +1895,36 @@
         }
       }
     },
+    "/review-items": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`GET /review-items`: results waiting for the user's review.",
+        "operationId": "list_review_items",
+        "responses": {
+          "200": {
+            "description": "Up to 200 `pending` items, `id` ascending (oldest first)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewItem"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The review items could not be read"
+          }
+        }
+      }
+    },
     "/runs": {
       "get": {
         "tags": [
@@ -1657,6 +2022,56 @@
   },
   "components": {
     "schemas": {
+      "AgentAction": {
+        "type": "object",
+        "description": "One `agent_actions` row: a `write` tool call that changed Waypoint's data.",
+        "required": [
+          "id",
+          "run_id",
+          "run_step_id",
+          "tool_call_id",
+          "tool",
+          "undo_data",
+          "created_at",
+          "undone_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_step_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "tool_call_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "undo_data": {
+            "description": "What the tool's undo needs; `null` when the handler set none, so it can't be undone."
+          },
+          "undone_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the action was undone; `null` while it stands."
+          }
+        }
+      },
       "Application": {
         "type": "object",
         "description": "One `applications` row: the body of every route that returns an application.",
@@ -1870,6 +2285,16 @@
           "offer",
           "rejected"
         ]
+      },
+      "ApproveAction": {
+        "type": "object",
+        "description": "The `POST /pending-actions/{id}/approve` body: `{}` approves the requested input,\n`{\"input\": {…}}` approves an edited one.",
+        "properties": {
+          "input": {
+            "description": "Replaces the requested input; checked against the tool's input schema."
+          }
+        },
+        "additionalProperties": false
       },
       "Capture": {
         "type": "object",
@@ -2609,6 +3034,97 @@
           }
         }
       },
+      "PendingAction": {
+        "type": "object",
+        "description": "One `pending_actions` row: an `external` tool call waiting for, or past, the user's\ndecision.",
+        "required": [
+          "id",
+          "run_id",
+          "run_step_id",
+          "tool_call_id",
+          "tool",
+          "input",
+          "approved_input",
+          "status",
+          "output",
+          "executed_tool_call_id",
+          "created_at",
+          "decided_at",
+          "executed_at"
+        ],
+        "properties": {
+          "approved_input": {
+            "description": "The input the user approved: the edited input, or a copy of `input`."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decided_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "executed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "executed_tool_call_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The tool call that claimed the action and ran the handler."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "input": {
+            "description": "The input the caller asked for."
+          },
+          "output": {
+            "description": "The handler's output, once executed."
+          },
+          "run_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_step_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PendingActionStatus"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "tool_call_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The tool call that asked for the action."
+          }
+        }
+      },
+      "PendingActionStatus": {
+        "type": "string",
+        "description": "Where a pending action is.",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "executing",
+          "executed",
+          "failed"
+        ]
+      },
       "Permission": {
         "type": "string",
         "description": "What a tool may do.",
@@ -2705,6 +3221,70 @@
           }
         ],
         "description": "One resume version with its extracted text: the `GET /resumes/{id}` body."
+      },
+      "ReviewItem": {
+        "type": "object",
+        "description": "One `review_items` row.",
+        "required": [
+          "id",
+          "run_id",
+          "run_step_id",
+          "kind",
+          "confidence",
+          "payload",
+          "status",
+          "created_at",
+          "resolved_at"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "number",
+            "format": "double",
+            "description": "The step's confidence, 0 to 1."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "description": "What the step was deciding, e.g. `tidy.note`."
+          },
+          "payload": {
+            "description": "The result the step didn't apply."
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "run_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_step_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReviewItemStatus"
+          }
+        }
+      },
+      "ReviewItemStatus": {
+        "type": "string",
+        "description": "Where a review item is.",
+        "enum": [
+          "pending",
+          "accepted",
+          "dismissed"
+        ]
       },
       "Run": {
         "type": "object",
@@ -2826,7 +3406,9 @@
           "running",
           "paused",
           "succeeded",
-          "failed"
+          "failed",
+          "awaiting_approval",
+          "rejected"
         ]
       },
       "RunStep": {
@@ -3064,8 +3646,36 @@
           "pending",
           "running",
           "succeeded",
-          "failed"
+          "failed",
+          "awaiting_approval"
         ]
+      },
+      "TidyRequest": {
+        "type": "object",
+        "description": "The `POST /applications/{id}/tidy` body.",
+        "required": [
+          "note",
+          "message"
+        ],
+        "properties": {
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "How sure the caller is of the note, 0 to 1 (default 1). Below 0.8 the note goes to\nthe review queue instead of the timeline."
+          },
+          "message": {
+            "type": "string",
+            "description": "The follow-up message to draft. Required; trimmed, at most 20,000 characters."
+          },
+          "note": {
+            "type": "string",
+            "description": "The note to add to the timeline. Required; trimmed, at most 20,000 characters."
+          }
+        },
+        "additionalProperties": false
       },
       "ToolCall": {
         "type": "object",
@@ -3172,7 +3782,8 @@
           "failed",
           "invalid_input",
           "invalid_output",
-          "unknown_tool"
+          "unknown_tool",
+          "awaiting_approval"
         ]
       },
       "ValidationErrors": {

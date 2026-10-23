@@ -18,6 +18,7 @@ pub mod openapi;
 pub mod resumes;
 pub mod runs;
 pub mod tools;
+pub mod workflows;
 
 use rocket::fairing::AdHoc;
 use rocket::figment::Figment;
@@ -47,14 +48,14 @@ pub fn rocket(
     let bus = EventBus::new();
     let wake = Wake::default();
     let (stop, stopped) = watch::channel(false);
+    let runtime = workflows::runtime();
     let worker = Worker {
         pool: pool.clone(),
         runner: claude.clone(),
         bus: bus.clone(),
         config: jobs,
         wake: wake.0.clone(),
-        // No workflows or tools are registered yet.
-        runtime: runs::Runtime::default(),
+        runtime: runtime.clone(),
     };
 
     let rocket = rocket::custom(figment)
@@ -62,6 +63,7 @@ pub fn rocket(
         .manage(claude)
         .manage(bus)
         .manage(wake)
+        .manage(runtime)
         .manage(google::Google::new(google))
         .manage(capture::Capturer::new(capture))
         .mount(
@@ -92,6 +94,13 @@ pub fn rocket(
                 jobs::show,
                 runs::list,
                 runs::show,
+                runs::approvals::list,
+                runs::approvals::approve_route,
+                runs::approvals::reject_route,
+                runs::actions::list,
+                runs::actions::undo_route,
+                runs::review::list,
+                workflows::tidy::start_tidy,
                 google::connect,
                 google::callback,
                 google::status,

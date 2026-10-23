@@ -1,16 +1,19 @@
 # Agent runtime
 
-Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps executed by the job queue, with each step's input, output, status, tokens and cost stored as it goes. Steps call the model through Waypoint's `claude -p` runner and call **tools**, typed Rust handlers with JSON schemas and a permission level. This page covers the shared machinery in `api/src/runs`, `api/src/tools` and `api/src/mcp`. No real workflows or tools are registered yet; the approval gate, undo, per-step tool allowlists and the run inspector UI build on this later.
+Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps executed by the job queue, with each step's input, output, status, tokens and cost stored as it goes. Steps call the model through Waypoint's `claude -p` runner and call **tools**, typed Rust handlers with JSON schemas and a permission level. This page covers the shared machinery in `api/src/runs`, `api/src/tools` and `api/src/mcp`, the guardrails that enforce each tool's permission level ([approval gate](#approval-gate), [action log and undo](#action-log-and-undo), [review items](#review-items)), and the one workflow the app ships, the [`tidy_application` sample](#sample-workflow-tidy_application) in `api/src/workflows`. Per-step tool allowlists and a review queue UI build on this later.
 
 ## Tables
 
 | Table | One row per | Holds |
 |---|---|---|
-| `agent_runs` | run of a workflow | `workflow`, `status` (`queued`, `running`, `paused`, `succeeded`, `failed`), `input`, `output`, `error`, token and cost totals, `job_id` (the latest `agent_run` job), `started_at`, `finished_at` |
-| `run_steps` | step of a run | `run_id`, `ordinal` (0, 1, …; unique per run), `name`, `status` (`pending`, `running`, `succeeded`, `failed`), `attempts`, `input`, `output`, `error`, token and cost totals, `claude_call_id` |
-| `tool_calls` | tool invocation in a step | `run_step_id`, `tool`, `permission`, `status`, `input`, `output`, `error`, tokens, cost, `claude_call_id`, `duration_ms` |
+| `agent_runs` | run of a workflow | `workflow`, `status` (`queued`, `running`, `paused`, `succeeded`, `failed`, `awaiting_approval`, `rejected`), `input`, `output`, `error`, token and cost totals, `job_id` (the latest `agent_run` job), `started_at`, `finished_at` |
+| `run_steps` | step of a run | `run_id`, `ordinal` (0, 1, …; unique per run), `name`, `status` (`pending`, `running`, `succeeded`, `failed`, `awaiting_approval`), `attempts`, `input`, `output`, `error`, token and cost totals, `claude_call_id` |
+| `tool_calls` | tool invocation in a step | `run_step_id`, `tool`, `permission`, `status` (`running`, `succeeded`, `failed`, `invalid_input`, `invalid_output`, `unknown_tool`, `awaiting_approval`), `input`, `output`, `error`, tokens, cost, `claude_call_id`, `duration_ms` |
+| `pending_actions` | distinct `external` request in a step | `run_id`, `run_step_id`, `tool_call_id` (the call that asked), `tool`, `input` (as requested), `approved_input`, `status` (`pending`, `approved`, `rejected`, `executing`, `executed`, `failed`), `output`, `executed_tool_call_id` (the call that claimed it), `created_at`, `decided_at`, `executed_at`. Unique on (`run_step_id`, `tool`, `md5(input::text)`) |
+| `agent_actions` | succeeded `write` tool call | `run_id`, `run_step_id`, `tool_call_id` (unique), `tool`, `undo_data`, `created_at`, `undone_at` |
+| `review_items` | result a step wasn't sure enough to apply | `run_id`, `run_step_id`, `kind`, `confidence` (0..=1), `payload`, `status` (`pending`, `accepted`, `dismissed`), `created_at`, `resolved_at`. Unique on (`run_step_id`, `kind`, `md5(payload::text)`) |
 
-Deleting a run deletes its steps and their tool calls. The `claude_call_id` columns point at `claude_calls`; runs reach their model calls through their steps.
+Deleting a run deletes its steps, their tool calls, and its pending actions, actions and review items. The `claude_call_id` columns point at `claude_calls`; runs reach their model calls through their steps.
 
 ## Starting and running
 
@@ -43,10 +46,12 @@ When a run's job runs again, steps that already `succeeded` are skipped and thei
 | kill switch on before the run or a step starts | defer with no delay (the queue runs on) | `paused` | unchanged | unchanged |
 | kill switch turned off | — (the job is claimed again) | `queued` | unchanged | unchanged |
 | permanent error, or the workflow isn't registered | fail | `failed` | error | set |
-| run already `succeeded` when the job starts | done (no-op) | unchanged | — | — |
+| a tool call waits for approval ([parked](#parking)) | done | `awaiting_approval` | cleared | unchanged |
+| the user rejects a pending action (not a job) | — | `rejected` | `the user rejected pending action <id>` | set |
+| run already `succeeded`, `awaiting_approval` or `rejected` when the job starts | done (no-op) | unchanged | — | — |
 | run row missing | fail | — | — | — |
 
-A step returns `StepError::Retry`, `UsageLimit` or `Fail`. Model-call errors convert with `?`: a usage limit gives `UsageLimit` and any other runner error gives `Retry`, the same mapping the other job kinds use. Tool errors convert too: an unknown tool or an invalid input or output gives `Fail`, and a failed handler or database error gives `Retry`. A database error inside the executor gives `Retry`.
+A step returns `StepError::Retry`, `UsageLimit` or `Fail`. Model-call errors convert with `?`: a usage limit gives `UsageLimit` and any other runner error gives `Retry`, the same mapping the other job kinds use. Tool errors convert too: an unknown tool, an invalid input or output, or a rejected action gives `Fail`, and a failed handler, a database error or a call awaiting approval gives `Retry` (a step with a call awaiting approval parks whatever it returns, so that one is only a fallback). A database error inside the executor gives `Retry`.
 
 ## Kill switch
 
@@ -58,6 +63,8 @@ Turning it **on** (`kill_switch::set_paused(pool, bus, wake, true)`):
 - a `running` run finishes the step it's on, then becomes `paused` before its next step starts. That step stays `pending` and the run's `error` doesn't change. Its job goes back to the queue with its attempt given back (`job.deferred`), without pausing the queue,
 - the worker claims no `agent_run` job. Other job kinds (`test_prompt`, `capture_extract`) still run, because they aren't agents,
 - `runs::start` and `runs::resume` still store the run and its job, with the run `paused` instead of `queued`. They read the switch `FOR SHARE`, so a concurrent change waits for them and then moves their run too.
+
+A run that is `awaiting_approval` keeps that status while the switch is on, and its pending actions can still be approved or rejected. Rejecting ends it `rejected` as usual. Approving its last pending action stores it `paused` with its job, so the parked step doesn't run until the switch is off.
 
 Turning it **off** makes every `paused` run `queued` again and wakes the worker. Runs carry on from their first unfinished step; steps that already succeeded don't run again.
 
@@ -102,9 +109,10 @@ A step calls a tool directly with `ctx.tool(name, input)`, or lets the model cal
 1. inserts a `tool_calls` row (`running`); if that fails, the handler never runs,
 2. for an unknown name, ends `unknown_tool` with no permission, without calling a handler,
 3. checks the input against the input schema and deserializes it into `Input`; either failing ends `invalid_input` without calling the handler,
-4. runs the handler; an error ends `failed`,
-5. checks the output against the output schema; a mismatch ends `invalid_output`, with the output stored for debugging,
-6. otherwise ends `succeeded` with the output.
+4. for an `external` tool, passes the [approval gate](#approval-gate), which may end the call without running the handler,
+5. runs the handler; an error ends `failed`,
+6. checks the output against the output schema; a mismatch ends `invalid_output`, with the output stored for debugging,
+7. otherwise ends `succeeded` with the output. A succeeded `write` call also gets its [`agent_actions` row](#action-log-and-undo), written in the same transaction as the final `tool_calls` update.
 
 Each row records the input, output, error, duration, tokens and cost, and `claude_call_id`: the model call that asked for the tool (empty for `ctx.tool` and for agent calls that failed). Validation errors name the JSON path and the expected type, such as `$.items[2].title: expected string`, and never quote the value.
 
@@ -116,7 +124,53 @@ Each row records the input, output, error, duration, tokens and cost, and `claud
 | `write` | Changes Waypoint's own data; reversible and logged with undo. |
 | `external` | Leaves Waypoint (sends, submits, calls out); always passes an approval gate. |
 
-Levels are stored on every tool call. Until the approval gate for `external` tools exists (a later job), the [MCP server](#mcp-server) neither lists nor runs them, so only step code can call one.
+Levels are stored on every tool call and enforced in the registry, so step code (`ctx.tool`) and the model (through the [MCP server](#mcp-server)) get the same rules: `external` calls stop at the [approval gate](#approval-gate), and `write` calls are logged for [undo](#action-log-and-undo).
+
+## Approval gate
+
+An `external` call never runs its handler on first request. Once its input passes the schema check (a bad input still ends `invalid_input` and creates nothing), the registry finds or creates the step's `pending_actions` row for that tool and requested input, and acts on its status:
+
+| Pending action | What the call does | `tool_calls` row |
+|---|---|---|
+| new, or `pending` | returns `ToolCallError::AwaitingApproval { pending_action_id }`; the step [parks](#parking) | `awaiting_approval` |
+| `approved` | claims the action (below), then runs the handler with `approved_input`. In the same transaction as the row, the action becomes `executed` with `output` and `executed_at` when the call succeeded, `failed` otherwise | as for any call |
+| `executing` | another attempt claimed it and is running the handler: returns `ToolCallError::Executing`, which retries the step, so a later attempt gets the stored output | `failed` |
+| `executed` | returns the stored `output` without running the handler again (steps are at-least-once) | `succeeded` with that output |
+| `failed` | returns `ToolCallError::ExecutionFailed`, which fails the step; the handler never runs a second time | `failed` |
+| `rejected` | returns `ToolCallError::Rejected`, which fails the step | `failed`, `the user rejected this action` |
+
+The row is keyed on (step, tool, requested input), so the step repeating the same call after approval finds it again. A call with a different input (a model may ask differently on resume) creates a new pending action.
+
+An approved action runs at most once. Before its handler runs, the call claims it with `UPDATE pending_actions SET status = 'executing', executed_tool_call_id = … WHERE id = … AND status = 'approved'`, so of two concurrent attempts of the same step (a job whose lease expired while the first attempt was still running, say) only the one that wins runs the handler, and the other acts on the status it finds. An external call can't be taken back, so a claimed action is never re-run: a handler failure or invalid output marks it `failed` and fails the step, and an action left `executing` by a crashed process stays there, so its step retries until it runs out of attempts and fails. Either way the user starts a new run to try again.
+
+### Parking
+
+When a step made at least one call that is awaiting approval, it parks whatever it returned (`Ok`, any `Err`, or an error it swallowed): in one transaction the step becomes `awaiting_approval` with its spend added and no output, and the run becomes `awaiting_approval` with `error` cleared and `finished_at` unchanged. The job ends `done` with `{"run_id": <id>, "status": "awaiting_approval"}`. A job that starts on an `awaiting_approval` or `rejected` run does nothing.
+
+### Deciding
+
+- `POST /pending-actions/{id}/approve` with `{}` approves the requested input; `{"input": {…}}` approves an edited one, checked against the tool's input schema and typed input (422 `{"errors":[{"field":"input","message":"<path>: <expected>"}]}` otherwise, never quoting values). The action becomes `approved` with `approved_input` and `decided_at`. When the run has no other `pending` action, it becomes `queued` (`paused` while the [kill switch](#kill-switch) is on, read `FOR SHARE` like `runs::start`) with a new `agent_run` job in the same transaction and the worker is woken; the parked step then runs again (the steps before it are skipped as usual). While other actions are still pending, the run stays `awaiting_approval`.
+- `POST /pending-actions/{id}/reject` rejects the action and every other `pending` action of the run, fails the run's `awaiting_approval` steps, and ends the run `rejected` with the error `the user rejected pending action <id>` and `finished_at`, in one transaction. The handler never runs. `runs::resume` only queues `failed` runs, so a rejected run is final.
+
+Both answer 409 with nothing changed unless the action is `pending` and its run `awaiting_approval`; that includes a run that is still `running` because its step hasn't parked yet. Approve is also 409 when the tool is no longer registered. Both lock the pending action, then its run, so they serialize with each other and with parking. `runs::approvals::{approve, reject}` are the same operations as library functions.
+
+## Action log and undo
+
+A `write` tool's handler calls `ctx.set_undo(data)` with what its undo needs, and implements `Tool::undo`:
+
+```rust
+async fn undo(&self, conn: &mut sqlx::PgConnection, data: Value) -> Result<(), UndoError>;
+```
+
+The default returns `UndoError::Unsupported`. `UndoError` is `Unsupported`, `Conflict(String)` or `Database(sqlx::Error)`.
+
+Every succeeded `write` call inserts one `agent_actions` row with the `undo_data` in the same transaction as the call's final `tool_calls` update. A write tool that never called `set_undo` still succeeds; its row has `undo_data = NULL`, a warning is logged, and it can't be undone. The handler's own write goes through the pool, so it isn't atomic with the log row (a known gap).
+
+`POST /actions/{id}/undo` reverts exactly one action in one transaction: it locks the row, runs the tool's `undo` on the transaction's connection with `undo_data`, and sets `undone_at`. It is 409 with nothing changed when the action is already undone, has no `undo_data`, its tool isn't registered, or the undo reports a conflict. The conflict policy is **refuse**: an undo whose record changed or is gone reports `Conflict` rather than overwrite anything. Undo publishes no event, since the run doesn't change.
+
+## Review items
+
+`ctx.review_if_unsure(kind, confidence, payload)` sends a result the step isn't sure of to the review queue. When `confidence` is below `runs::REVIEW_THRESHOLD` (0.8) or isn't finite, it stores a `pending` `review_items` row and returns `Some(id)`, and the step must not apply the result. Otherwise it returns `None`. The confidence is stored clamped to 0..=1, with NaN stored as 0, and a rerun of the step gets the same item back for the same kind and payload. Resolving items (accept or dismiss) comes later; `GET /review-items` lists the pending ones.
 
 ### Supported schema subset
 
@@ -130,7 +184,7 @@ Any other keyword (`oneOf`, `$ref`, `minimum`, `pattern`, …) makes registratio
 
 ## MCP server
 
-A step hands the model Waypoint's tools with `ctx.call_with_tools(req)` or `ctx.call_structured_with_tools::<T>(req, schema)`. They work like `call`/`call_structured`, except that every registered `read` and `write` tool is available to the model through Waypoint's MCP server, and no other tool is. Plain `call`/`call_structured` never pass any MCP flags.
+A step hands the model Waypoint's tools with `ctx.call_with_tools(req)` or `ctx.call_structured_with_tools::<T>(req, schema)`. They work like `call`/`call_structured`, except that every registered tool is available to the model through Waypoint's MCP server, and no other tool is. `external` tools pass the [approval gate](#approval-gate) as they do for step code, so a model asking for one parks the step even when the step's code returns `Ok`. Plain `call`/`call_structured` never pass any MCP flags.
 
 ### Transport
 
@@ -152,7 +206,7 @@ Newline-delimited JSON-RPC 2.0 over the relay's stdio. Requests on one connectio
 |---|---|
 | `initialize` | `protocolVersion` (the client's when it is `2025-06-18`, `2025-03-26` or `2024-11-05`, otherwise `2025-06-18`), `capabilities: {tools: {listChanged: false}}`, `serverInfo: {name: "waypoint", version}` |
 | `ping` | `{}` |
-| `tools/list` | `{"tools": [{name, description, inputSchema}]}` for every registered tool except `external` ones, by name. No `outputSchema`. |
+| `tools/list` | `{"tools": [{name, description, inputSchema}]}` for every registered tool, by name. No `outputSchema`. |
 | `tools/call` `{name, arguments}` | runs the tool through the registry (missing `arguments` counts as `{}`) |
 
 Notifications (no `id`) get no response. Errors: an unknown method is `-32601`, a line that isn't JSON is `-32700`, and a batch array or any other non-object is `-32600`.
@@ -163,9 +217,9 @@ How a `tools/call` ends:
 |---|---|---|
 | output | `{"content":[{"type":"text","text":"<output as compact JSON>"}],"isError":false}` | as for `ctx.tool` |
 | unknown tool | JSON-RPC error `-32602`, `no tool has this name` | `unknown_tool` |
-| invalid input or output, handler or model-call failure | `{"content":[{"type":"text","text":"<error>"}],"isError":true}`, so the model can react | as for `ctx.tool` |
+| invalid input or output, handler or model-call failure, rejected action | `{"content":[{"type":"text","text":"<error>"}],"isError":true}`, so the model can react | as for `ctx.tool` |
 | database error | `isError` result `the tool call could not be recorded`; the sqlx error goes to the log only | none or `running` |
-| `external` tool | `isError` result `this tool needs the user's approval and isn't available to agents yet`; the handler never runs | none |
+| awaiting approval (`external` tool) | `isError` result `this action is waiting for the user's approval; end your turn without retrying it`; the handler doesn't run and the step parks | `awaiting_approval`, plus a `pending` pending action |
 | `name` missing or not a string | JSON-RPC error `-32602`, `invalid params` | none |
 
 Error texts never quote input values.
@@ -174,14 +228,32 @@ Error texts never quote input values.
 
 Tool calls made during an agent call are recorded on the calling step. When the outer call succeeds, every `tool_calls` row its session created gets `claude_call_id` set to the outer call's `claude_calls.id`; when it fails, they keep `claude_call_id` empty. The model calls a tool handler makes count against the step (and so the run) even when the outer call fails. A usage limit inside a tool's own model call reaches the model as an `isError` result, not as the step's outcome.
 
+## Sample workflow: `tidy_application`
+
+The production runtime (`workflows::runtime()`) registers one workflow, which exercises every guardrail without calling a model. Its run input is `{"application_id", "note", "message", "confidence"}`, and each step passes its input through and adds to it:
+
+| Step | Tool (permission) | What it does |
+|---|---|---|
+| `inspect` | `get_application` (`read`) | Reads `{id, company, title, status}` of the application and adds it as `application`. An unknown id fails the tool (`application <id> doesn't exist`), which retries and then fails the run. |
+| `note` | `add_note` (`write`) | `review_if_unsure("tidy.note", confidence, {application_id, note})`: below 0.8 it adds `review_item_id` and writes nothing. Otherwise `add_note` adds a `note` to the application's timeline, adds `note_event_id`, and logs an action whose undo deletes that note (a conflict when it is gone). |
+| `draft` | `draft_follow_up` (`external`) | Always runs, so every run reaches the gate. After approval it returns `{"draft": "<message> (to <company>)"}`, which is the run's output. It sends and stores nothing: agents draft, the user sends. |
+
+The three tools are also in the MCP server's `tools/list`. The README's "Try the sample workflow" walks through it with curl.
+
 ## Routes
 
-Both routes are read-only, answer only a local `Host` (403 otherwise) and answer 500 on a database error.
+Every route answers only a local `Host` (403 otherwise) and answers 500 on a database error. The `POST` routes also refuse a cross-site request (`Sec-Fetch-Site: cross-site`) and an HTML form body with 403, and the ones with a JSON body answer 415 to any other content type and 400 to a body that doesn't parse or has unknown fields.
 
 - `GET /runs?limit=&before=`: runs newest first (`id` descending). `limit` defaults to 50 and is clamped to 1..=200. `before` returns only runs with `id < before`, so the next page is `?before=<last id>`. With no runs the body is `[]`.
 - `GET /runs/{id}`: the run with `steps` ordered by `ordinal`, each with its `tool_calls` ordered by `id`. An unknown id is 404.
+- `GET /pending-actions`: up to 200 `pending` actions, oldest first.
+- `POST /pending-actions/{id}/approve` (`{}` or `{"input": {…}}`) and `POST /pending-actions/{id}/reject` (no body): see [Deciding](#deciding). 200 with the `PendingAction`; 404 for an unknown id.
+- `GET /actions?run_id=&limit=&before=`: the action log newest first, optionally for one run; `limit` and `before` work as on `GET /runs`.
+- `POST /actions/{id}/undo` (no body): see [Action log and undo](#action-log-and-undo). 200 with the `AgentAction`; 404 for an unknown id.
+- `GET /review-items`: up to 200 `pending` review items, oldest first.
+- `POST /applications/{id}/tidy` with `{"note", "message", "confidence"?}` starts [`tidy_application`](#sample-workflow-tidy_application) and answers 201 with the queued `Run`. `note` and `message` are required, trimmed and at most 20,000 characters; `confidence` defaults to 1 and must be within 0..=1; failures are 422 naming the field. An unknown application is 404, checked before the run starts.
 
-There are no routes to start, resume or cancel runs yet.
+There are no generic routes to start, resume or cancel runs.
 
 ## Events
 
@@ -201,6 +273,9 @@ It fires after each of these commits, never inside a transaction:
 - the executor marking the run `running`,
 - a step going `running`,
 - each `StepContext::tool` call returning, whether the tool succeeded or failed,
+- each MCP `tools/call` that reached the registry returning (a row was written or attempted; a call without a usable `name` publishes nothing),
+- a step parking (the run is `awaiting_approval`),
+- an approve that queues the run again, and a reject (the run is `rejected`),
 - a step succeeding or failing (a failed step's event already has the run's settled status: `queued` for a retry or a usage-limit deferral, `failed` otherwise),
 - the run succeeding, or failing because its workflow isn't in the runtime,
 - the best-effort settle after a database error.

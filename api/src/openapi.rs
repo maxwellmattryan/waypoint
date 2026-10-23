@@ -20,10 +20,14 @@ use crate::health::{self, Health};
 use crate::jobs::{self, Job};
 use crate::kill_switch::{self, DataDeletion, DeleteAllData, KillSwitch, SetKillSwitch};
 use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
+use crate::runs::actions::{self, AgentAction};
+use crate::runs::approvals::{self, ApproveAction, PendingAction, PendingActionStatus};
+use crate::runs::review::{self, ReviewItem, ReviewItemStatus};
 use crate::runs::{
     self, Run, RunDetail, RunStatus, RunStep, RunStepDetail, StepStatus, ToolCall, ToolCallStatus,
 };
 use crate::tools::Permission;
+use crate::workflows::tidy::{self, TidyRequest};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -58,6 +62,13 @@ use crate::tools::Permission;
         capture::capture,
         runs::list,
         runs::show,
+        approvals::list,
+        approvals::approve_route,
+        approvals::reject_route,
+        actions::list,
+        actions::undo_route,
+        review::list,
+        tidy::start_tidy,
         kill_switch::show,
         kill_switch::update,
         kill_switch::delete_all,
@@ -103,6 +114,13 @@ use crate::tools::Permission;
         ToolCall,
         ToolCallStatus,
         Permission,
+        PendingAction,
+        PendingActionStatus,
+        ApproveAction,
+        AgentAction,
+        ReviewItem,
+        ReviewItemStatus,
+        TidyRequest,
         KillSwitch,
         SetKillSwitch,
         DeleteAllData,
