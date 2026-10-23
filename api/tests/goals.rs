@@ -81,6 +81,22 @@ async fn planner_runs(pool: &PgPool) -> Vec<(Value, Option<Value>)> {
         .expect("read the runs")
 }
 
+/// The output of `plan_goal` run number `index`, once the executor stores it. The step
+/// commits the goal's new status before the executor records the run's output.
+async fn planner_output(pool: &PgPool, index: usize) -> Value {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        if let Some(Some(output)) = planner_runs(pool).await.get(index).map(|run| run.1.clone()) {
+            return output;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "plan_goal run {index} never stored an output"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// The prompt of the fake's latest call.
 fn last_prompt(fake: &common::Fake) -> String {
     let stdin = std::fs::read_to_string(fake.record.join("stdin")).expect("stdin");
@@ -218,10 +234,9 @@ async fn planner_asks_then_plans(pool: PgPool) {
     assert!(asked["plan"].is_null());
     let first = asked["questions"][0]["id"].as_i64().unwrap();
     let second = asked["questions"][1]["id"].as_i64().unwrap();
-    let run_output = planner_runs(&pool).await[0].1.clone();
     assert_eq!(
-        run_output,
-        Some(json!({"goal_id": id, "kind": "questions", "question_ids": [first, second]}))
+        planner_output(&pool, 0).await,
+        json!({"goal_id": id, "kind": "questions", "question_ids": [first, second]})
     );
 
     // Answering plans again with the answers in the prompt.
@@ -302,12 +317,12 @@ async fn planner_asks_then_plans(pool: PgPool) {
     assert!(call.1 > 0.0);
     let plan_id = plan["id"].as_i64().unwrap();
     assert_eq!(
-        runs[1].1,
-        Some(json!({
+        planner_output(&pool, 1).await,
+        json!({
             "goal_id": id, "kind": "plan", "plan_id": plan_id, "version": 1,
             "status": "ready", "review_item_id": null, "companies": 1, "unverified": 0,
             "dropped": {"companies": 0, "keywords": 0, "locations": 0},
-        }))
+        })
     );
     let second_run: i64 = sqlx::query_scalar(
         "SELECT id FROM agent_runs WHERE workflow = 'plan_goal' ORDER BY id DESC LIMIT 1",
