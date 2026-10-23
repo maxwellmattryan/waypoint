@@ -197,6 +197,9 @@ pub enum SourceKind {
     Run,
     /// Read from an email; `source_ref` is its message id.
     Email,
+    /// Learned by the memory writer from your decisions; `source_ref` is the lowest
+    /// evidence signal id.
+    Signal,
 }
 
 text_enum!(SourceKind, "source kind", [
@@ -205,6 +208,7 @@ text_enum!(SourceKind, "source kind", [
     Linkedin => "linkedin",
     Run => "run",
     Email => "email",
+    Signal => "signal",
 ]);
 
 /// One `memories` row: the body of every route that returns a memory.
@@ -260,6 +264,26 @@ pub struct MemoryFields {
     topic: MemoryTopic,
     content: String,
     tags: Vec<String>,
+}
+
+impl MemoryFields {
+    pub fn kind(&self) -> MemoryKind {
+        self.kind
+    }
+
+    pub fn topic(&self) -> MemoryTopic {
+        self.topic
+    }
+
+    /// Trimmed, never blank.
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    /// Normalised ([`normalise_tags`]).
+    pub fn tags(&self) -> &[String] {
+        &self.tags
+    }
 }
 
 /// Trims a tag, lowercases it and collapses each run of whitespace to one space.

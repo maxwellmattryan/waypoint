@@ -26,12 +26,10 @@ use crate::evals::Suite;
 use crate::events::EventBus;
 use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
-use crate::memories::{
-    self, MemoryInput, MemoryKind, MemorySource, MemoryStatus, MemoryTopic, NewMemory,
-};
 use crate::retrieval;
 use crate::runs::{self, Run, Runtime, StepContext, StepError, Workflow};
 use crate::tools::{Permission, Tool, ToolContext, ToolError, UndoError};
+use crate::workflows::{EvalMemory, seed_memories};
 
 /// The workflow's name.
 pub const WORKFLOW: &str = "tidy_application";
@@ -413,21 +411,6 @@ struct EvalSetup {
     memories: Vec<EvalMemory>,
 }
 
-/// A memory a case seeds. Its id is the variable `memory_<name>`.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EvalMemory {
-    name: String,
-    kind: MemoryKind,
-    topic: MemoryTopic,
-    content: String,
-    #[serde(default)]
-    tags: Vec<String>,
-    /// `confirmed` when absent.
-    #[serde(default)]
-    status: Option<MemoryStatus>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EvalApplication {
@@ -470,45 +453,7 @@ impl Suite for TidyEval {
             .map_err(|err| format!("cannot insert the application: {err}"))?;
             vars.insert("application_id".into(), json!(id));
         }
-        sqlx::query("DELETE FROM memories")
-            .execute(pool)
-            .await
-            .map_err(|err| format!("cannot clear the memories: {err}"))?;
-        for memory in setup.memories {
-            let name = memory.name.trim();
-            if name.is_empty() {
-                return Err("a memory has a blank name".into());
-            }
-            let var = format!("memory_{name}");
-            if vars.contains_key(&var) {
-                return Err(format!("two memories are named {name:?}"));
-            }
-            let fields = memories::validate(&MemoryInput {
-                kind: memory.kind,
-                topic: memory.topic,
-                content: memory.content,
-                tags: memory.tags,
-            })
-            .map_err(|err| {
-                let fields: Vec<String> = err
-                    .errors
-                    .iter()
-                    .map(|e| format!("{}: {}", e.field, e.message))
-                    .collect();
-                format!("memory {name:?} is invalid: {}", fields.join("; "))
-            })?;
-            let stored = memories::insert(
-                pool,
-                &NewMemory {
-                    fields,
-                    status: memory.status.unwrap_or(MemoryStatus::Confirmed),
-                    source: MemorySource::manual(),
-                },
-            )
-            .await
-            .map_err(|err| format!("cannot insert memory {name:?}: {err}"))?;
-            vars.insert(var, json!(stored.id));
-        }
+        seed_memories(pool, setup.memories, &mut vars).await?;
         Ok(vars)
     }
 }

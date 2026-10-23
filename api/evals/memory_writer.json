@@ -1,0 +1,112 @@
+{
+  "workflow": "memory_writer",
+  "cases": [
+    {
+      "name": "edited location becomes a preference",
+      "setup": {
+        "signals": [
+          {
+            "name": "edit",
+            "kind": "approval",
+            "subject": "draft_follow_up",
+            "drafted": {"application_id": 1, "message": "Thanks for the call! I'm happy to relocate to NYC for this role."},
+            "approved": {"application_id": 1, "message": "Thanks for the call! I'm looking for remote only roles."}
+          }
+        ]
+      },
+      "input": {},
+      "expect": {
+        "status": "succeeded",
+        "output": {
+          "signals": ["${signal_edit}"],
+          "created": [{"kind": "preference", "topic": "location", "evidence_signal_ids": ["${signal_edit}"]}],
+          "remaining": 0
+        }
+      }
+    },
+    {
+      "name": "dismissal reason becomes a preference",
+      "setup": {
+        "signals": [
+          {
+            "name": "dismiss",
+            "kind": "dismissal",
+            "subject": "tidy.note",
+            "drafted": {"application_id": 2, "note": "Applied to Coinbase's protocol team"},
+            "reason": "I won't work in crypto"
+          }
+        ]
+      },
+      "input": {},
+      "expect": {
+        "status": "succeeded",
+        "output": {
+          "signals": ["${signal_dismiss}"],
+          "created": [{"kind": "preference", "evidence_signal_ids": ["${signal_dismiss}"]}]
+        }
+      }
+    },
+    {
+      "name": "unedited approval teaches nothing",
+      "setup": {
+        "signals": [
+          {
+            "name": "plain",
+            "kind": "approval",
+            "subject": "draft_follow_up",
+            "drafted": {"application_id": 3, "message": "Thanks for your time today. Looking forward to next steps."}
+          }
+        ]
+      },
+      "input": {},
+      "expect": {
+        "status": "succeeded",
+        "output": {"signals": ["${signal_plain}"], "created": [], "updated": [], "revisions": []}
+      }
+    },
+    {
+      "name": "correction revises a confirmed answer",
+      "setup": {
+        "memories": [
+          {"name": "notice", "kind": "answer", "topic": "notice_period", "content": "Two weeks"}
+        ],
+        "signals": [
+          {
+            "name": "notice",
+            "kind": "approval",
+            "subject": "draft_follow_up",
+            "drafted": {"application_id": 4, "message": "I can start after two weeks' notice."},
+            "approved": {"application_id": 4, "message": "I can start after one month's notice."}
+          }
+        ]
+      },
+      "input": {},
+      "expect": {
+        "status": "succeeded",
+        "output": {
+          "signals": ["${signal_notice}"],
+          "created": [],
+          "revisions": [{"revises_memory_id": "${memory_notice}", "kind": "answer", "evidence_signal_ids": ["${signal_notice}"]}]
+        }
+      }
+    },
+    {
+      "name": "no signals makes no call",
+      "setup": {"signals": []},
+      "input": {},
+      "expect": {
+        "status": "succeeded",
+        "output": {
+          "signals": [],
+          "created": [],
+          "updated": [],
+          "revisions": [],
+          "already_known": 0,
+          "reviewed": [],
+          "invalid": [],
+          "remaining": 0
+        }
+      }
+    }
+  ]
+}

@@ -1652,6 +1652,33 @@
         }
       }
     },
+    "/memories/learn": {
+      "post": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "Asks the memory writer to learn from the unprocessed signals now.",
+        "operationId": "learn_memories",
+        "responses": {
+          "202": {
+            "description": "The `memory_writer` run: the waiting (`queued` or `paused`) one with `reused: true`, moved to start now when queued, or a new one that may start now. A run with no unprocessed signals makes no model call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryWriterQueued"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "500": {
+            "description": "The run could not be scheduled"
+          }
+        }
+      }
+    },
     "/memories/{id}": {
       "get": {
         "tags": [
@@ -3773,6 +3800,25 @@
           "other"
         ]
       },
+      "MemoryWriterQueued": {
+        "type": "object",
+        "description": "The `POST /memories/learn` body.",
+        "required": [
+          "run_id",
+          "reused"
+        ],
+        "properties": {
+          "reused": {
+            "type": "boolean",
+            "description": "Whether this is a writer run that was already waiting rather than a new one."
+          },
+          "run_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The `memory_writer` run that will process the unprocessed signals."
+          }
+        }
+      },
       "NewApplication": {
         "type": "object",
         "description": "The `POST /applications` body: the [`ApplicationInput`] fields plus an optional\nstarting status (`sourced` when omitted).",
@@ -4545,7 +4591,8 @@
           "resume",
           "linkedin",
           "run",
-          "email"
+          "email",
+          "signal"
         ]
       },
       "Stage": {

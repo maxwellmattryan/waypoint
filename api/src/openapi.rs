@@ -35,6 +35,7 @@ use crate::runs::{
     ToolCallStatus,
 };
 use crate::tools::Permission;
+use crate::workflows::memory_writer::{self, MemoryWriterQueued};
 use crate::workflows::tidy::{self, TidyRequest};
 
 #[derive(OpenApi)]
@@ -66,6 +67,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         memories::update,
         memories::confirm,
         memories::delete,
+        memory_writer::learn,
         memory_signals::list,
         linkedin::import,
         resume_profile::start,
@@ -133,6 +135,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         SignalKind,
         SignalOp,
         SignalChange,
+        MemoryWriterQueued,
         ProfileImportSummary,
         ProfileImportQueued,
         Run,

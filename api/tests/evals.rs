@@ -13,7 +13,7 @@ use waypoint_api::claude::ClaudeRequest;
 use waypoint_api::evals::{self, CaseResult, Options, Report, ScratchDb, Suite};
 use waypoint_api::runs::{RunStatus, Runtime, StepContext, StepError, Workflow};
 use waypoint_api::tools::Registry;
-use waypoint_api::workflows::{self, tidy};
+use waypoint_api::workflows::{self, memory_writer, tidy};
 
 /// The runner's own timeout; longer than any case timeout used here.
 const RUNNER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -151,6 +151,110 @@ async fn tidy_dataset_passes_without_approving(pool: PgPool) {
     .await
     .expect("count draft calls");
     assert_eq!(ran, 0, "the harness never approves");
+}
+
+#[sqlx::test]
+async fn memory_writer_suite_seeds_and_runs(pool: PgPool) {
+    // Setup replaces every signal and memory with the case's own.
+    let suite = memory_writer::MemoryWriterEval;
+    sqlx::query("INSERT INTO memories (kind, topic, content) VALUES ('fact', 'skill', 'Old')")
+        .execute(&pool)
+        .await
+        .expect("seed an old memory");
+    let setup = json!({
+        "memories": [{"name": "notice", "kind": "answer", "topic": "notice_period", "content": "Two weeks"}],
+        "signals": [
+            {"name": "edit", "kind": "approval", "subject": "draft_follow_up",
+             "drafted": {"message": "a"}, "approved": {"message": "b"}},
+            {"name": "plain", "kind": "approval", "subject": "draft_follow_up", "drafted": {"message": "a"}},
+            {"name": "no", "kind": "rejection", "subject": "draft_follow_up", "drafted": {"message": "a"}},
+            {"name": "why", "kind": "dismissal", "subject": "tidy.note", "drafted": {"note": "n"}, "reason": "Wrong role"}
+        ]
+    });
+    let vars = suite.setup(&pool, &setup).await.expect("setup");
+    let names: Vec<&String> = vars.keys().collect();
+    assert_eq!(
+        names,
+        [
+            "memory_notice",
+            "signal_edit",
+            "signal_no",
+            "signal_plain",
+            "signal_why"
+        ]
+    );
+    /// `(kind, pending_action_id, review_item_id, changes, reason)`.
+    type SignalRow = (
+        String,
+        Option<i64>,
+        Option<i64>,
+        Option<Value>,
+        Option<String>,
+    );
+    let rows: Vec<SignalRow> = sqlx::query_as(
+        "SELECT kind, pending_action_id, review_item_id, changes, reason \
+             FROM memory_signals ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read signals");
+    assert_eq!(
+        rows,
+        [
+            (
+                "approval".into(),
+                Some(1),
+                None,
+                Some(json!([{"op": "replace", "path": "/message", "before": "a", "after": "b"}])),
+                None
+            ),
+            ("approval".into(), Some(2), None, Some(json!([])), None),
+            ("rejection".into(), Some(3), None, None, None),
+            (
+                "dismissal".into(),
+                None,
+                Some(4),
+                None,
+                Some("Wrong role".into())
+            ),
+        ]
+    );
+    let contents: Vec<String> = sqlx::query_scalar("SELECT content FROM memories")
+        .fetch_all(&pool)
+        .await
+        .expect("read memories");
+    assert_eq!(contents, ["Two weeks"]);
+    assert!(
+        suite
+            .setup(&pool, &json!({"signals": [{"name": "x", "kind": "rejection", "subject": "s", "drafted": {}, "reason": "r"}]}))
+            .await
+            .is_err(),
+        "only a dismissal has a reason"
+    );
+
+    // The shipped "no signals" case passes through the real worker without a call.
+    let fake = common::fake("success", RUNNER_TIMEOUT);
+    let path = evals::default_path(memory_writer::WORKFLOW);
+    let dataset = evals::load(&path, memory_writer::WORKFLOW).expect("the shipped dataset loads");
+    let report = evals::run(
+        &pool,
+        fake.runner.clone(),
+        workflows::runtime(),
+        &suite,
+        common::fast_config(),
+        &dataset,
+        "memory_writer.json",
+        &Options {
+            cases: vec!["no signals makes no call".into()],
+            case_timeout: Duration::from_secs(30),
+        },
+    )
+    .await
+    .expect("the eval runs");
+    let text = report.text();
+    assert!(report.passed(), "{text}");
+    assert_eq!(report.totals.cases, 1, "{text}");
+    assert_eq!(report.cases[0].usage.calls, 0, "{text}");
 }
 
 #[sqlx::test]

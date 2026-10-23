@@ -1,11 +1,14 @@
-//! Learning signals: the raw evidence of what the user corrects and turns down, for a later
+//! Learning signals: the raw evidence of what the user corrects and turns down, for the
 //! memory writer to learn from. One `memory_signals` row per decision on something an agent
 //! drafted: an approval (with the diff from the drafted to the approved input), a rejection
 //! or a review-queue dismissal (with the user's optional reason).
 //!
 //! Signals are written only by the `record_*` helpers, each on the decision's own
-//! transaction, so a stored decision always has its signal and a failed one leaves none. The
-//! only route lists them; nothing over HTTP writes, edits or deletes one.
+//! transaction, so a stored decision always has its signal and a failed one leaves none.
+//! Each helper also schedules a memory writer run in that transaction
+//! ([`crate::workflows::memory_writer::schedule`], debounced), which claims the unprocessed
+//! signals and marks them processed (see docs/memory-writer.md). The only route lists them;
+//! nothing over HTTP writes, edits or deletes one.
 
 use std::collections::BTreeSet;
 
@@ -17,10 +20,13 @@ use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::applications::{ApiError, ValidationErrors, internal};
+use crate::events::EventBus;
 use crate::host::LocalHost;
 use crate::memories::{filter, text_enum};
+use crate::runs::Run;
 use crate::runs::approvals::PendingAction;
 use crate::runs::review::ReviewItem;
+use crate::workflows::memory_writer::{self, Trigger};
 
 /// What decision a signal records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -97,7 +103,7 @@ pub struct MemorySignal {
     pub created_at: DateTime<Utc>,
 }
 
-const COLUMNS: &str = "id, kind, run_id, pending_action_id, review_item_id, subject, drafted, \
+pub(crate) const COLUMNS: &str = "id, kind, run_id, pending_action_id, review_item_id, subject, drafted, \
                        approved, changes, reason, created_at";
 
 /// The changes that turn `drafted` into `approved`. Objects are compared key by key,
@@ -144,11 +150,23 @@ fn walk(changes: &mut Vec<SignalChange>, path: String, before: &Value, after: &V
     }
 }
 
-/// Records the approval of `action`, as returned by the approving UPDATE.
+/// Schedules the memory writer after a signal insert. Returns the run it created, for the
+/// caller to publish after its commit; `None` when a waiting run was reused.
+async fn schedule_writer(
+    tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
+) -> sqlx::Result<Option<Run>> {
+    let (run, reused) = memory_writer::schedule(tx, bus, Trigger::Decision).await?;
+    Ok((!reused).then_some(run))
+}
+
+/// Records the approval of `action`, as returned by the approving UPDATE, and schedules the
+/// memory writer ([`schedule_writer`]).
 pub(crate) async fn record_approval(
     tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
     action: &PendingAction,
-) -> sqlx::Result<()> {
+) -> sqlx::Result<Option<Run>> {
     let approved = action.approved_input.as_ref().unwrap_or(&action.input);
     let changes = sqlx::types::Json(diff(&action.input, approved));
     sqlx::query(
@@ -163,15 +181,17 @@ pub(crate) async fn record_approval(
     .bind(approved)
     .bind(changes)
     .execute(&mut **tx)
-    .await
-    .map(drop)
+    .await?;
+    schedule_writer(tx, bus).await
 }
 
-/// Records the rejection of `action`, the one the user rejected.
+/// Records the rejection of `action`, the one the user rejected, and schedules the memory
+/// writer.
 pub(crate) async fn record_rejection(
     tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
     action: &PendingAction,
-) -> sqlx::Result<()> {
+) -> sqlx::Result<Option<Run>> {
     sqlx::query(
         "INSERT INTO memory_signals (kind, run_id, pending_action_id, subject, drafted) \
          VALUES ('rejection', $1, $2, $3, $4)",
@@ -181,16 +201,18 @@ pub(crate) async fn record_rejection(
     .bind(&action.tool)
     .bind(&action.input)
     .execute(&mut **tx)
-    .await
-    .map(drop)
+    .await?;
+    schedule_writer(tx, bus).await
 }
 
-/// Records the dismissal of `item`, with the user's reason (already trimmed, never blank).
+/// Records the dismissal of `item`, with the user's reason (already trimmed, never blank),
+/// and schedules the memory writer.
 pub(crate) async fn record_dismissal(
     tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
     item: &ReviewItem,
     reason: Option<&str>,
-) -> sqlx::Result<()> {
+) -> sqlx::Result<Option<Run>> {
     sqlx::query(
         "INSERT INTO memory_signals (kind, run_id, review_item_id, subject, drafted, reason) \
          VALUES ('dismissal', $1, $2, $3, $4, $5)",
@@ -201,8 +223,8 @@ pub(crate) async fn record_dismissal(
     .bind(&item.payload)
     .bind(reason)
     .execute(&mut **tx)
-    .await
-    .map(drop)
+    .await?;
+    schedule_writer(tx, bus).await
 }
 
 /// Up to `limit` signals with `id < before` (any id when `None`), of `kind` when given,

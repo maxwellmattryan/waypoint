@@ -4,7 +4,9 @@
 //!
 //! Both decisions lock the pending action, then its run, so they serialize with each other
 //! and with the executor parking the run. Each records its learning signal
-//! ([`crate::memory_signals`]) in the same transaction.
+//! ([`crate::memory_signals`]), which schedules the memory writer, in the same transaction.
+
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use rocket::State;
@@ -211,7 +213,7 @@ pub async fn approve(
     .bind(&approved)
     .fetch_one(&mut *tx)
     .await?;
-    memory_signals::record_approval(&mut tx, &action).await?;
+    let writer = memory_signals::record_approval(&mut tx, bus, &action).await?;
     let others: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM pending_actions WHERE run_id = $1 AND status = 'pending'",
     )
@@ -226,11 +228,14 @@ pub async fn approve(
             .bind(status)
             .execute(&mut *tx)
             .await?;
-        Some(super::enqueue(&mut tx, bus, action.run_id).await?)
+        Some(super::enqueue(&mut tx, bus, action.run_id, Duration::ZERO).await?)
     } else {
         None
     };
     tx.commit().await?;
+    if let Some(run) = writer {
+        bus.publish(Event::RunUpdated { run });
+    }
     if let Some(run) = requeued {
         bus.publish(Event::RunUpdated { run });
         wake.0.notify_one();
@@ -279,8 +284,11 @@ pub async fn reject(
     .fetch_one(&mut *tx)
     .await?;
     // Only the action the user looked at; the run's other rejected actions get no signal.
-    memory_signals::record_rejection(&mut tx, &action).await?;
+    let writer = memory_signals::record_rejection(&mut tx, bus, &action).await?;
     tx.commit().await?;
+    if let Some(run) = writer {
+        bus.publish(Event::RunUpdated { run });
+    }
     super::publish(pool, bus, action.run_id).await;
     Ok(action)
 }

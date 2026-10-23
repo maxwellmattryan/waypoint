@@ -12,6 +12,7 @@ use sqlx::PgPool;
 
 use super::approvals::DecisionError;
 use crate::applications::{ApiError, JsonContent, ValidationErrors, internal, parsed, text};
+use crate::events::{Event, EventBus};
 use crate::host::{LocalHost, NotCrossSite};
 use crate::memory_signals;
 
@@ -118,9 +119,10 @@ pub async fn list_pending(pool: &PgPool) -> Result<Vec<ReviewItem>, sqlx::Error>
 
 /// Dismisses `pending` item `id`: marks it `dismissed` with `resolved_at` set, applies
 /// nothing, and records a `dismissal` signal with `reason` (trimmed, never blank) in the
-/// same transaction.
+/// same transaction, which schedules the memory writer.
 pub async fn dismiss(
     pool: &PgPool,
+    bus: &EventBus,
     id: i64,
     reason: Option<String>,
 ) -> Result<ReviewItem, DecisionError> {
@@ -133,8 +135,12 @@ pub async fn dismiss(
     .fetch_optional(&mut *tx)
     .await?;
     if let Some(item) = dismissed {
-        memory_signals::record_dismissal(&mut tx, &item, reason.as_deref()).await?;
+        let writer =
+            memory_signals::record_dismissal(&mut tx, bus, &item, reason.as_deref()).await?;
         tx.commit().await?;
+        if let Some(run) = writer {
+            bus.publish(Event::RunUpdated { run });
+        }
         return Ok(item);
     }
     let exists: Option<i32> = sqlx::query_scalar("SELECT 1 FROM review_items WHERE id = $1")
@@ -198,6 +204,7 @@ pub async fn dismiss_route(
     _json: JsonContent,
     id: i64,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
     body: Result<Json<DismissReviewItem>, json::Error<'_>>,
 ) -> Result<Json<ReviewItem>, ApiError> {
     let DismissReviewItem { reason } = parsed(body)?;
@@ -206,7 +213,7 @@ pub async fn dismiss_route(
     if !errors.is_empty() {
         return Err(ApiError::Invalid(ValidationErrors { errors }));
     }
-    dismiss(pool, id, reason)
+    dismiss(pool, bus, id, reason)
         .await
         .map(Json)
         .map_err(|err| err.into_api("dismiss a review item"))

@@ -198,6 +198,16 @@ impl StepContext<'_> {
         self.step_id
     }
 
+    /// The `agent_runs.id` this context belongs to.
+    pub fn run_id(&self) -> i64 {
+        self.run_id
+    }
+
+    /// The event bus, for steps that publish what they change.
+    pub fn bus(&self) -> &EventBus {
+        self.bus
+    }
+
     /// [`ClaudeRunner::call`], counted against this step.
     pub async fn call(&mut self, req: &ClaudeRequest) -> Result<ClaudeResponse, ClaudeError> {
         self.meter.call(self.pool, self.runner, req).await

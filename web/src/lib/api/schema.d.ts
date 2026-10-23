@@ -400,6 +400,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memories/learn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Asks the memory writer to learn from the unprocessed signals now. */
+        post: operations["learn_memories"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memories/{id}": {
         parameters: {
             query?: never;
@@ -1071,6 +1088,16 @@ export interface components {
          * @enum {string}
          */
         MemoryTopic: "position" | "skill" | "education" | "target_role" | "seniority" | "location" | "comp_floor" | "industry" | "deal_breaker" | "work_authorization" | "notice_period" | "salary_expectation" | "why_leaving" | "other";
+        /** @description The `POST /memories/learn` body. */
+        MemoryWriterQueued: {
+            /** @description Whether this is a writer run that was already waiting rather than a new one. */
+            reused: boolean;
+            /**
+             * Format: int64
+             * @description The `memory_writer` run that will process the unprocessed signals.
+             */
+            run_id: number;
+        };
         /**
          * @description The `POST /applications` body: the [`ApplicationInput`] fields plus an optional
          *     starting status (`sourced` when omitted).
@@ -1394,7 +1421,7 @@ export interface components {
          * @description Where a memory came from.
          * @enum {string}
          */
-        SourceKind: "manual" | "resume" | "linkedin" | "run" | "email";
+        SourceKind: "manual" | "resume" | "linkedin" | "run" | "email" | "signal";
         /** @description One `application_stages` row. */
         Stage: {
             /** Format: int64 */
@@ -3110,6 +3137,40 @@ export interface operations {
                 };
             };
             /** @description The memory could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    learn_memories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The `memory_writer` run: the waiting (`queued` or `paused`) one with `reused: true`, moved to start now when queued, or a new one that may start now. A run with no unprocessed signals makes no model call */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryWriterQueued"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run could not be scheduled */
             500: {
                 headers: {
                     [name: string]: unknown;
