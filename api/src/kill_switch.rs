@@ -36,6 +36,7 @@ pub const USER_TABLES: &[&str] = &[
     "resume_versions",
     "memories",
     "memory_signals",
+    "memory_evidence",
     "agent_runs",
     "run_steps",
     "tool_calls",
