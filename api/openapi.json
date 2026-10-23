@@ -3080,7 +3080,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "The tool call that ran the handler, once executed."
+            "description": "The tool call that claimed the action and ran the handler."
           },
           "id": {
             "type": "integer",
@@ -3120,7 +3120,9 @@
           "pending",
           "approved",
           "rejected",
-          "executed"
+          "executing",
+          "executed",
+          "failed"
         ]
       },
       "Permission": {

@@ -890,7 +890,7 @@ export interface components {
             executed_at: string | null;
             /**
              * Format: int64
-             * @description The tool call that ran the handler, once executed.
+             * @description The tool call that claimed the action and ran the handler.
              */
             executed_tool_call_id: number | null;
             /** Format: int64 */
@@ -915,7 +915,7 @@ export interface components {
          * @description Where a pending action is.
          * @enum {string}
          */
-        PendingActionStatus: "pending" | "approved" | "rejected" | "executed";
+        PendingActionStatus: "pending" | "approved" | "rejected" | "executing" | "executed" | "failed";
         /**
          * @description What a tool may do.
          * @enum {string}

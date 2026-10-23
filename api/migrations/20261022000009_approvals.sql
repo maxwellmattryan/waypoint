@@ -20,8 +20,10 @@ ALTER TABLE tool_calls
 -- One row per distinct `external` request in a step. `input` is what the caller asked for
 -- and keys the row with the step and tool, so a rerun of the step finds it again (jsonb's
 -- text form is canonical). `approved_input` is what the user approved, possibly edited.
--- `tool_call_id` is the call that created the row; `executed_tool_call_id` the one that ran
--- the handler, whose `output` is kept so a rerun returns it without running it twice.
+-- `tool_call_id` is the call that created the row; `executed_tool_call_id` the one that
+-- claimed it (`approved` → `executing`) and ran the handler, whose `output` is kept so a
+-- rerun returns it without running it twice. A claimed action never runs again: it ends
+-- `executed`, or `failed` when the handler didn't succeed.
 CREATE TABLE pending_actions (
     id BIGSERIAL PRIMARY KEY,
     run_id BIGINT NOT NULL REFERENCES agent_runs (id) ON DELETE CASCADE,
@@ -30,7 +32,7 @@ CREATE TABLE pending_actions (
     tool TEXT NOT NULL,
     input JSONB NOT NULL,
     approved_input JSONB,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','executed')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','executing','executed','failed')),
     output JSONB,
     executed_tool_call_id BIGINT REFERENCES tool_calls (id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

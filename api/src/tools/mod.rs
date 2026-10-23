@@ -7,7 +7,9 @@
 //!
 //! - an `external` call never runs its handler on first request. It waits in
 //!   `pending_actions` for the user's decision ([`ToolCallError::AwaitingApproval`]), and
-//!   the step repeating the same request later runs the approved input once,
+//!   the step repeating the same request later runs the approved input once: the attempt
+//!   that claims the action (`approved` → `executing`) runs the handler, and no attempt
+//!   ever runs it again, whether it ended `executed` or `failed`,
 //! - a succeeded `write` call is logged in `agent_actions` with the data its
 //!   [`Tool::undo`] needs, set by the handler through [`ToolContext::set_undo`].
 
@@ -297,6 +299,12 @@ pub enum ToolCallError {
     AwaitingApproval { pending_action_id: i64 },
     /// The user rejected this `external` call; the handler never runs.
     Rejected,
+    /// Another attempt of the step claimed this approved `external` call and is running
+    /// its handler, so this one doesn't. A later attempt gets its stored output.
+    Executing { pending_action_id: i64 },
+    /// An earlier attempt ran this approved `external` call's handler and it didn't
+    /// succeed. The handler never runs a second time.
+    ExecutionFailed { pending_action_id: i64 },
 }
 
 impl fmt::Display for ToolCallError {
@@ -307,6 +315,14 @@ impl fmt::Display for ToolCallError {
                 "waiting for the user's approval (pending action {pending_action_id})"
             ),
             Self::Rejected => write!(f, "the user rejected this action"),
+            Self::Executing { pending_action_id } => write!(
+                f,
+                "another attempt is running the approved action (pending action {pending_action_id})"
+            ),
+            Self::ExecutionFailed { pending_action_id } => write!(
+                f,
+                "the approved action failed and won't run again (pending action {pending_action_id})"
+            ),
             Self::UnknownTool => write!(f, "no tool has this name"),
             Self::InvalidInput(message) => write!(f, "invalid tool input: {message}"),
             Self::InvalidOutput(message) => write!(f, "invalid tool output: {message}"),
@@ -481,7 +497,7 @@ impl Registry {
             meter: Meter::default(),
             undo: None,
         };
-        // The pending action this call runs the approved handler for, if any.
+        // The pending action this call claimed and runs the approved handler for, if any.
         let mut executes = None;
         let finished = match entry {
             None => Finished {
@@ -516,7 +532,7 @@ impl Registry {
             action: entry
                 .filter(|entry| succeeded && entry.info.permission == Permission::Write)
                 .map(|_| ctx.undo),
-            executed: executes.filter(|_| succeeded),
+            executed: executes,
         };
 
         match record
@@ -552,15 +568,16 @@ impl Registry {
 }
 
 /// The final write of one invocation: its `tool_calls` row, plus the `agent_actions` row of
-/// a succeeded `write` call and the pending action a succeeded approved call executed, all
-/// in one transaction.
+/// a succeeded `write` call and the outcome of the pending action the call claimed, all in
+/// one transaction.
 struct Record<'a> {
     id: i64,
     step_id: i64,
     tool: &'a str,
     /// `Some(undo_data)` when the call is an action to log.
     action: Option<Option<Value>>,
-    /// The pending action to mark `executed`.
+    /// The pending action this call claimed: it becomes `executed` when the call
+    /// succeeded, `failed` otherwise.
     executed: Option<i64>,
 }
 
@@ -609,12 +626,17 @@ impl Record<'_> {
             .await?;
         }
         if let Some(action_id) = self.executed {
+            let status = if finished.status == "succeeded" {
+                "executed"
+            } else {
+                "failed"
+            };
             sqlx::query(
-                "UPDATE pending_actions SET status = 'executed', output = $2, \
-                 executed_tool_call_id = $3, executed_at = now() \
-                 WHERE id = $1 AND status = 'approved'",
+                "UPDATE pending_actions SET status = $2, output = $3, executed_at = now() \
+                 WHERE id = $1 AND status = 'executing' AND executed_tool_call_id = $4",
             )
             .bind(action_id)
+            .bind(status)
             .bind(&finished.output)
             .bind(self.id)
             .execute(&mut *tx)
@@ -649,7 +671,7 @@ async fn gate(
         });
     }
     let found = pending_action(pool, step_id, tool_call_id, entry.info.name, input).await;
-    let (action_id, status, approved_input, output) = match found {
+    let (action_id, status, output) = match found {
         Ok(found) => found,
         Err(err) => {
             return Gate::Done(Finished {
@@ -659,13 +681,62 @@ async fn gate(
             });
         }
     };
-    Gate::Done(match status.as_str() {
-        "approved" => {
-            return Gate::Run {
-                action_id,
-                input: approved_input.unwrap_or_else(|| input.clone()),
-            };
-        }
+    if status != "approved" {
+        return Gate::Done(settled(action_id, &status, output));
+    }
+    // Claim the approved action before running its handler, so that of two attempts of the
+    // same step (a job whose lease expired, say) only the one that wins runs it.
+    match claim(pool, action_id, tool_call_id).await {
+        Ok(Some(approved_input)) => Gate::Run {
+            action_id,
+            input: approved_input.unwrap_or_else(|| input.clone()),
+        },
+        // Another attempt claimed it (or settled it) first: act on where it is now.
+        Ok(None) => Gate::Done(match current(pool, action_id).await {
+            Ok((status, output)) => settled(action_id, &status, output),
+            Err(err) => Finished {
+                status: "failed",
+                output: None,
+                result: Err(ToolCallError::Database(err)),
+            },
+        }),
+        Err(err) => Gate::Done(Finished {
+            status: "failed",
+            output: None,
+            result: Err(ToolCallError::Database(err)),
+        }),
+    }
+}
+
+/// Moves approved action `action_id` to `executing`, claimed by `tool_call_id`. Returns its
+/// `approved_input` when this call won the claim, `None` when the action was no longer
+/// `approved`.
+async fn claim(
+    pool: &PgPool,
+    action_id: i64,
+    tool_call_id: i64,
+) -> Result<Option<Option<Value>>, sqlx::Error> {
+    sqlx::query_scalar(
+        "UPDATE pending_actions SET status = 'executing', executed_tool_call_id = $2 \
+         WHERE id = $1 AND status = 'approved' RETURNING approved_input",
+    )
+    .bind(action_id)
+    .bind(tool_call_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// `(status, output)` of pending action `action_id`.
+async fn current(pool: &PgPool, action_id: i64) -> Result<(String, Option<Value>), sqlx::Error> {
+    sqlx::query_as("SELECT status, output FROM pending_actions WHERE id = $1")
+        .bind(action_id)
+        .fetch_one(pool)
+        .await
+}
+
+/// How a call ends on a pending action that isn't `approved`: none of these run the handler.
+fn settled(action_id: i64, status: &str, output: Option<Value>) -> Finished {
+    match status {
         // Steps are at-least-once: a rerun gets the stored output, not a second send.
         "executed" => {
             let output = output.unwrap_or(Value::Null);
@@ -680,6 +751,20 @@ async fn gate(
             output: None,
             result: Err(ToolCallError::Rejected),
         },
+        "executing" => Finished {
+            status: "failed",
+            output: None,
+            result: Err(ToolCallError::Executing {
+                pending_action_id: action_id,
+            }),
+        },
+        "failed" => Finished {
+            status: "failed",
+            output: None,
+            result: Err(ToolCallError::ExecutionFailed {
+                pending_action_id: action_id,
+            }),
+        },
         _ => Finished {
             status: "awaiting_approval",
             output: None,
@@ -687,10 +772,10 @@ async fn gate(
                 pending_action_id: action_id,
             }),
         },
-    })
+    }
 }
 
-/// `(id, status, approved_input, output)` of the pending action keyed on (step, tool,
+/// `(id, status, output)` of the pending action keyed on (step, tool,
 /// requested input), inserted as `pending` by `tool_call_id` when there is none yet.
 async fn pending_action(
     pool: &PgPool,
@@ -698,7 +783,7 @@ async fn pending_action(
     tool_call_id: i64,
     tool: &str,
     input: &Value,
-) -> Result<(i64, String, Option<Value>, Option<Value>), sqlx::Error> {
+) -> Result<(i64, String, Option<Value>), sqlx::Error> {
     sqlx::query(
         "INSERT INTO pending_actions (run_id, run_step_id, tool_call_id, tool, input) \
          SELECT run_id, id, $2, $3, $4 FROM run_steps WHERE id = $1 \
@@ -711,7 +796,7 @@ async fn pending_action(
     .execute(pool)
     .await?;
     sqlx::query_as(
-        "SELECT id, status, approved_input, output FROM pending_actions \
+        "SELECT id, status, output FROM pending_actions \
          WHERE run_step_id = $1 AND tool = $2 AND md5(input::text) = md5($3::jsonb::text)",
     )
     .bind(step_id)

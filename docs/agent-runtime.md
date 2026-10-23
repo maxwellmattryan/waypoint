@@ -9,7 +9,7 @@ Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps ex
 | `agent_runs` | run of a workflow | `workflow`, `status` (`queued`, `running`, `paused`, `succeeded`, `failed`, `awaiting_approval`, `rejected`), `input`, `output`, `error`, token and cost totals, `job_id` (the latest `agent_run` job), `started_at`, `finished_at` |
 | `run_steps` | step of a run | `run_id`, `ordinal` (0, 1, …; unique per run), `name`, `status` (`pending`, `running`, `succeeded`, `failed`, `awaiting_approval`), `attempts`, `input`, `output`, `error`, token and cost totals, `claude_call_id` |
 | `tool_calls` | tool invocation in a step | `run_step_id`, `tool`, `permission`, `status` (`running`, `succeeded`, `failed`, `invalid_input`, `invalid_output`, `unknown_tool`, `awaiting_approval`), `input`, `output`, `error`, tokens, cost, `claude_call_id`, `duration_ms` |
-| `pending_actions` | distinct `external` request in a step | `run_id`, `run_step_id`, `tool_call_id` (the call that asked), `tool`, `input` (as requested), `approved_input`, `status` (`pending`, `approved`, `rejected`, `executed`), `output`, `executed_tool_call_id`, `created_at`, `decided_at`, `executed_at`. Unique on (`run_step_id`, `tool`, `md5(input::text)`) |
+| `pending_actions` | distinct `external` request in a step | `run_id`, `run_step_id`, `tool_call_id` (the call that asked), `tool`, `input` (as requested), `approved_input`, `status` (`pending`, `approved`, `rejected`, `executing`, `executed`, `failed`), `output`, `executed_tool_call_id` (the call that claimed it), `created_at`, `decided_at`, `executed_at`. Unique on (`run_step_id`, `tool`, `md5(input::text)`) |
 | `agent_actions` | succeeded `write` tool call | `run_id`, `run_step_id`, `tool_call_id` (unique), `tool`, `undo_data`, `created_at`, `undone_at` |
 | `review_items` | result a step wasn't sure enough to apply | `run_id`, `run_step_id`, `kind`, `confidence` (0..=1), `payload`, `status` (`pending`, `accepted`, `dismissed`), `created_at`, `resolved_at`. Unique on (`run_step_id`, `kind`, `md5(payload::text)`) |
 
@@ -133,11 +133,15 @@ An `external` call never runs its handler on first request. Once its input passe
 | Pending action | What the call does | `tool_calls` row |
 |---|---|---|
 | new, or `pending` | returns `ToolCallError::AwaitingApproval { pending_action_id }`; the step [parks](#parking) | `awaiting_approval` |
-| `approved` | runs the handler with `approved_input`; on success the action becomes `executed` with `output`, `executed_tool_call_id` and `executed_at`, in the same transaction as the row. A handler failure is an ordinary tool failure (retry) and the action stays `approved` | as for any call |
+| `approved` | claims the action (below), then runs the handler with `approved_input`. In the same transaction as the row, the action becomes `executed` with `output` and `executed_at` when the call succeeded, `failed` otherwise | as for any call |
+| `executing` | another attempt claimed it and is running the handler: returns `ToolCallError::Executing`, which retries the step, so a later attempt gets the stored output | `failed` |
 | `executed` | returns the stored `output` without running the handler again (steps are at-least-once) | `succeeded` with that output |
+| `failed` | returns `ToolCallError::ExecutionFailed`, which fails the step; the handler never runs a second time | `failed` |
 | `rejected` | returns `ToolCallError::Rejected`, which fails the step | `failed`, `the user rejected this action` |
 
 The row is keyed on (step, tool, requested input), so the step repeating the same call after approval finds it again. A call with a different input (a model may ask differently on resume) creates a new pending action.
+
+An approved action runs at most once. Before its handler runs, the call claims it with `UPDATE pending_actions SET status = 'executing', executed_tool_call_id = … WHERE id = … AND status = 'approved'`, so of two concurrent attempts of the same step (a job whose lease expired while the first attempt was still running, say) only the one that wins runs the handler, and the other acts on the status it finds. An external call can't be taken back, so a claimed action is never re-run: a handler failure or invalid output marks it `failed` and fails the step, and an action left `executing` by a crashed process stays there, so its step retries until it runs out of attempts and fails. Either way the user starts a new run to try again.
 
 ### Parking
 

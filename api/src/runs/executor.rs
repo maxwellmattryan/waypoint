@@ -84,7 +84,11 @@ impl From<ToolCallError> for StepError {
             ToolCallError::Failed(_) | ToolCallError::Database(_) => Self::Retry(err.to_string()),
             // The step parks whatever it returns; retry is the safe fallback.
             ToolCallError::AwaitingApproval { .. } => Self::Retry(err.to_string()),
-            ToolCallError::Rejected => Self::Fail(err.to_string()),
+            ToolCallError::Rejected | ToolCallError::ExecutionFailed { .. } => {
+                Self::Fail(err.to_string())
+            }
+            // A later attempt gets the output the claiming attempt stores.
+            ToolCallError::Executing { .. } => Self::Retry(err.to_string()),
             ToolCallError::Claude(err) => {
                 let message = format!("the tool's model call failed: {err}");
                 match Self::from(err) {
@@ -688,6 +692,18 @@ mod tests {
                 "retry",
             ),
             (ToolCallError::Rejected, "fail"),
+            (
+                ToolCallError::Executing {
+                    pending_action_id: 1,
+                },
+                "retry",
+            ),
+            (
+                ToolCallError::ExecutionFailed {
+                    pending_action_id: 1,
+                },
+                "fail",
+            ),
         ];
         for (err, expected) in cases {
             let label = err.to_string();

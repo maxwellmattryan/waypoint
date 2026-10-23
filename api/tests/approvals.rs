@@ -1,18 +1,23 @@
 //! The guardrails end to end through the API: the `tidy_application` sample workflow parks
 //! at the approval gate, approve and reject decide it, the action log undoes its note, and
-//! a low-confidence note goes to the review queue. No model is called.
+//! a low-confidence note goes to the review queue. The last tests drive the registry's gate
+//! directly to show an approved action runs at most once. No model is called.
 
 mod common;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use rocket::http::{ContentType, Header, Status};
 use rocket::local::asynchronous::Client;
 use serde_json::{Value, json};
 use sqlx::PgPool;
+use tokio::sync::Notify;
 use waypoint_api::claude::ClaudeRunner;
 use waypoint_api::events::{Event, EventBus, Subscriber};
 use waypoint_api::runs::RunStatus;
+use waypoint_api::tools::{Permission, Registry, Tool, ToolCallError, ToolContext, ToolError};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -596,4 +601,147 @@ async fn changing_routes_refuse_cross_site_and_forms(pool: PgPool) {
     let after = get(&client, &format!("/actions?run_id={run}")).await;
     assert_eq!(after, logged, "nothing was undone");
     assert_eq!(run_count(&pool).await, 1, "no run was started");
+}
+
+/// An `external` tool that counts its handler runs. With `hold`, the handler waits for
+/// `release` after telling `entered` it started; with `fail`, it fails.
+#[derive(Clone, Default)]
+struct Mailer {
+    calls: Arc<AtomicUsize>,
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+    hold: bool,
+    fail: bool,
+}
+
+#[rocket::async_trait]
+impl Tool for Mailer {
+    const NAME: &'static str = "send";
+    const DESCRIPTION: &'static str = "Sends a message";
+    const PERMISSION: Permission = Permission::External;
+    type Input = Value;
+    type Output = Value;
+
+    fn input_schema() -> Value {
+        json!({"type": "object"})
+    }
+    fn output_schema() -> Value {
+        json!({"type": "object"})
+    }
+    async fn call(&self, _: &mut ToolContext<'_>, _: Value) -> Result<Value, ToolError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.hold {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        if self.fail {
+            return Err(ToolError::Failed("the send failed".into()));
+        }
+        Ok(json!({"sent": true}))
+    }
+}
+
+/// A registry with `tool`, a step to call it from, and the approved pending action of its
+/// `{"to": "a"}` request: `(registry, runner, step id, pending action id)`.
+async fn approved_send(pool: &PgPool, tool: Mailer) -> (Registry, ClaudeRunner, i64, i64) {
+    let mut registry = Registry::default();
+    registry.register(tool).expect("send registers");
+    let runner = ClaudeRunner::new("claude", Duration::from_secs(1));
+    let (step,): (i64,) = sqlx::query_as(
+        "WITH run AS (INSERT INTO agent_runs (workflow, input) VALUES ('w', '{}') RETURNING id) \
+         INSERT INTO run_steps (run_id, ordinal, name) SELECT id, 0, 'a' FROM run RETURNING id",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("insert a run and step");
+    let asked = registry
+        .invoke(pool, &runner, step, None, "send", json!({"to": "a"}))
+        .await;
+    let Err(ToolCallError::AwaitingApproval { pending_action_id }) = asked else {
+        panic!("the first request waits for approval: {asked:?}");
+    };
+    sqlx::query(
+        "UPDATE pending_actions SET status = 'approved', approved_input = input, \
+         decided_at = now() WHERE id = $1",
+    )
+    .bind(pending_action_id)
+    .execute(pool)
+    .await
+    .expect("approve");
+    (registry, runner, step, pending_action_id)
+}
+
+async fn action_status(pool: &PgPool, id: i64) -> String {
+    sqlx::query_scalar("SELECT status FROM pending_actions WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .expect("read the pending action")
+}
+
+#[sqlx::test]
+async fn concurrent_attempts_run_an_approved_action_once(pool: PgPool) {
+    let tool = Mailer {
+        hold: true,
+        ..Mailer::default()
+    };
+    let (registry, runner, step, action) = approved_send(&pool, tool.clone()).await;
+    let input = json!({"to": "a"});
+
+    // The second attempt calls while the first is inside the handler.
+    let first = registry.invoke(&pool, &runner, step, None, "send", input.clone());
+    let second = async {
+        tool.entered.notified().await;
+        let result = registry
+            .invoke(&pool, &runner, step, None, "send", input.clone())
+            .await;
+        tool.release.notify_one();
+        result
+    };
+    let (first, second) = tokio::time::timeout(TIMEOUT, async { tokio::join!(first, second) })
+        .await
+        .expect("both attempts finish");
+
+    assert_eq!(
+        first.expect("the first attempt runs it").0,
+        json!({"sent": true})
+    );
+    assert!(
+        matches!(second, Err(ToolCallError::Executing { pending_action_id }) if pending_action_id == action),
+        "the second attempt doesn't run it: {second:?}"
+    );
+    assert_eq!(tool.calls.load(Ordering::SeqCst), 1, "the handler ran once");
+    assert_eq!(action_status(&pool, action).await, "executed");
+
+    let rerun = registry
+        .invoke(&pool, &runner, step, None, "send", input)
+        .await
+        .expect("a rerun gets the stored output");
+    assert_eq!(rerun.0, json!({"sent": true}));
+    assert_eq!(tool.calls.load(Ordering::SeqCst), 1, "still once");
+}
+
+#[sqlx::test]
+async fn a_failed_approved_action_never_runs_again(pool: PgPool) {
+    let tool = Mailer {
+        fail: true,
+        ..Mailer::default()
+    };
+    let (registry, runner, step, action) = approved_send(&pool, tool.clone()).await;
+    let input = json!({"to": "a"});
+
+    let first = registry
+        .invoke(&pool, &runner, step, None, "send", input.clone())
+        .await;
+    assert!(matches!(first, Err(ToolCallError::Failed(_))), "{first:?}");
+    assert_eq!(action_status(&pool, action).await, "failed");
+
+    let rerun = registry
+        .invoke(&pool, &runner, step, None, "send", input)
+        .await;
+    assert!(
+        matches!(rerun, Err(ToolCallError::ExecutionFailed { pending_action_id }) if pending_action_id == action),
+        "a rerun doesn't run it again: {rerun:?}"
+    );
+    assert_eq!(tool.calls.load(Ordering::SeqCst), 1, "the handler ran once");
 }

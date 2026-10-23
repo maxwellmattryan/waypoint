@@ -35,8 +35,12 @@ pub enum PendingActionStatus {
     Approved,
     /// The user rejected it; the handler never runs.
     Rejected,
+    /// A step attempt claimed it and is running the handler; no other attempt runs it.
+    Executing,
     /// The handler ran with `approved_input`; `output` is what it returned.
     Executed,
+    /// The handler ran and didn't succeed; it never runs again, and the step fails.
+    Failed,
 }
 
 /// One `pending_actions` row: an `external` tool call waiting for, or past, the user's
@@ -58,7 +62,7 @@ pub struct PendingAction {
     /// The handler's output, once executed.
     #[schema(required = true)]
     pub output: Option<Value>,
-    /// The tool call that ran the handler, once executed.
+    /// The tool call that claimed the action and ran the handler.
     #[schema(required = true)]
     pub executed_tool_call_id: Option<i64>,
     pub created_at: DateTime<Utc>,
