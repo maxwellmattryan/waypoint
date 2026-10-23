@@ -11,12 +11,13 @@ use sqlx::PgPool;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
-use super::{AGENT_RUN, CAPTURE_EXTRACT, Config, Job, RESUME_PROFILE, TEST_PROMPT};
+use super::{AGENT_RUN, CAPTURE_EXTRACT, Config, GMAIL_SYNC, Job, RESUME_PROFILE, TEST_PROMPT};
 use crate::capture::{self, llm::LlmError};
 use crate::claude::{ClaudeError, ClaudeRequest, ClaudeRunner};
 use crate::events::{Event, EventBus};
+use crate::gmail::sync::PageOutcome;
 use crate::profile::resume::ImportError;
-use crate::{profile, runs};
+use crate::{gmail, google, profile, runs};
 
 /// The delay before retry number `attempt` (1-based): `base * 2^(attempt-1)`, capped at
 /// `cap`. It saturates instead of overflowing.
@@ -36,6 +37,8 @@ pub struct Worker {
     pub wake: Arc<Notify>,
     /// The workflows and tools `agent_run` jobs can use.
     pub runtime: runs::Runtime,
+    /// Google settings and HTTP client, for `gmail_sync` jobs.
+    pub google: google::Google,
 }
 
 /// What a handler decided about one attempt.
@@ -44,6 +47,8 @@ enum JobOutcome {
     Done(Value),
     /// Failed in a way another attempt might fix.
     Retry(String),
+    /// Like `Retry`, but waits at least this long (still capped at `retry_cap`).
+    RetryAfter(String, Duration),
     /// The subscription's usage limit was hit.
     UsageLimit(String),
     /// Failed for good; no retry.
@@ -60,6 +65,7 @@ struct Context {
     bus: EventBus,
     config: Config,
     runtime: runs::Runtime,
+    google: google::Google,
     /// Tells the loop to pause until this time.
     pause: mpsc::UnboundedSender<DateTime<Utc>>,
 }
@@ -78,6 +84,14 @@ impl Worker {
             Ok(n) => rocket::info!("jobs: requeued {n} job(s) left running by the last run"),
             Err(err) => rocket::warn!("jobs: cannot requeue orphaned jobs: {err}"),
         }
+        // The loop below claims the catch-up job, so no wake is needed.
+        match gmail::sync::catch_up(&self.pool, &self.bus, &self.google).await {
+            Ok(Some(requested)) if !requested.reused => {
+                rocket::info!("gmail: queued a catch-up sync (job {})", requested.job.id);
+            }
+            Ok(_) => {}
+            Err(err) => rocket::warn!("gmail: cannot queue the catch-up sync: {err}"),
+        }
 
         let (pause_tx, mut pause_rx) = mpsc::unbounded_channel();
         let ctx = Context {
@@ -86,6 +100,7 @@ impl Worker {
             bus: self.bus.clone(),
             config: self.config.clone(),
             runtime: self.runtime.clone(),
+            google: self.google.clone(),
             pause: pause_tx,
         };
         let poll = self.config.poll_interval;
@@ -192,11 +207,19 @@ async fn run_job(ctx: Context, job: Job, _permit: OwnedSemaphorePermit) {
                     .await
                     .map(|job| Event::JobRetrying { job })
             }
-            JobOutcome::Retry(error) | JobOutcome::Fail(error) => {
-                super::fail(&ctx.pool, job.id, error)
+            JobOutcome::RetryAfter(error, at_least) if job.attempts < job.max_attempts => {
+                let delay = backoff(job.attempts, ctx.config.retry_base, ctx.config.retry_cap)
+                    .max(*at_least)
+                    .min(ctx.config.retry_cap);
+                super::retry(&ctx.pool, job.id, error, delay)
                     .await
-                    .map(|job| Event::JobFailed { job })
+                    .map(|job| Event::JobRetrying { job })
             }
+            JobOutcome::Retry(error)
+            | JobOutcome::RetryAfter(error, _)
+            | JobOutcome::Fail(error) => super::fail(&ctx.pool, job.id, error)
+                .await
+                .map(|job| Event::JobFailed { job }),
             JobOutcome::UsageLimit(error) => {
                 let pause = ctx.config.usage_limit_pause;
                 pause_until = chrono::Duration::from_std(pause)
@@ -246,7 +269,21 @@ async fn dispatch(ctx: &Context, job: &Job) -> JobOutcome {
         AGENT_RUN => runs::execute(&ctx.pool, &ctx.runner, &ctx.runtime, &ctx.bus, job)
             .await
             .into(),
+        GMAIL_SYNC => gmail::sync::run_page(&ctx.pool, &ctx.bus, &ctx.google, job)
+            .await
+            .into(),
         other => JobOutcome::Fail(format!("unknown job kind {other:?}")),
+    }
+}
+
+impl From<PageOutcome> for JobOutcome {
+    fn from(outcome: PageOutcome) -> Self {
+        match outcome {
+            PageOutcome::Done(result) => Self::Done(result),
+            PageOutcome::Retry(error) => Self::Retry(error),
+            PageOutcome::RetryAfter(error, delay) => Self::RetryAfter(error, delay),
+            PageOutcome::Fail(error) => Self::Fail(error),
+        }
     }
 }
 

@@ -50,6 +50,7 @@ impl Harness {
             config,
             wake: wake.0.clone(),
             runtime,
+            google: waypoint_api::google::Google::new(Default::default()),
         }
         .spawn(stopped);
         let harness = Self {

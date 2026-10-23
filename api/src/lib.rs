@@ -56,6 +56,7 @@ pub fn rocket(
     let wake = Wake::default();
     let (stop, stopped) = watch::channel(false);
     let runtime = workflows::runtime();
+    let google = google::Google::new(google);
     let worker = Worker {
         pool: pool.clone(),
         runner: claude.clone(),
@@ -63,6 +64,7 @@ pub fn rocket(
         config: jobs,
         wake: wake.0.clone(),
         runtime: runtime.clone(),
+        google: google.clone(),
     };
 
     let rocket = rocket::custom(figment)
@@ -71,7 +73,7 @@ pub fn rocket(
         .manage(bus)
         .manage(wake)
         .manage(runtime)
-        .manage(google::Google::new(google))
+        .manage(google)
         .manage(capture::Capturer::new(capture))
         .mount(
             "/",

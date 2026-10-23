@@ -134,6 +134,15 @@ fn host() -> Header<'static> {
 }
 
 async fn client(pool: &PgPool, google: google::Config) -> Client {
+    // A sync that just finished, so the worker's startup catch-up never queues a Gmail
+    // sync for the account a test seeds; `DELETE /data` must empty this table too.
+    sqlx::query(
+        "INSERT INTO gmail_sync_state (id, last_finished_at) VALUES (true, now()) \
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .execute(pool)
+    .await
+    .expect("seed the Gmail sync state");
     let rocket = waypoint_api::rocket(
         rocket::Config::figment(),
         pool.clone(),
@@ -194,6 +203,7 @@ fn spawn_worker(
         config,
         wake: wake.0.clone(),
         runtime,
+        google: Google::new(google::Config::default()),
     }
     .spawn(stopped);
     (fake, stop)
