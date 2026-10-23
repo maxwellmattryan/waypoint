@@ -9,6 +9,8 @@
 		ondelete: (memory: Memory) => void;
 		/** Filters the list by one of the memory's tags. */
 		ontag: (tag: string) => void;
+		/** Shows the highlight ring, for the memory a link pointed at. */
+		highlighted?: boolean;
 	}
 </script>
 
@@ -17,7 +19,14 @@
 	import { Badge, Button, Card, Link, Tag } from '#lib/components/ui';
 	import { TOPIC_LABELS, sourceLine } from '#lib/memories/topics.js';
 
-	let { memory, onconfirm, onedit, ondelete, ontag }: MemoryItemProps = $props();
+	let {
+		memory,
+		onconfirm,
+		onedit,
+		ondelete,
+		ontag,
+		highlighted = false
+	}: MemoryItemProps = $props();
 
 	let confirming = $state(false);
 
@@ -36,7 +45,16 @@
 	}
 </script>
 
-<Card>
+<!-- Focusable from script only (`/memories?memory=<id>` moves focus here); the ring marks it. -->
+<Card
+	id="memory-{memory.id}"
+	tabindex={-1}
+	data-highlighted={highlighted ? 'true' : undefined}
+	class={[
+		'transition-shadow focus:outline-none',
+		highlighted && 'ring-2 ring-focus ring-offset-2 ring-offset-bg'
+	]}
+>
 	<div class="flex flex-col gap-4">
 		<div class="flex items-start justify-between gap-4">
 			<div class="flex min-w-0 flex-col gap-1">

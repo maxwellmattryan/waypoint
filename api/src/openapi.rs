@@ -30,7 +30,8 @@ use crate::runs::actions::{self, AgentAction};
 use crate::runs::approvals::{self, ApproveAction, PendingAction, PendingActionStatus};
 use crate::runs::review::{self, ReviewItem, ReviewItemStatus};
 use crate::runs::{
-    self, Run, RunDetail, RunStatus, RunStep, RunStepDetail, StepStatus, ToolCall, ToolCallStatus,
+    self, Run, RunDetail, RunMemory, RunStatus, RunStep, RunStepDetail, StepStatus, ToolCall,
+    ToolCallStatus,
 };
 use crate::tools::Permission;
 use crate::workflows::tidy::{self, TidyRequest};
@@ -134,6 +135,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         RunStep,
         StepStatus,
         RunStepDetail,
+        RunMemory,
         ToolCall,
         ToolCallStatus,
         Permission,

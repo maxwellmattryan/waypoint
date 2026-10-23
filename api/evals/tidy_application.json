@@ -11,7 +11,8 @@
         "review_items": [],
         "pending_actions": [
           {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Thanks"}}
-        ]
+        ],
+        "memories": []
       }
     },
     {
@@ -24,7 +25,8 @@
         "review_items": [],
         "pending_actions": [
           {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Looking forward to it"}}
-        ]
+        ],
+        "memories": []
       }
     },
     {
@@ -39,7 +41,8 @@
         ],
         "pending_actions": [
           {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Any update?"}}
-        ]
+        ],
+        "memories": []
       }
     },
     {
@@ -54,7 +57,8 @@
         ],
         "pending_actions": [
           {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Checking in"}}
-        ]
+        ],
+        "memories": []
       }
     },
     {
@@ -64,7 +68,8 @@
         "status": "failed",
         "error_contains": "doesn't exist",
         "actions": [],
-        "pending_actions": []
+        "pending_actions": [],
+        "memories": []
       }
     },
     {
@@ -74,7 +79,111 @@
       "expect": {
         "status": "failed",
         "error_contains": "confidence",
-        "actions": []
+        "actions": [],
+        "memories": []
+      }
+    },
+    {
+      "name": "recall: relevant memory retrieved, unrelated excluded",
+      "setup": {
+        "application": {"company": "Pied Piper", "title": "Compression Engineer"},
+        "memories": [
+          {"name": "relevant", "kind": "fact", "topic": "other", "content": "Pied Piper's team uses middle-out compression"},
+          {"name": "unrelated", "kind": "fact", "topic": "other", "content": "Enjoys sourdough baking"}
+        ]
+      },
+      "input": {"application_id": "${application_id}", "note": "Met the team", "message": "Thanks for the chat", "confidence": 0.9},
+      "expect": {
+        "status": "awaiting_approval",
+        "memories": [{"step": "draft", "memory_id": "${memory_relevant}"}]
+      }
+    },
+    {
+      "name": "recall: proposed memory excluded",
+      "setup": {
+        "application": {"company": "Hooli", "title": "Product Engineer"},
+        "memories": [
+          {"name": "proposed", "kind": "fact", "topic": "other", "content": "Hooli product engineer, following up", "status": "proposed"},
+          {"name": "confirmed", "kind": "fact", "topic": "other", "content": "Hooli interviews happen on Tuesdays"}
+        ]
+      },
+      "input": {"application_id": "${application_id}", "note": "Waiting on Hooli", "message": "Following up", "confidence": 0.9},
+      "expect": {
+        "status": "awaiting_approval",
+        "memories": [{"step": "draft", "memory_id": "${memory_confirmed}"}]
+      }
+    },
+    {
+      "name": "recall: more shared terms rank first",
+      "setup": {
+        "application": {"company": "Initech", "title": "Backend Engineer"},
+        "memories": [
+          {"name": "both", "kind": "fact", "topic": "other", "content": "Initech's backend team writes Go"},
+          {"name": "one", "kind": "fact", "topic": "other", "content": "Initech is in Austin"}
+        ]
+      },
+      "input": {"application_id": "${application_id}", "note": "Second round booked", "message": "Any news?", "confidence": 0.9},
+      "expect": {
+        "status": "awaiting_approval",
+        "memories": [
+          {"step": "draft", "memory_id": "${memory_both}"},
+          {"step": "draft", "memory_id": "${memory_one}"}
+        ]
+      }
+    },
+    {
+      "name": "recall: a tag matching the company",
+      "setup": {
+        "application": {"company": "Umbrella", "title": "Platform Engineer"},
+        "memories": [
+          {"name": "tagged", "kind": "preference", "topic": "location", "content": "Prefers hybrid work", "tags": ["Umbrella"]}
+        ]
+      },
+      "input": {"application_id": "${application_id}", "note": "Recruiter call done", "message": "Checking in", "confidence": 0.9},
+      "expect": {
+        "status": "awaiting_approval",
+        "memories": [{"step": "draft", "memory_id": "${memory_tagged}"}]
+      }
+    },
+    {
+      "name": "recall: no shared term retrieves nothing",
+      "setup": {
+        "application": {"company": "Globex", "title": "Staff Engineer"},
+        "memories": [
+          {"name": "baking", "kind": "fact", "topic": "other", "content": "Enjoys sourdough baking"},
+          {"name": "language", "kind": "fact", "topic": "skill", "content": "Speaks Portuguese"}
+        ]
+      },
+      "input": {"application_id": "${application_id}", "note": "Applied", "message": "Looking forward to it", "confidence": 0.9},
+      "expect": {
+        "status": "awaiting_approval",
+        "memories": []
+      }
+    },
+    {
+      "name": "recall: at most five memories",
+      "setup": {
+        "application": {"company": "Vandelay", "title": "Import Engineer"},
+        "memories": [
+          {"name": "m1", "kind": "fact", "topic": "other", "content": "Vandelay detail 1"},
+          {"name": "m2", "kind": "fact", "topic": "other", "content": "Vandelay detail 2"},
+          {"name": "m3", "kind": "fact", "topic": "other", "content": "Vandelay detail 3"},
+          {"name": "m4", "kind": "fact", "topic": "other", "content": "Vandelay detail 4"},
+          {"name": "m5", "kind": "fact", "topic": "other", "content": "Vandelay detail 5"},
+          {"name": "m6", "kind": "fact", "topic": "other", "content": "Vandelay detail 6"},
+          {"name": "m7", "kind": "fact", "topic": "other", "content": "Vandelay detail 7"}
+        ]
+      },
+      "input": {"application_id": "${application_id}", "note": "Applied", "message": "Hello", "confidence": 0.9},
+      "expect": {
+        "status": "awaiting_approval",
+        "memories": [
+          {"step": "draft", "memory_id": "${memory_m7}"},
+          {"step": "draft", "memory_id": "${memory_m6}"},
+          {"step": "draft", "memory_id": "${memory_m5}"},
+          {"step": "draft", "memory_id": "${memory_m4}"},
+          {"step": "draft", "memory_id": "${memory_m3}"}
+        ]
       }
     }
   ]

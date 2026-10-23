@@ -25,7 +25,7 @@ function makeRun(id: number, overrides: Partial<Run> = {}): Run {
 }
 
 function detail(id: number, overrides: Partial<Run> = {}): RunDetail {
-	return { ...makeRun(id, overrides), steps: [] };
+	return { ...makeRun(id, overrides), steps: [], memories: [] };
 }
 
 /** `count` runs counting down from `top`. */

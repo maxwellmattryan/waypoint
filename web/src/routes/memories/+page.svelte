@@ -1,13 +1,15 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { onMount, tick, untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { createApiClient, type Memory, type MemoryInput } from '#lib/api';
 	import LinkedInImportDialog from '#lib/components/memories/LinkedInImportDialog.svelte';
 	import MemoryFilters from '#lib/components/memories/MemoryFilters.svelte';
 	import MemoryFormDialog from '#lib/components/memories/MemoryFormDialog.svelte';
 	import MemorySection from '#lib/components/memories/MemorySection.svelte';
-	import { Button, ConfirmDialog, EmptyState, Skeleton } from '#lib/components/ui';
+	import { Button, ConfirmDialog, EmptyState, Skeleton, toast } from '#lib/components/ui';
 	import { createMemory, updateMemory } from '#lib/memories/api.js';
+	import { parseMemoryParam } from '#lib/memories/link.js';
 	import { MemoryList } from '#lib/memories/memories.svelte.js';
 	import { importLinkedIn } from '#lib/memories/profile.js';
 	import { SECTIONS } from '#lib/memories/topics.js';
@@ -15,6 +17,33 @@
 
 	const client = createApiClient();
 	const list = new MemoryList({ client });
+
+	/** The memory a link pointed at (`?memory=<id>`); highlighted while it's in the URL. */
+	const target = $derived(parseMemoryParam(page.url.searchParams.get('memory')));
+
+	/** Set once the first successful load has scrolled to the target or reported it missing. */
+	let revealed = false;
+
+	$effect(() => {
+		if (revealed || list.view.kind !== 'loaded') return;
+		revealed = true;
+		void untrack(() => reveal(target));
+	});
+
+	/** Scrolls to and focuses memory `id`, or says it's gone when it isn't listed. */
+	async function reveal(id: number | null) {
+		if (id === null) return;
+		if (!list.memories.some((memory) => memory.id === id)) {
+			toast.error('That memory no longer exists');
+			return;
+		}
+		await tick();
+		const card = document.getElementById(`memory-${id}`);
+		if (!card) return;
+		const behavior = motionDuration('base') === 0 ? 'instant' : 'smooth';
+		card.scrollIntoView({ behavior, block: 'center' });
+		card.focus({ preventScroll: true });
+	}
 
 	let formOpen = $state(false);
 	let importOpen = $state(false);
@@ -130,6 +159,7 @@
 				<MemorySection
 					heading={section.heading}
 					memories={section.memories}
+					highlighted={target}
 					onconfirm={(memory) => list.confirm(memory.id)}
 					onedit={edit}
 					ondelete={askDelete}

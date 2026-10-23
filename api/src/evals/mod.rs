@@ -81,6 +81,9 @@ pub struct Expect {
     /// `{tool, undone}` per logged action, by id.
     #[serde(default)]
     pub actions: Option<Vec<Value>>,
+    /// `{step, memory_id}` per memory the run's steps retrieved (`run_memories`), by id.
+    #[serde(default)]
+    pub memories: Option<Vec<Value>>,
 }
 
 impl Expect {
@@ -103,6 +106,7 @@ impl Expect {
             pending_actions: list(&self.pending_actions)?,
             review_items: list(&self.review_items)?,
             actions: list(&self.actions)?,
+            memories: list(&self.memories)?,
         })
     }
 }
@@ -317,6 +321,8 @@ pub struct Observed {
     pub review_items: Vec<Value>,
     /// `{tool, undone}`.
     pub actions: Vec<Value>,
+    /// `{step, memory_id}`.
+    pub memories: Vec<Value>,
 }
 
 /// Every check of `expect` that `observed` fails; empty when the case passes.
@@ -352,6 +358,7 @@ pub fn score(expect: &Expect, observed: &Observed) -> Vec<String> {
         ),
         ("review_items", &expect.review_items, &observed.review_items),
         ("actions", &expect.actions, &observed.actions),
+        ("memories", &expect.memories, &observed.memories),
     ];
     for (name, expected, actual) in lists {
         if let Some(expected) = expected {
@@ -822,6 +829,12 @@ async fn observe(pool: &PgPool, run_id: i64) -> Result<Observed, sqlx::Error> {
              FROM agent_actions WHERE run_id = $1 ORDER BY id",
         )
         .await?,
+        memories: rows(
+            "SELECT jsonb_build_object('step', s.name, 'memory_id', rm.memory_id) \
+             FROM run_memories rm JOIN run_steps s ON s.id = rm.run_step_id \
+             WHERE rm.run_id = $1 ORDER BY rm.id",
+        )
+        .await?,
     })
 }
 
@@ -1015,7 +1028,7 @@ mod tests {
         let valid = dataset_with(json!([
             {"name": "a", "setup": {"x": 1}, "input": {"k": 1}, "expect": {
                 "status": "awaiting_approval", "output": {}, "error_contains": "x",
-                "pending_actions": [], "review_items": [], "actions": []
+                "pending_actions": [], "review_items": [], "actions": [], "memories": []
             }},
             case("b", "failed")
         ]));
@@ -1027,7 +1040,13 @@ mod tests {
 
         let mut extra = case("extra", "failed");
         extra["expect"]["surprise"] = json!(1);
+        let mut memories = case("memories", "failed");
+        memories["expect"]["memories"] = json!({"step": "draft"});
         let cases = [
+            (
+                dataset_with(json!([memories])),
+                "case \"memories\": invalid type: map, expected a sequence",
+            ),
             (
                 json!({"workflow": "tidy_application", "cases": [], "x": 1}).to_string(),
                 "unknown field `x`",
@@ -1066,6 +1085,81 @@ mod tests {
 
         let err = load(Path::new("/nonexistent/x.json"), "x").unwrap_err();
         assert!(err.contains("/nonexistent/x.json"), "{err}");
+    }
+
+    #[test]
+    fn score_checks_memories() {
+        let observed = Observed {
+            status: RunStatus::AwaitingApproval,
+            output: None,
+            error: None,
+            pending_actions: Vec::new(),
+            review_items: Vec::new(),
+            actions: Vec::new(),
+            memories: vec![
+                json!({"step": "draft", "memory_id": 4}),
+                json!({"step": "draft", "memory_id": 3}),
+            ],
+        };
+        let expect = |memories: Option<Value>| Expect {
+            status: RunStatus::AwaitingApproval,
+            output: None,
+            error_contains: None,
+            pending_actions: None,
+            review_items: None,
+            actions: None,
+            memories: memories.map(|m| m.as_array().cloned().unwrap_or_default()),
+        };
+        let cases: [(&str, Option<Value>, &[&str]); 5] = [
+            ("unchecked", None, &[]),
+            (
+                "same rows in order",
+                Some(json!([
+                    {"step": "draft", "memory_id": 4},
+                    {"step": "draft", "memory_id": 3}
+                ])),
+                &[],
+            ),
+            (
+                "wrong order",
+                Some(json!([
+                    {"step": "draft", "memory_id": 3},
+                    {"step": "draft", "memory_id": 4}
+                ])),
+                &[
+                    "memories[0].memory_id: expected 3, got 4",
+                    "memories[1].memory_id: expected 4, got 3",
+                ],
+            ),
+            (
+                "wrong count",
+                Some(json!([{"step": "draft", "memory_id": 4}])),
+                &["memories: expected 1 item(s), got 2"],
+            ),
+            (
+                "wrong step",
+                Some(json!([
+                    {"step": "note", "memory_id": 4},
+                    {"step": "draft", "memory_id": 3}
+                ])),
+                &["memories[0].step: expected \"note\", got \"draft\""],
+            ),
+        ];
+        for (label, memories, failures) in cases {
+            assert_eq!(score(&expect(memories), &observed), failures, "{label}");
+        }
+
+        let mut vars = Map::new();
+        vars.insert("memory_remote".into(), json!(4));
+        let substituted = expect(Some(
+            json!([{"step": "draft", "memory_id": "${memory_remote}"}]),
+        ))
+        .substitute(&vars)
+        .unwrap();
+        assert_eq!(
+            substituted.memories,
+            Some(vec![json!({"step": "draft", "memory_id": 4})])
+        );
     }
 
     fn report_case(name: &str, result: CaseResult, calls: i64, cost: f64) -> CaseReport {

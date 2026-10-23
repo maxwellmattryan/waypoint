@@ -233,7 +233,7 @@ pub struct Memory {
 }
 
 // `search` is never selected.
-const COLUMNS: &str = "id, kind, topic, content, tags, status, confirmed_at, source_kind, \
+pub(crate) const COLUMNS: &str = "id, kind, topic, content, tags, status, confirmed_at, source_kind, \
                        source_ref, source_label, created_at, updated_at";
 
 /// The `POST /memories` and `PUT /memories/{id}` body. Unknown keys, `status` and the
