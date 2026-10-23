@@ -1,0 +1,45 @@
+[
+  {
+    "id": "aaaaaaaa-0000-4000-8000-000000000001",
+    "text": "Staff Engineer",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Engineering",
+      "location": "San Francisco, California",
+      "team": "Platform",
+      "allLocations": ["San Francisco, California"]
+    },
+    "country": "US",
+    "workplaceType": "hybrid",
+    "createdAt": 1790848800000,
+    "descriptionPlain": "Join the platform team.",
+    "description": "<div>Join the <b>platform</b> team.</div>",
+    "lists": [
+      { "text": "What you&#39;ll do", "content": "<li>Design APIs</li><li>Run Postgres</li>" }
+    ],
+    "additional": "<div>We sponsor visas.</div>",
+    "additionalPlain": "We sponsor visas.",
+    "hostedUrl": "https://jobs.lever.co/example-labs/aaaaaaaa-0000-4000-8000-000000000001",
+    "applyUrl": "https://jobs.lever.co/example-labs/aaaaaaaa-0000-4000-8000-000000000001/apply"
+  },
+  {
+    "id": "aaaaaaaa-0000-4000-8000-000000000002",
+    "text": "Product Designer",
+    "categories": {
+      "commitment": "Full-time",
+      "location": "Remote - Canada",
+      "team": "Design",
+      "allLocations": ["Remote - Canada"]
+    },
+    "country": "CA",
+    "workplaceType": "remote",
+    "createdAt": 1790935200000,
+    "descriptionPlain": "Design the product.",
+    "description": "<p>Design the product.</p>",
+    "lists": [],
+    "additional": "",
+    "additionalPlain": "",
+    "hostedUrl": "https://jobs.lever.co/example-labs/aaaaaaaa-0000-4000-8000-000000000002",
+    "applyUrl": "https://jobs.lever.co/example-labs/aaaaaaaa-0000-4000-8000-000000000002/apply"
+  }
+]

@@ -344,6 +344,7 @@ async fn step_records_memories_once_and_keeps_snapshots(pool: PgPool) {
         wake: wake.0.clone(),
         runtime: runtime.clone(),
         google: waypoint_api::google::Google::new(Default::default()),
+        capture: waypoint_api::capture::Capturer::new(Default::default()),
     }
     .spawn(stopped);
     let run = runs::start(

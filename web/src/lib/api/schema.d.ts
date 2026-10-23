@@ -743,6 +743,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sourcing/boards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queues a fetch of one public job board into `job_postings`. */
+        post: operations["source_board"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1510,6 +1527,27 @@ export interface components {
          * @enum {string}
          */
         SignalOp: "add" | "remove" | "replace";
+        /** @description The 202 body. */
+        SourceBoardQueued: {
+            /** @description The queued or running `source_board` job; its `result` holds the counts. */
+            job: components["schemas"]["Job"];
+            /**
+             * @description `true` when a fetch of this board was already queued or running and nothing new
+             *     was enqueued.
+             */
+            reused: boolean;
+        };
+        /** @description The `POST /sourcing/boards` body. */
+        SourceBoardRequest: {
+            /**
+             * @description The board's slug, as in its board URL (`boards.greenhouse.io/<board>`,
+             *     `jobs.lever.co/<board>`, `jobs.ashbyhq.com/<board>`): 1–100 letters, digits,
+             *     hyphens or underscores. Trimmed; case is kept. Required.
+             */
+            board: string | null;
+            /** @description `greenhouse`, `lever` or `ashby`. Required. */
+            source: string | null;
+        };
         /** @description The email that caused an event, as the timeline shows it. */
         SourceEmail: {
             from_address: string | null;
@@ -4477,6 +4515,69 @@ export interface operations {
                 content?: never;
             };
             /** @description The run could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    source_board: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceBoardRequest"];
+            };
+        };
+        responses: {
+            /** @description The board's `source_board` job: new, or the one already queued or running */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceBoardQueued"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The source or the board slug is invalid */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The job could not be queued */
             500: {
                 headers: {
                     [name: string]: unknown;
