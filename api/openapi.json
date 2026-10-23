@@ -1516,6 +1516,332 @@
         }
       }
     },
+    "/memories": {
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "Memories matching every given filter.",
+        "operationId": "list_memories",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only memories of this kind; blank means any",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MemoryKind"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only memories with this status; blank means any",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MemoryStatus"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Only memories carrying this tag, normalised like stored tags; blank means any",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Full-text search over content, topic and tags (`websearch_to_tsquery('english', q)`); blank means no search",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching memories: with `q`, best match first, then newest `updated_at` first, ties by `id` descending; without `q`, newest `updated_at` first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Memory"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "422": {
+            "description": "`kind` or `status` is not a known value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The memories could not be read"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "Adds a memory the user wrote: confirmed now, source `manual`.",
+        "operationId": "create_memory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The stored memory, confirmed, with source `manual`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Memory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route, or `kind` or `topic` is unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "One or more fields are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The memory could not be stored"
+          }
+        }
+      }
+    },
+    "/memories/{id}": {
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "One memory.",
+        "operationId": "get_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The memory's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Memory"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No memory has this id"
+          },
+          "500": {
+            "description": "The memory could not be read"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "Replaces a memory's kind, topic, content and tags. Its status, `confirmed_at` and\nprovenance are kept.",
+        "operationId": "update_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The memory's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Memory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route, or `kind` or `topic` is unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No memory has this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "One or more fields are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The memory could not be stored"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "Deletes a memory permanently.",
+        "operationId": "delete_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The memory's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The memory is deleted"
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No memory has this id"
+          },
+          "500": {
+            "description": "The memory could not be deleted"
+          }
+        }
+      }
+    },
+    "/memories/{id}/confirm": {
+      "post": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "Confirms a proposed memory. An already confirmed memory is returned unchanged.",
+        "operationId": "confirm_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The memory's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The confirmed memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Memory"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No memory has this id"
+          },
+          "500": {
+            "description": "The memory could not be confirmed"
+          }
+        }
+      }
+    },
     "/pending-actions": {
       "get": {
         "tags": [
@@ -2991,6 +3317,148 @@
           }
         }
       },
+      "Memory": {
+        "type": "object",
+        "description": "One `memories` row: the body of every route that returns a memory.",
+        "required": [
+          "id",
+          "kind",
+          "topic",
+          "content",
+          "tags",
+          "status",
+          "confirmed_at",
+          "source_kind",
+          "source_ref",
+          "source_label",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "confirmed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the memory became confirmed; `null` while proposed."
+          },
+          "content": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MemoryKind"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "source_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A human label for the source, e.g. \"Resume · Staff Eng v3\"."
+          },
+          "source_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An id in the source as text: a resume version id, a run id, a message id."
+          },
+          "status": {
+            "$ref": "#/components/schemas/MemoryStatus"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Normalised: lowercase, single-spaced, no blanks or duplicates."
+          },
+          "topic": {
+            "$ref": "#/components/schemas/MemoryTopic"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MemoryInput": {
+        "type": "object",
+        "description": "The `POST /memories` and `PUT /memories/{id}` body. Unknown keys, `status` and the\nprovenance fields included, are ignored.",
+        "required": [
+          "kind",
+          "topic",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Required; a missing or blank value is a 422. At most 5,000 characters."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MemoryKind"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "At most 20 tags of at most 50 characters each, normalised on write."
+          },
+          "topic": {
+            "$ref": "#/components/schemas/MemoryTopic",
+            "description": "Must be one of the kind's topics."
+          }
+        }
+      },
+      "MemoryKind": {
+        "type": "string",
+        "description": "What sort of thing a memory is.",
+        "enum": [
+          "fact",
+          "preference",
+          "answer"
+        ]
+      },
+      "MemoryStatus": {
+        "type": "string",
+        "description": "Whether the user has confirmed a memory.",
+        "enum": [
+          "proposed",
+          "confirmed"
+        ]
+      },
+      "MemoryTopic": {
+        "type": "string",
+        "description": "What a memory is about. Which topics are allowed depends on the kind\n([`MemoryKind::topics`]); `other` is allowed for every kind.",
+        "enum": [
+          "position",
+          "skill",
+          "education",
+          "target_role",
+          "seniority",
+          "location",
+          "comp_floor",
+          "industry",
+          "deal_breaker",
+          "work_authorization",
+          "notice_period",
+          "salary_expectation",
+          "why_leaving",
+          "other"
+        ]
+      },
       "NewApplication": {
         "type": "object",
         "description": "The `POST /applications` body: the [`ApplicationInput`] fields plus an optional\nstarting status (`sourced` when omitted).",
@@ -3592,6 +4060,17 @@
           }
         },
         "additionalProperties": false
+      },
+      "SourceKind": {
+        "type": "string",
+        "description": "Where a memory came from.",
+        "enum": [
+          "manual",
+          "resume",
+          "linkedin",
+          "run",
+          "email"
+        ]
       },
       "Stage": {
         "type": "object",

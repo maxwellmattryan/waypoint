@@ -1,12 +1,13 @@
 <script lang="ts" module>
 	import type { HTMLButtonAttributes } from 'svelte/elements';
-	import type { ButtonSize, ButtonVariant } from './styles';
+	import type { ButtonVariant, IconButtonSize } from './styles';
 
 	export interface IconButtonProps extends HTMLButtonAttributes {
 		/** Accessible name, rendered as `aria-label`. */
 		label: string;
 		variant?: ButtonVariant;
-		size?: ButtonSize;
+		/** `xs` (size-5) for buttons inside small controls, `sm` (size-8) or `md` (size-10). */
+		size?: IconButtonSize;
 	}
 </script>
 

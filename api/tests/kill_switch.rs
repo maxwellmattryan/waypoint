@@ -66,10 +66,11 @@ async fn seed_google(pool: &PgPool) {
 }
 
 /// One row in most user tables: an application, a run with a step, a job, a model call
-/// and an OAuth state.
+/// an OAuth state and a memory.
 async fn seed_data(pool: &PgPool) {
     for sql in [
         "INSERT INTO applications (company, title) VALUES ('Acme', 'Engineer')",
+        "INSERT INTO memories (kind, topic, content) VALUES ('fact', 'skill', 'Rust')",
         "INSERT INTO jobs (kind, payload, status) VALUES ('test_prompt', '{}', 'succeeded')",
         "INSERT INTO agent_runs (workflow, input, status) VALUES ('w', '{}', 'failed')",
         "INSERT INTO run_steps (run_id, ordinal, name) SELECT id, 0, 'a' FROM agent_runs",

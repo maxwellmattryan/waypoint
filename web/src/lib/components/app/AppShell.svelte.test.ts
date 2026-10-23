@@ -15,6 +15,7 @@ function renderAt(pathname: string) {
 		dashboard: screen.getByRole('link', { name: 'Dashboard' }),
 		applications: screen.getByRole('link', { name: 'Applications' }),
 		resumes: screen.getByRole('link', { name: 'Resumes' }),
+		memory: screen.getByRole('link', { name: 'Memory' }),
 		review: screen.getByRole('link', { name: 'Review' }),
 		nav
 	};
@@ -27,6 +28,7 @@ describe('AppShell', () => {
 		['/applications/42', 'applications'],
 		['/resumes', 'resumes'],
 		['/resumes/7', 'resumes'],
+		['/memories', 'memory'],
 		['/review', 'review'],
 		['/runs', null],
 		['/dev/primitives', null]
@@ -39,8 +41,10 @@ describe('AppShell', () => {
 		expect(links.resumes).toHaveAttribute('href', '/resumes');
 		expect(links.nav).toContainElement(links.review);
 		expect(links.review).toHaveAttribute('href', '/review');
+		expect(links.nav).toContainElement(links.memory);
+		expect(links.memory).toHaveAttribute('href', '/memories');
 
-		for (const name of ['dashboard', 'applications', 'resumes', 'review'] as const) {
+		for (const name of ['dashboard', 'applications', 'resumes', 'memory', 'review'] as const) {
 			if (name === section) expect(links[name]).toHaveAttribute('aria-current', 'page');
 			else expect(links[name]).not.toHaveAttribute('aria-current');
 		}

@@ -28,6 +28,7 @@
 	const dashboardHref = resolve('/');
 	const applicationsHref = resolve('/applications');
 	const resumesHref = resolve('/resumes');
+	const memoriesHref = resolve('/memories');
 	const reviewHref = resolve('/review');
 	const runsHref = resolve('/runs');
 	const path = $derived(page.url.pathname);
@@ -41,10 +42,14 @@
 			class="mx-auto flex min-h-16 max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 sm:flex-nowrap sm:px-8"
 		>
 			<p class="text-lg font-semibold tracking-tight text-fg">Waypoint</p>
-			<nav aria-label="Main" class="order-last flex w-full items-center gap-1 sm:order-none sm:w-auto">
+			<nav
+				aria-label="Main"
+				class="order-last flex w-full flex-wrap items-center gap-1 sm:order-none sm:w-auto sm:flex-nowrap"
+			>
 				<NavLink href={dashboardHref} current={path === dashboardHref}>Dashboard</NavLink>
 				<NavLink href={applicationsHref} current={inSection(applicationsHref)}>Applications</NavLink>
 				<NavLink href={resumesHref} current={inSection(resumesHref)}>Resumes</NavLink>
+				<NavLink href={memoriesHref} current={inSection(memoriesHref)}>Memory</NavLink>
 				<NavLink href={reviewHref} current={inSection(reviewHref)}>Review</NavLink>
 				<NavLink href={runsHref} current={inSection(runsHref)}>Runs</NavLink>
 			</nav>

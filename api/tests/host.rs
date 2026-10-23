@@ -73,6 +73,7 @@ async fn every_route_rejects_foreign_or_missing_host(pool: PgPool) {
         "claude_calls",
         "google_oauth_states",
         "google_accounts",
+        "memories",
     ] {
         let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
             .fetch_one(&pool)

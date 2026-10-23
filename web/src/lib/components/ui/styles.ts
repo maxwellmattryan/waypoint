@@ -26,11 +26,14 @@ export const buttonSizes = {
 } as const;
 
 export const iconButtonSizes = {
+	/** For icon buttons inside a small control, such as a Tag's remove button. */
+	xs: 'size-5',
 	sm: 'size-8',
 	md: 'size-10'
 } as const;
 
 export type ButtonSize = keyof typeof buttonSizes;
+export type IconButtonSize = keyof typeof iconButtonSizes;
 
 /** Base for text-like form controls (Input, Textarea, Select). Text controls keep the text cursor. */
 export const controlBase =
@@ -59,6 +62,29 @@ export const badgeTones = {
 } as const;
 
 export type BadgeTone = keyof typeof badgeTones;
+
+/** The pill every Tag shares: Badge-sized, neutral. */
+export const tagBase =
+	'inline-flex h-6 max-w-full items-center gap-1 rounded-full bg-neutral-soft px-2 text-xs font-medium whitespace-nowrap text-neutral-soft-fg';
+
+/** Hover and active colours of a clickable Tag. */
+export const tagPressable =
+	'enabled:hover:bg-primary-soft enabled:hover:text-primary-soft-fg enabled:active:bg-border';
+
+/**
+ * TagInput's box: looks like a text control and shows the focus ring while its input has
+ * focus. A `div`, so it uses plain `hover:` rather than `enabled:hover:`.
+ */
+export function tagInputBox(invalid: boolean, disabled: boolean): string {
+	const border = invalid ? 'border-danger' : 'border-border-strong';
+	const hover = invalid ? 'hover:border-danger-hover' : 'hover:border-fg-subtle';
+	return [
+		'flex min-h-10 w-full flex-wrap items-center gap-1 rounded-md border bg-surface px-2 py-1 text-sm text-fg transition-colors',
+		'focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus',
+		border,
+		disabled ? 'cursor-not-allowed opacity-50' : hover
+	].join(' ');
+}
 
 export const skeletonShapes = {
 	rect: 'rounded-md',

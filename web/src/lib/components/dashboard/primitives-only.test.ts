@@ -2,19 +2,22 @@ import { describe, expect, it } from 'vitest';
 
 // AGENTS.md invariants for screens: interactive elements come from the primitives (which bake in
 // cursor and state styles), and spacing stays on the 4px grid. Covers the app shell, the dashboard
-// cards, the applications, resumes, runs and review components and pages, and the root layout and page.
+// cards, the applications, resumes, memories, runs and review components and pages, and the root
+// layout and page.
 const sources = import.meta.glob(
 	[
 		'../app/*.svelte',
 		'./*.svelte',
 		'../applications/*.svelte',
 		'../resumes/*.svelte',
+		'../memories/*.svelte',
 		'../runs/*.svelte',
 		'../review/*.svelte',
 		'/src/routes/+layout.svelte',
 		'/src/routes/+page.svelte',
 		'/src/routes/applications/**/*.svelte',
 		'/src/routes/resumes/**/*.svelte',
+		'/src/routes/memories/**/*.svelte',
 		'/src/routes/runs/**/*.svelte',
 		'/src/routes/review/**/*.svelte'
 	],
@@ -62,6 +65,11 @@ describe('primitives only', () => {
 				'/src/lib/components/resumes/ResumeUploadDialog.svelte',
 				'/src/routes/resumes/+page.svelte',
 				'/src/routes/resumes/[id]/+page.svelte',
+				'/src/lib/components/memories/MemoryFilters.svelte',
+				'/src/lib/components/memories/MemoryFormDialog.svelte',
+				'/src/lib/components/memories/MemoryItem.svelte',
+				'/src/lib/components/memories/MemorySection.svelte',
+				'/src/routes/memories/+page.svelte',
 				'/src/lib/components/runs/MemoriesUsed.svelte',
 				'/src/lib/components/runs/PermissionBadge.svelte',
 				'/src/lib/components/runs/RunDetailView.svelte',

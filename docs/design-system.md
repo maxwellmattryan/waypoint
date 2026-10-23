@@ -78,9 +78,9 @@ For Svelte transitions, use the helper so reduced motion is honoured:
 
 Every route renders inside `AppShell` (`web/src/lib/components/app/AppShell.svelte`), which the root layout wraps around the page: a top bar with the "Waypoint" wordmark, the main nav and a live-connection Badge (Connecting, Live, Reconnecting), then the page in a centred `main` (`max-w-5xl`, `px-4 py-8`, `sm:px-8`). Pages don't add their own `main` or outer padding.
 
-The main nav (`<nav aria-label="Main">`) is four [NavLinks](#navlink): Dashboard (`/`), Applications (`/applications`), Resumes (`/resumes`) and Runs (`/runs`). The shell marks the current section from `page.url.pathname`: Dashboard only on `/`, Applications on `/applications` and every `/applications/<id>`, Resumes on `/resumes` and every `/resumes/<id>`, Runs on `/runs` and every `/runs/<id>`. Below `sm` the nav wraps onto its own row under the wordmark and badge.
+The main nav (`<nav aria-label="Main">`) is six [NavLinks](#navlink): Dashboard (`/`), Applications (`/applications`), Resumes (`/resumes`), Memory (`/memories`), Review (`/review`) and Runs (`/runs`). The shell marks the current section from `page.url.pathname`: Dashboard only on `/`, and every other link on its own path and every path under it (Applications on `/applications` and every `/applications/<id>`, Memory on `/memories`, and so on), but not on a path that only starts with the same letters (`/resumesx`). Below `sm` the nav moves onto its own row under the wordmark and badge, and wraps when the links don't fit.
 
-Screens are composed from the primitives only: `primitives-only.test.ts` in `web/src/lib/components/dashboard/` fails if the shell, the root layout or page, a dashboard card, a component in `components/applications` or `components/resumes`, or a page under `routes/applications` or `routes/resumes` uses a raw interactive tag, a `cursor-*` class or a half spacing step.
+Screens are composed from the primitives only: `primitives-only.test.ts` in `web/src/lib/components/dashboard/` fails if the shell, the root layout or page, a dashboard card, a component in `components/applications`, `components/resumes`, `components/memories`, `components/runs` or `components/review`, or a page under the matching `routes/` folder uses a raw interactive tag, a `cursor-*` class or a half spacing step.
 
 ## Primitives
 
@@ -101,7 +101,7 @@ import { Button, Input, Card } from '#lib/components/ui';
 
 ### IconButton
 
-A square button. `label` is required and becomes the `aria-label`. The icon is the `children`. `variant` defaults to `ghost`; `size` and `disabled` work as on Button.
+A square button. `label` is required and becomes the `aria-label`. The icon is the `children`. `variant` defaults to `ghost`; `disabled` works as on Button. `size`: `xs` (size-5, for buttons inside small controls such as a Tag) | `sm` (size-8) | `md` (default, size-10).
 
 ```svelte
 <IconButton label="Close" onclick={close}><CloseIcon /></IconButton>
@@ -179,6 +179,31 @@ A surface with border, radius, small shadow and `p-4`. Without `href` it's a non
 
 ```svelte
 <Badge tone="success">Offer</Badge>
+```
+
+### Tag
+
+A small neutral pill for one tag, Badge-sized (`h-6`, `rounded-full`, `text-xs`). Props: `label` (required), `onclick`, `onremove`, `disabled` and `class`. Without handlers it's a non-interactive `<span>`. With `onclick` it's a `<button>` with `cursor-pointer`, a primary-soft hover, an active background, the focus ring and `cursor-not-allowed` when disabled. With `onremove` it gets a trailing `xs` IconButton labelled "Remove tag <label>"; with both, the label and the remove button are separate buttons. Long labels truncate.
+
+```svelte
+<Tag label="remote" />
+<Tag label="remote" onclick={() => filterBy('remote')} />
+<Tag label="remote" onremove={() => remove('remote')} />
+```
+
+### TagInput
+
+A list of tags in a Field, like Input: `label`, optional `hint` and `error`, generated or passed `id` (the text input's). `value: string[]` is bindable. The tags show as removable Tags, followed by a text input inside one box that looks like a text control and shows the focus ring while the input has focus.
+
+- Enter or a comma adds the typed text, normalised by `normaliseTag` (trimmed, lowercased, whitespace runs collapsed). Text with commas adds each part. A blank or duplicate tag isn't added. Leaving the input adds what was typed.
+- Backspace in an empty input removes the last tag; each Tag's remove button removes that tag and returns focus to the input.
+- `max` (default 20) stops adding: the hint becomes "At most <max> tags" and the typed text stays in the input.
+- Enter never submits an enclosing form. Tags fade in and out with the `fast` token.
+
+`normaliseTag` and `normaliseTags` (in `tags.ts`, exported from the barrel) match `normalise_tag(s)` in `api/src/memories.rs`.
+
+```svelte
+<TagInput label="Tags" bind:value={tags} error={errors.tags} />
 ```
 
 ### EmptyState
@@ -260,6 +285,19 @@ A centred modal. Props: `open` (bindable, default `false`), `title` (required, t
 		<Button onclick={archive}>Archive</Button>
 	{/snippet}
 </Dialog>
+```
+
+### ConfirmDialog
+
+A small Dialog that asks before an action, with Cancel and a confirm button in its footer. Props: `open` (bindable), `title`, optional `description`, `confirmLabel` (default "Delete"), `pendingLabel` (default "Deleting…"), `tone`: `danger` (default) | `primary`, an optional `children` body, and `onconfirm: () => Promise<boolean>`. Confirm calls `onconfirm`; while it runs the confirm button is disabled and shows `pendingLabel`. Resolving `true` closes the dialog; `false` keeps it open (show the error yourself, e.g. with a toast). Cancel closes it without calling `onconfirm`. Keyboard, focus and Escape work as on Dialog.
+
+```svelte
+<ConfirmDialog
+	bind:open={deleting}
+	title="Delete memory"
+	description="Waypoint will forget this. This can't be undone."
+	onconfirm={remove}
+/>
 ```
 
 ### Drawer
