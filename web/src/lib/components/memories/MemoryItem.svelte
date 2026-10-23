@@ -1,5 +1,6 @@
 <script lang="ts" module>
-	import type { Memory } from '#lib/api';
+	import type { Memory, MemorySignal } from '#lib/api';
+	import type { Result } from '#lib/memories/api.js';
 
 	export interface MemoryItemProps {
 		memory: Memory;
@@ -9,6 +10,8 @@
 		ondelete: (memory: Memory) => void;
 		/** Filters the list by one of the memory's tags. */
 		ontag: (tag: string) => void;
+		/** Reads a memory's evidence signals, for a proposed learned memory's "Show evidence". */
+		loadEvidence: (id: number) => Promise<Result<MemorySignal[]>>;
 		/** Shows the highlight ring, for the memory a link pointed at. */
 		highlighted?: boolean;
 	}
@@ -18,6 +21,7 @@
 	import { formatDate } from '#lib/applications/format.js';
 	import { Badge, Button, Card, Link, Tag } from '#lib/components/ui';
 	import { TOPIC_LABELS, sourceLine } from '#lib/memories/topics.js';
+	import MemoryEvidence from './MemoryEvidence.svelte';
 
 	let {
 		memory,
@@ -25,6 +29,7 @@
 		onedit,
 		ondelete,
 		ontag,
+		loadEvidence,
 		highlighted = false
 	}: MemoryItemProps = $props();
 
@@ -98,5 +103,9 @@
 				<Button size="sm" variant="ghost" onclick={() => ondelete(memory)}>Delete</Button>
 			</div>
 		</div>
+
+		{#if proposed && memory.source_kind === 'signal'}
+			<MemoryEvidence memoryId={memory.id} load={loadEvidence} />
+		{/if}
 	</div>
 </Card>

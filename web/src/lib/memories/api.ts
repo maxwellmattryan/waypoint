@@ -1,4 +1,11 @@
-import type { ApiClient, Memory, MemoryInput, MemoryKind, MemoryStatus } from '#lib/api';
+import type {
+	ApiClient,
+	Memory,
+	MemoryInput,
+	MemoryKind,
+	MemorySignal,
+	MemoryStatus
+} from '#lib/api';
 import { run, type Result } from '#lib/applications/api.js';
 
 export type { Result };
@@ -41,6 +48,14 @@ export function listMemories(
 
 export function getMemory(client: ApiClient, id: number): Promise<Result<Memory>> {
 	return run(200, () => client.GET('/memories/{id}', path(id)));
+}
+
+/** The learning signals behind memory `id`, newest first; `[]` when it has none. */
+export function listMemoryEvidence(
+	client: ApiClient,
+	id: number
+): Promise<Result<MemorySignal[]>> {
+	return run(200, () => client.GET('/memories/{id}/evidence', path(id)));
 }
 
 /** Adds a memory; the API stores it confirmed, with source `manual`. */

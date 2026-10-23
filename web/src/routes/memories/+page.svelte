@@ -8,7 +8,7 @@
 	import MemoryFormDialog from '#lib/components/memories/MemoryFormDialog.svelte';
 	import MemorySection from '#lib/components/memories/MemorySection.svelte';
 	import { Button, ConfirmDialog, EmptyState, Skeleton, toast } from '#lib/components/ui';
-	import { createMemory, updateMemory } from '#lib/memories/api.js';
+	import { createMemory, listMemoryEvidence, updateMemory } from '#lib/memories/api.js';
 	import { parseMemoryParam } from '#lib/memories/link.js';
 	import { MemoryList } from '#lib/memories/memories.svelte.js';
 	import { importLinkedIn } from '#lib/memories/profile.js';
@@ -164,6 +164,7 @@
 					onedit={edit}
 					ondelete={askDelete}
 					ontag={(tag) => list.setTag(tag)}
+					loadEvidence={(id) => listMemoryEvidence(client, id)}
 				/>
 			</div>
 		{/each}

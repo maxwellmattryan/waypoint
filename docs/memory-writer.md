@@ -72,7 +72,7 @@ Each target is locked with `SELECT … FOR UPDATE` first. Nothing ever stores or
 - **Update of anything else** (a confirmed memory, or another source's proposal). The target is never modified. A new proposed `signal` memory with the proposal's fields is stored as for a create, with `revises_memory_id` pointing at the target, and listed under `revisions`.
 - **A target deleted since the prompt** makes that proposal invalid (`target memory no longer exists`); the rest of the batch still commits.
 
-`memory_evidence` cascades from both sides, and `revises_memory_id` is set to `NULL` when the revised memory is deleted. The memories page shows a `signal` memory as "Learned from <source_label>", or "Learned from your decisions" without a label. Showing evidence and revisions, and confirming a revision in place of the original, come later in the #51 follow-up.
+`memory_evidence` cascades from both sides, and `revises_memory_id` is set to `NULL` when the revised memory is deleted. The memories page shows a `signal` memory as "Learned from <source_label>", or "Learned from your decisions" without a label. A proposed `signal` memory also has "Show evidence", which lists the signals linked to it, read from `GET /memories/{id}/evidence` (newest first) on first expand. Showing revisions, and confirming a revision in place of the original, come later in the #51 follow-up.
 
 ## Evals
 
