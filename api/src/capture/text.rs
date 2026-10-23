@@ -3,7 +3,7 @@
 use scraper::{ElementRef, Html, Node, Selector};
 
 /// Elements whose text a reader never sees.
-const HIDDEN: [&str; 5] = ["script", "style", "noscript", "template", "svg"];
+pub(crate) const HIDDEN: [&str; 5] = ["script", "style", "noscript", "template", "svg"];
 
 /// The page's `<title>`, its `meta name=description` content, then every text node in
 /// `<body>` outside [`HIDDEN`] elements. Each piece has its whitespace collapsed, empty

@@ -1,0 +1,23 @@
+[
+  {
+    "id": "aaaaaaaa-0000-4000-8000-000000000005",
+    "text": "Office Manager",
+    "categories": {
+      "commitment": "Part-time",
+      "department": "Operations",
+      "location": "Berlin",
+      "team": "Workplace",
+      "allLocations": ["Berlin"]
+    },
+    "country": "DE",
+    "workplaceType": "onsite",
+    "createdAt": 1791194400000,
+    "descriptionPlain": "Run the office.",
+    "description": "<p>Run the office.</p>",
+    "lists": [],
+    "additional": "",
+    "additionalPlain": "",
+    "hostedUrl": "https://jobs.lever.co/example-labs/aaaaaaaa-0000-4000-8000-000000000005",
+    "applyUrl": "https://jobs.lever.co/example-labs/aaaaaaaa-0000-4000-8000-000000000005/apply"
+  }
+]

@@ -5,6 +5,7 @@
 pub mod boards;
 pub mod location;
 pub mod store;
+pub mod text;
 
 use serde::{Deserialize, Serialize};
 

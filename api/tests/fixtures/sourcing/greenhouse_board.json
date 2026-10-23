@@ -1,0 +1,68 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/example-labs/jobs/4012345",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null
+        }
+      ],
+      "internal_job_id": 3012345,
+      "location": { "name": "New York, NY" },
+      "metadata": null,
+      "id": 4012345,
+      "updated_at": "2026-10-01T12:30:00-04:00",
+      "requisition_id": "ENG-101",
+      "title": "Senior Backend Engineer",
+      "company_name": "Example Labs Inc.",
+      "first_published": "2026-09-15T09:00:00-04:00",
+      "content": "&lt;p&gt;Build &amp;amp; ship the &lt;strong&gt;platform&lt;/strong&gt;.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Rust&lt;/li&gt;&lt;li&gt;Postgres&lt;/li&gt;&lt;/ul&gt;",
+      "departments": [
+        { "id": 101, "name": "Engineering", "child_ids": [], "parent_id": null }
+      ],
+      "offices": [
+        { "id": 201, "name": "New York", "location": "New York, NY", "child_ids": [], "parent_id": null }
+      ]
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/example-labs/jobs/4012346",
+      "data_compliance": [],
+      "internal_job_id": 3012346,
+      "location": { "name": "Remote - US" },
+      "metadata": null,
+      "id": 4012346,
+      "updated_at": "2026-10-02T08:00:00Z",
+      "requisition_id": "DES-7",
+      "title": "Product Designer",
+      "first_published": null,
+      "content": "&lt;p&gt;Design   things.&lt;/p&gt;",
+      "departments": [],
+      "offices": []
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/example-labs/jobs/4012347",
+      "data_compliance": [],
+      "internal_job_id": 3012347,
+      "location": { "name": "London, United Kingdom" },
+      "metadata": null,
+      "id": 4012347,
+      "updated_at": "2026-09-01T10:00:00+01:00",
+      "requisition_id": "PPL-3",
+      "title": "Recruiter",
+      "company_name": "Example Labs Inc.",
+      "first_published": "2026-08-01T10:00:00+01:00",
+      "content": "&lt;h2&gt;About&lt;/h2&gt;&lt;p&gt;Hire people.&lt;/p&gt;&lt;script&gt;track()&lt;/script&gt;",
+      "departments": [
+        { "id": 102, "name": "People", "child_ids": [], "parent_id": null }
+      ],
+      "offices": [
+        { "id": 202, "name": "London", "location": "London, United Kingdom", "child_ids": [], "parent_id": null }
+      ]
+    }
+  ],
+  "meta": { "total": 3 }
+}

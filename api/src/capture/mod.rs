@@ -75,6 +75,12 @@ pub struct Config {
     /// Test-only: socket addresses the redirect guard treats as public, so a test can
     /// stand up a "public" origin on loopback.
     pub treat_as_public: Vec<SocketAddr>,
+    /// Sourcing: postings per Lever list page (`limit`).
+    pub board_page_size: usize,
+    /// Sourcing: most Lever list pages one fetch reads before it counts as an error.
+    pub max_board_pages: usize,
+    /// Sourcing: most body bytes read from one board list response.
+    pub max_board_bytes: u64,
 }
 
 impl Default for Config {
@@ -89,6 +95,9 @@ impl Default for Config {
             lever: Board::new(&["jobs.lever.co"], "https://api.lever.co"),
             ashby: Board::new(&["jobs.ashbyhq.com"], "https://api.ashbyhq.com"),
             treat_as_public: Vec::new(),
+            board_page_size: 100,
+            max_board_pages: 50,
+            max_board_bytes: 25 * 1024 * 1024,
         }
     }
 }
@@ -113,6 +122,11 @@ impl Capturer {
             .build()
             .expect("the HTTP client builds");
         Self { config, client }
+    }
+
+    /// The shared HTTP client, for the sourcing board fetches.
+    pub(crate) fn client(&self) -> &reqwest::Client {
+        &self.client
     }
 }
 

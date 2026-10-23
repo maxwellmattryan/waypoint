@@ -1,0 +1,46 @@
+[
+  {
+    "id": "aaaaaaaa-0000-4000-8000-000000000003",
+    "text": "Data Scientist",
+    "categories": {
+      "commitment": "Contract",
+      "department": "Data",
+      "location": "London",
+      "team": "Insights",
+      "allLocations": ["London"]
+    },
+    "country": "GB",
+    "workplaceType": "onsite",
+    "createdAt": 1791021600000,
+    "descriptionPlain": "Model things.",
+    "description": "<p>Model things.</p>",
+    "lists": [
+      { "text": "Requirements", "content": "<li>Python</li>" }
+    ],
+    "additional": "",
+    "additionalPlain": "",
+    "hostedUrl": "https://jobs.lever.co/example-labs/aaaaaaaa-0000-4000-8000-000000000003",
+    "applyUrl": "https://jobs.lever.co/example-labs/aaaaaaaa-0000-4000-8000-000000000003/apply"
+  },
+  {
+    "id": "aaaaaaaa-0000-4000-8000-000000000004",
+    "text": "Support Lead",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Support",
+      "location": "Austin, TX; Remote",
+      "team": "Customer",
+      "allLocations": ["Austin, TX", "Remote"]
+    },
+    "country": "US",
+    "workplaceType": "unspecified",
+    "createdAt": 1791108000000,
+    "descriptionPlain": "Help customers.",
+    "description": "<p>Help customers.</p>",
+    "lists": [],
+    "additional": "",
+    "additionalPlain": "",
+    "hostedUrl": "https://jobs.lever.co/example-labs/aaaaaaaa-0000-4000-8000-000000000004",
+    "applyUrl": "javascript:alert(1)"
+  }
+]
