@@ -102,6 +102,283 @@
       "setup": {"emails": ["classify/availability-pt.eml"]},
       "input": {"email_id": "${email_id}"},
       "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Initrode", "proposed_times": [{"start_utc": "2026-10-27T21:00:00Z"}, {"start_utc": "2026-11-03T22:00:00Z"}]}}
+    },
+    {
+      "name": "ashby-rejection-html-only",
+      "setup": {"emails": ["classify/ashby-rejection-html-only.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection", "company": "Pied Piper"}}
+    },
+    {
+      "name": "greenhouse-rejection-position-filled",
+      "setup": {"emails": ["classify/greenhouse-rejection-position-filled.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection", "company": "Aperture Science"}},
+      "note": "\"The position has been filled\" ends this application, so it is a soft rejection."
+    },
+    {
+      "name": "lever-rejection-qp",
+      "setup": {"emails": ["classify/lever-rejection-qp.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection", "company": "Black Mesa"}}
+    },
+    {
+      "name": "workday-rejection-base64",
+      "setup": {"emails": ["classify/workday-rejection-base64.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection", "company": "Oscorp"}},
+      "note": "\"Not to move forward at this time\" with an invitation to reapply is still a rejection of this application."
+    },
+    {
+      "name": "rejection-after-onsite-thread",
+      "setup": {"emails": ["classify/gringotts-onsite-invite.eml", "classify/rejection-after-onsite-thread.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection", "company": "Gringotts"}},
+      "note": "A reply in the onsite-invite thread; the quoted invite must not make it an interview_invite."
+    },
+    {
+      "name": "rejection-rfc2047-q",
+      "setup": {"emails": ["classify/rejection-rfc2047-q.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection", "company": "Monarch Solutions"}}
+    },
+    {
+      "name": "rejection-outlook-reply",
+      "setup": {"emails": ["classify/rejection-outlook-reply.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection", "company": "Dunder Mifflin"}}
+    },
+    {
+      "name": "agency-rejection-client",
+      "setup": {"emails": ["classify/agency-rejection-client.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection"}},
+      "note": "An agency recruiter relays the client's decision; it names both the agency and the client, so company is unlabelled."
+    },
+    {
+      "name": "rejection-rfc2047-b",
+      "setup": {"emails": ["classify/rejection-rfc2047-b.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection", "company": "Virtucon"}},
+      "note": "Filled internally and closed to external candidates: a soft rejection."
+    },
+    {
+      "name": "gringotts-onsite-invite",
+      "setup": {"emails": ["classify/gringotts-onsite-invite.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Gringotts", "proposed_times": [{"start_utc": "2026-10-29T14:00:00Z"}]}}
+    },
+    {
+      "name": "lever-invite-bst",
+      "setup": {"emails": ["classify/lever-invite-bst.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Prestige Worldwide", "proposed_times": [{"start_utc": "2026-10-23T14:00:00Z"}]}}
+    },
+    {
+      "name": "greenhouse-invite-ics",
+      "setup": {"emails": ["classify/greenhouse-invite-ics.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Sirius Cybernetics", "proposed_times": [{"start_utc": "2026-11-03T18:00:00Z"}]}}
+    },
+    {
+      "name": "invite-offset-ist",
+      "setup": {"emails": ["classify/invite-offset-ist.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Zorg Industries", "proposed_times": [{"start_utc": "2026-10-27T14:00:00Z"}]}}
+    },
+    {
+      "name": "invite-html-only-cet",
+      "setup": {"emails": ["classify/invite-html-only-cet.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Abstergo", "proposed_times": [{"start_utc": "2026-11-03T09:00:00Z"}]}}
+    },
+    {
+      "name": "ashby-invite-multipart",
+      "setup": {"emails": ["classify/ashby-invite-multipart.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Hanso Foundation", "proposed_times": [{"start_utc": "2026-11-02T19:00:00Z"}]}}
+    },
+    {
+      "name": "forward-invite-from-hiring-manager",
+      "setup": {"emails": ["classify/forward-invite-from-hiring-manager.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Spacely Sprockets", "proposed_times": [{"start_utc": null}]}},
+      "note": "A hiring manager forwards the user's own interview confirmation, so it is an invite; the forwarded time states no zone."
+    },
+    {
+      "name": "workday-invite-offset",
+      "setup": {"emails": ["classify/workday-invite-offset.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Cogswell Cogs", "proposed_times": [{"start_utc": "2026-10-30T19:30:00Z"}]}}
+    },
+    {
+      "name": "availability-et-dst",
+      "setup": {"emails": ["classify/availability-et-dst.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Blue Sun", "proposed_times": [{"start_utc": "2026-10-30T15:00:00Z"}, {"start_utc": "2026-11-03T16:00:00Z"}]}}
+    },
+    {
+      "name": "availability-ct-dst-thread",
+      "setup": {"emails": ["classify/own-reply-interested.eml", "classify/availability-ct-dst-thread.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Omni Consumer Products", "proposed_times": [{"start_utc": "2026-10-29T20:00:00Z"}, {"start_utc": "2026-11-02T21:00:00Z"}]}}
+    },
+    {
+      "name": "availability-eu-change",
+      "setup": {"emails": ["classify/availability-eu-change.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Tessier-Ashpool", "proposed_times": [{"start_utc": "2026-10-22T14:00:00Z"}, {"start_utc": "2026-10-27T15:00:00Z"}]}}
+    },
+    {
+      "name": "availability-uk-time",
+      "setup": {"emails": ["classify/availability-uk-time.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Ollivanders", "proposed_times": [{"start_utc": "2026-10-23T09:00:00Z"}, {"start_utc": "2026-10-26T10:00:00Z"}]}}
+    },
+    {
+      "name": "availability-no-zone-outlook",
+      "setup": {"emails": ["classify/availability-no-zone-outlook.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Rekall", "proposed_times": [{"start_utc": null}, {"start_utc": null}]}}
+    },
+    {
+      "name": "availability-offset-base64",
+      "setup": {"emails": ["classify/availability-offset-base64.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Weyland-Yutani", "proposed_times": [{"start_utc": "2026-10-28T13:00:00Z"}, {"start_utc": "2026-10-29T17:00:00Z"}]}}
+    },
+    {
+      "name": "lever-availability-request",
+      "setup": {"emails": ["classify/lever-availability-request.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "InGen"}},
+      "note": "Asks for availability through a scheduling link and proposes no times of its own."
+    },
+    {
+      "name": "greenhouse-availability-company-in-body",
+      "setup": {"emails": ["classify/greenhouse-availability-company-in-body.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Buy n Large"}},
+      "note": "The sender is a generic \"Recruiting Team\" on the ATS domain; the company is named only in the body."
+    },
+    {
+      "name": "offer-verbal-follow-up",
+      "setup": {"emails": ["classify/offer-verbal-follow-up.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "offer", "company": "Duff"}},
+      "note": "A verbal offer confirmed in writing is an offer even though the letter comes later."
+    },
+    {
+      "name": "offer-written-thread",
+      "setup": {"emails": ["classify/offer-verbal-follow-up.eml", "classify/offer-written-thread.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "offer", "company": "Duff"}}
+    },
+    {
+      "name": "offer-letter-html-only",
+      "setup": {"emails": ["classify/offer-letter-html-only.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "offer", "company": "Contoso"}}
+    },
+    {
+      "name": "greenhouse-offer-deadline",
+      "setup": {"emails": ["classify/greenhouse-offer-deadline.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "offer", "company": "Northwind"}}
+    },
+    {
+      "name": "offer-agency",
+      "setup": {"emails": ["classify/offer-agency.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "offer"}},
+      "note": "An agency recruiter relays the client's offer; it names both the agency and the client, so company is unlabelled."
+    },
+    {
+      "name": "ashby-offer-deadline",
+      "setup": {"emails": ["classify/ashby-offer-deadline.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "offer", "company": "Tailspin Toys"}}
+    },
+    {
+      "name": "own-reply-interested",
+      "setup": {"emails": ["classify/own-reply-interested.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Omni Consumer Products"}},
+      "note": "The user's own reply: it offers availability but asks the user for nothing."
+    },
+    {
+      "name": "own-reply-decline",
+      "setup": {"emails": ["classify/own-reply-decline.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Oceanic"}},
+      "note": "The user's own reply declining outreach; the quoted recruiter note asks for a phone screen, but the email is the user's."
+    },
+    {
+      "name": "own-reply-confirm-time",
+      "setup": {"emails": ["classify/availability-pt.eml", "classify/own-reply-confirm-time.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Initrode"}},
+      "note": "The user's own reply picking a slot is not a recruiter's invite or request."
+    },
+    {
+      "name": "availability-acknowledged",
+      "setup": {"emails": ["classify/availability-pt.eml", "classify/own-reply-confirm-time.eml", "classify/availability-acknowledged.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Initrode"}},
+      "note": "Acknowledges the user's availability and promises an invite later; it neither asks for times nor confirms one."
+    },
+    {
+      "name": "lever-application-received",
+      "setup": {"emails": ["classify/lever-application-received.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Los Pollos Hermanos"}}
+    },
+    {
+      "name": "workday-application-received-multipart",
+      "setup": {"emails": ["classify/workday-application-received-multipart.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Globo Gym"}}
+    },
+    {
+      "name": "position-on-hold-qp",
+      "setup": {"emails": ["classify/position-on-hold-qp.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Yoyodyne"}},
+      "note": "A hold keeps the application active, so it is not a rejection."
+    },
+    {
+      "name": "linkedin-cold-outreach",
+      "setup": {"emails": ["classify/linkedin-cold-outreach.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Vehement Capital"}},
+      "note": "Cold outreach that asks for no call or times (unlike recruiter-outreach); the company differs from the linkedin.com sender."
+    },
+    {
+      "name": "take-home-assignment-q",
+      "setup": {"emails": ["classify/take-home-assignment-q.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Pendant Publishing"}},
+      "note": "A take-home assignment with nothing to schedule is not an interview invite."
+    },
+    {
+      "name": "forward-friend-referral",
+      "setup": {"emails": ["classify/forward-friend-referral.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Strickland Propane"}},
+      "note": "A friend forwards a recruiter's post to a mailing list; nothing is addressed to the user."
+    },
+    {
+      "name": "agency-outreach-unnamed-client",
+      "setup": {"emails": ["classify/agency-outreach-unnamed-client.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other"}},
+      "note": "Agency outreach for an unnamed client with no time ask; the only company named is the agency, so company is unlabelled."
+    },
+    {
+      "name": "greenhouse-application-received-html",
+      "setup": {"emails": ["classify/greenhouse-application-received-html.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Bluth Company"}}
     }
   ]
 }

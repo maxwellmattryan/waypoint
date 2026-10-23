@@ -148,23 +148,25 @@ The cases check that an edit from "happy to relocate to NYC" to "remote only" be
 
 ## The `classify_email` eval set
 
-`api/evals/classify_email.json` covers [classify and extract](email.md#classify-and-extract): 17 cases, one model call each. Setup takes `{"emails": ["<path relative to api/fixtures/>", ...]}`. It deletes every classification, email and thread, then ingests the files in order (`source = fixture`, the file stem as the provider id, no known companies) **without queuing a run**, and returns `email_id`, the last file's id. Each case's input is `{"email_id": "${email_id}"}`, so the case's own run is the only one, and it expects `status: succeeded`. An empty list, a path containing `..` or starting with `/`, or a file that is missing or doesn't parse is a setup error.
+`api/evals/classify_email.json` covers [classify and extract](email.md#classify-and-extract): 60 cases, one model call each. Setup takes `{"emails": ["<path relative to api/fixtures/>", ...]}`. It deletes every classification, email and thread, then ingests the files in order (`source = fixture`, the file stem as the provider id, no known companies) **without queuing a run**, and returns `email_id`, the last file's id. Each case's input is `{"email_id": "${email_id}"}`, so the case's own run is the only one, and it expects `status: succeeded`. An empty list, a path containing `..` or starting with `/`, or a file that is missing or doesn't parse is a setup error.
 
-There is one case per candidate fixture in `api/fixtures/emails/` (15). A reply is seeded after the message it answers, so the prompt's thread block has it: `recruiter-outreach.eml` comes before `recruiter-outlook-reply.eml` and before `recruiter-reply-subject-only.eml`. Two synthetic eval-only files in `api/fixtures/classify/` cover the classes the corpus lacks: `offer.eml`, and `availability-pt.eml`, a recruiter proposing "Tue Oct 27 at 2pm PT or Tue Nov 3 at 2pm PT", which crosses the US DST change. They sit outside `api/fixtures/emails/`, so the dev import and its manifest don't change.
+There is one case per email, named by its file stem, and the email is the setup's last file. 15 cases cover the candidate fixtures in `api/fixtures/emails/`, and 45 cover the synthetic eval-only files in `api/fixtures/classify/`, which sit outside `api/fixtures/emails/` so the dev import and its manifest don't change. Every one of them scores `candidate` under the heuristics with no known companies, as a real email reaching the classifier would. The eval-only files cover the messy inputs a real inbox has: multipart and HTML-only bodies, quoted-printable and base64 with non-ASCII text, RFC 2047 `B` and `Q` headers, Gmail and Outlook quoted replies, threads, forwards, each ATS (Greenhouse, Lever, Ashby, Workday), time zones across the US and EU DST changes, numeric offsets and no zone, agency recruiters and companies that differ from the sender, the user's own replies, and `.ics` invites. [`api/fixtures/classify/README.md`](../api/fixtures/classify/README.md) lists every file with its class and categories.
+
+A reply is seeded after the messages it answers, so the prompt's thread block has them: for example `recruiter-outreach.eml` comes before `recruiter-outlook-reply.eml`, and `availability-pt.eml` and `own-reply-confirm-time.eml` come before `availability-acknowledged.eml`.
 
 Every case labels `output.class`:
 
-| Fixture | Class |
-|---|---|
-| `ashby-rejection` | rejection |
-| `greenhouse-application-received`, `greenhouse-company-domain`, `greenhouse-second-company`, `workday-application-update`, `workday-candidate-home`, `recruiter-bulk-tool`, `forwarded-thread`, `recruiter-reply-subject-only` | other |
-| `interview-invite-ics`, `lever-interview-invite`, `gmail-reply-quoted` | interview_invite |
-| `recruiter-outreach`, `recruiter-outlook-reply`, `rfc2047-latin1`, `availability-pt` | availability_request |
-| `offer` | offer |
+| Class | Cases | Fixtures |
+|---|---|---|
+| rejection | 10 | `ashby-rejection`; soft rejections ("not at this time", position filled, filled internally) over every ATS, an HTML-only and an Outlook reply, a thread reply after an onsite, encoded headers, and an agency relaying the client's decision |
+| interview_invite | 11 | `interview-invite-ics`, `lever-interview-invite`, `gmail-reply-quoted`; scheduled interviews in BST, CET, ET, PT, `+05:30`, Workday's `(GMT-05:00)` and no zone, two `.ics` invites, and a hiring manager forwarding the confirmation |
+| availability_request | 12 | `recruiter-outreach`, `recruiter-outlook-reply`, `rfc2047-latin1`, `availability-pt`; two-slot asks across the US and EU DST changes, UK time, `UTC-03:00`, no zone, a thread reply, a Lever scheduling link and a company named only in a Greenhouse body |
+| offer | 7 | `offer`; a verbal-offer follow-up and its written-letter reply, an HTML-only letter, offers with deadlines (Greenhouse, Ashby) and an agency relaying an offer |
+| other | 20 | `greenhouse-application-received`, `greenhouse-company-domain`, `greenhouse-second-company`, `workday-application-update`, `workday-candidate-home`, `recruiter-bulk-tool`, `forwarded-thread`, `recruiter-reply-subject-only`; ATS application-received notes, the user's own replies (interested, declining, confirming a slot), a "received your availability" acknowledgement, a position on hold, cold outreach with no time ask (LinkedIn and an agency), a take-home assignment and a friend's forward |
 
-`forwarded-thread` is a friend passing along a recruiter's note to someone else, which is outreach, not a request for the user's availability. `recruiter-reply-subject-only` is the user's own reply, which asks nothing and confirms no slot. `recruiter-outlook-reply` asks for a phone screen "next Tuesday or Wednesday".
+`forwarded-thread` is a friend passing along a recruiter's note to someone else, which is outreach, not a request for the user's availability. `recruiter-reply-subject-only` and the `own-reply-*` cases are the user's own messages, which ask the user for nothing. `recruiter-outlook-reply` asks for a phone screen "next Tuesday or Wednesday". Every borderline case carries a `note` with its rationale.
 
-`output.company` is labelled only where the email names the company in exactly one form (not `gmail-reply-quoted` or `rfc2047-latin1`). `output.proposed_times` (its length and each `start_utc`) is labelled for `interview-invite-ics` (`2026-09-22T15:00:00Z`), `availability-pt` (`2026-10-27T21:00:00Z` and `2026-11-03T22:00:00Z`) and `gmail-reply-quoted` (one time with `start_utc: null`, since no zone is stated). Role, stage and interviewer are free-form and unlabelled.
+`output.company` is labelled only where the email names the company in exactly one form (not, for example, `gmail-reply-quoted`, `rfc2047-latin1` or the agency cases, which name both the agency and the client). `output.proposed_times` (its length and each `start_utc`) is labelled on 17 cases: `interview-invite-ics`, `availability-pt`, `gmail-reply-quoted` and every eval-only invite or availability request that states times (`start_utc: null` where no zone is given). Times in the user's own replies and offer deadlines aren't labelled. Role, stage and interviewer are free-form and unlabelled.
 
 **Classification accuracy** is the share of cases with no failure starting `output.class`:
 
@@ -175,17 +177,46 @@ cargo run --bin eval -- classify_email --json \
 
 A case whose run fails has a `status` failure but no `output.class` one, so check the pass rate too. Tokens per email are the totals' `input_tokens_per_run` and `output_tokens_per_run`, since each run reads one email.
 
+**Per-class accuracy** groups the cases by their labelled class (save the report first with `cargo run --bin eval -- classify_email --json > /tmp/classify.json`):
+
+```sh
+jq -r --slurpfile d api/evals/classify_email.json '
+  ($d[0].cases | map({(.name): .expect.output.class}) | add) as $label
+  | .cases | group_by($label[.name])[]
+  | "\($label[.[0].name]): \(map(select(all(.failures[]; startswith("output.class") | not))) | length)/\(length)"' /tmp/classify.json
+```
+
 **Fixture results (synthetic corpus, not your inbox)**, recorded on 2026-10-23 with `haiku`:
 
-| Pass rate | Classification accuracy | Input tokens per email | Output tokens per email | Cost per email |
-|---|---|---|---|---|
-| 17/17 (100%) | 17/17 (100%) | 5,172 | 447 | $0.0010 |
+| Cases | Pass rate | Classification accuracy | Input tokens per email | Output tokens per email | Cost per email |
+|---|---|---|---|---|---|
+| 60 | 57/60 (95%) | 57/60 (95%) | 5,199 | 472 | $0.0010 |
 
-These files were written to exercise each class, so the numbers say how the prompt does on them, not how often it is right on real mail. Real-inbox numbers need your own labelled emails.
+| Class | Classification accuracy |
+|---|---|
+| rejection | 10/10 |
+| interview_invite | 11/11 |
+| availability_request | 12/12 |
+| offer | 7/7 |
+| other | 17/20 |
+
+No case errored or hit a usage limit, and every failure was the class: company and proposed-time labels all matched.
+
+Misses:
+
+| Case | Labelled | Model | Why |
+|---|---|---|---|
+| `own-reply-interested` | other | availability_request | The user's own reply offers their availability, which reads like a request for it. |
+| `own-reply-decline` | other | rejection | The user declines a recruiter's outreach, and the model took the user's "no" as a rejection. |
+| `own-reply-confirm-time` | other | availability_request | The user's own reply picks one of the recruiter's slots in a thread that asked for availability. |
+
+All three are the user's own messages, which the prompt doesn't tell apart from the recruiter's (`recruiter-reply-subject-only`, a shorter own reply, passed).
+
+These files were written to exercise each class and the messy inputs above, so the numbers say how the prompt does on them, not how often it is right on real mail. Real-inbox numbers need your own labelled emails (see [Labelling emails](#labelling-emails)).
 
 ## The `match_email` eval set
 
-`api/evals/match_email.json` covers [match and act](email.md#match-and-act): 15 cases. Matching is deterministic Rust, so the set makes **no model call** and runs the same anywhere. Setup takes:
+`api/evals/match_email.json` covers [match and act](email.md#match-and-act): 27 cases. Matching is deterministic Rust, so the set makes **no model call** and runs the same anywhere. Setup takes:
 
 ```json
 {"applications": [{"name", "company", "title", "status", "stages"?}],
@@ -213,6 +244,18 @@ Every case labels `status: succeeded`, `output.status` and `output.application_i
 | `new-application-from-ats` | `greenhouse-second-company`, no applications | review, `email.new_application` (`applied`) |
 | `no-company-unmatched` | `forwarded-thread` (company null) | unmatched |
 | `confident-other-links` | `greenhouse-company-domain` | no_action with the application |
+| `workday-sender-name-and-role` | `classify/workday-invite-offset` (company null) | applied |
+| `agency-company-proposes-new` | `classify/offer-agency`, company is the agency, not the Fabrikam application | review, `email.new_application` (`offer`) |
+| `agency-no-company-unmatched` | `classify/agency-rejection-client` (company null) | unmatched |
+| `thread-reply-rejection` | `classify/gringotts-onsite-invite` matched, then `classify/rejection-after-onsite-thread` (company null) | applied, → `rejected` |
+| `html-only-rejection-company-and-role` | `classify/ashby-rejection-html-only` | applied, → `rejected` |
+| `offer-on-interviewing` | `classify/ashby-offer-deadline` | applied, `interviewing` → `offer` |
+| `low-confidence-rejection-to-review` | `classify/lever-rejection-qp` at 0.55 | review, `low_confidence` |
+| `role-picks-one-of-two` | `classify/greenhouse-invite-ics`, two Sirius Cybernetics applications | applied to the one whose title matches |
+| `own-reply-no-action` | `classify/own-reply-decline` (`other`) | no_action |
+| `invite-stage-exists` | `classify/invite-offset-ist`, already interviewing with that stage | no_action |
+| `company-only-in-ats-body` | `classify/greenhouse-availability-company-in-body` | applied |
+| `company-differs-from-sender-domain` | `classify/linkedin-cold-outreach` (sent from `linkedin.com`) | no_action with the application |
 
 **Match accuracy** is the share of cases with no failure starting `output.status` or `output.application_id`:
 
@@ -223,11 +266,78 @@ cargo run --bin eval -- match_email --json \
 
 **Fixture results (synthetic corpus, not your inbox)**, recorded on 2026-10-23:
 
-| Pass rate | Match accuracy | Model calls | Cost |
-|---|---|---|---|
-| 15/15 (100%) | 15/15 (100%) | 0 | $0.0000 |
+| Cases | Pass rate | Match accuracy | Model calls | Input tokens per email | Output tokens per email | Cost per email |
+|---|---|---|---|---|---|---|
+| 27 | 27/27 (100%) | 27/27 (100%) | 0 | 0 | 0 | $0.0000 |
+
+No misses.
 
 The cases and their classifications were written to exercise each signal and outcome, so these numbers check the rules, not how often matching is right on real mail. Real-inbox numbers need your own labelled emails.
+
+## Labelling emails
+
+The shipped email sets are synthetic. To measure Waypoint on your own mail, label some of your emails in the same format and run them as a private dataset.
+
+### Where files go
+
+| What | Shipped (synthetic, committed) | Yours (redacted, never committed) |
+|---|---|---|
+| `.eml` files | `api/fixtures/classify/` (and the dev corpus in `api/fixtures/emails/`) | `api/fixtures/private/` |
+| Datasets | `api/evals/classify_email.json`, `api/evals/match_email.json` | `api/evals/private/<workflow>.json` |
+
+Both private directories are in `.gitignore`, because this repo is public. A private dataset's `workflow` must still name the suite (`classify_email` or `match_email`). Setup paths are relative to `api/fixtures/`, so a private file is `private/<file>.eml`.
+
+### One email per file
+
+Each file is one raw RFC 5322 message, as Gmail's "Download message" saves it. Name it in kebab case after what it shows, for example `2026-10-gh-acme-rejection.eml`. The file stem becomes the email's provider id, so it must be unique across every directory a dataset reads.
+
+### Classify labels
+
+One case per email, named by its file stem:
+
+```json
+{
+  "name": "2026-10-gh-acme-rejection",
+  "setup": {"emails": ["private/2026-10-gh-acme-invite.eml", "private/2026-10-gh-acme-rejection.eml"]},
+  "input": {"email_id": "${email_id}"},
+  "expect": {"status": "succeeded", "output": {
+    "class": "rejection",
+    "company": "Acme",
+    "proposed_times": [{"start_utc": "2026-10-27T21:00:00Z"}, {"start_utc": null}]
+  }},
+  "note": "Says 'not at this time', but closes the process: a rejection."
+}
+```
+
+- `setup.emails` lists the email last. A thread reply lists the messages it answers first, oldest first, so the prompt sees the thread.
+- `class` is required: `rejection`, `interview_invite`, `availability_request`, `offer` or `other`.
+- `company` only when the email names the company in exactly one form. Leave it out when it says "Acme" in one place and "Acme Corp" in another, or names no company.
+- `proposed_times` when the email proposes or confirms times: one entry per time, in the order the email gives them, with `start_utc` in RFC 3339 with `Z`, or `null` when the email states no zone. Work each instant out with a calculation, for example `TZ=America/Los_Angeles date -j -f '%Y-%m-%d %H:%M' '2026-10-27 14:00' -u +%FT%TZ` on macOS.
+- Anything you leave out is unlabelled and isn't checked. Role, stage and interviewer are free-form, so leave them out.
+- `note` is an optional one-line string: why a borderline label is what it is. Scoring and the report ignore it.
+
+### Match labels
+
+Use the `match_email` setup shape [above](#the-match_email-eval-set): your applications, then each email with the classification to store and, for a thread, `matched_to` on the earlier email. Label `expect.output.status` and `expect.output.application_id` (`"${application_<name>}"` or `null`), and `review_items` and `actions` where they matter.
+
+### Redaction rules
+
+- Replace every person's name and address, and every company's own domain, with `.example` equivalents (`dana@acme.example`). Keep a company name only if you're fine with it being in your eval set.
+- Keep ATS and job-board sender domains (`greenhouse-mail.io`, `lever.co`, `ashbyhq.com`, `myworkday.com`, `linkedin.com`, …) so the heuristics still fire.
+- Keep the `Message-ID`, `In-Reply-To` and `References` structure, but redact their domain parts.
+- Delete tracking links, unsubscribe tokens, phone numbers, postal addresses and every attachment other than an `.ics` invite.
+- Keep dates, time zones and any wording that affects the label.
+- Check that the redacted file still scores as a candidate by running its case. Setup ingests it with the real heuristics, but the eval classifies it either way, so run with `--keep-db` and check the stored verdict (`SELECT provider_message_id, verdict, verdict_reasons FROM emails` in the scratch database). A real inbox would never send a `skip` email to the model.
+
+### Running a private dataset
+
+```sh
+docker compose up -d --wait db
+cargo run --bin eval -- classify_email --dataset api/evals/private/classify_email.json
+cargo run --bin eval -- match_email --dataset api/evals/private/match_email.json
+```
+
+Add `--json` and use the accuracy commands above to get the numbers.
 
 ## Adding a suite
 

@@ -1,0 +1,19 @@
+From: Lena Fischer <lena@abstergo.example>
+To: Alex Doe <me@home.example>
+Subject: Your video interview with Abstergo
+Date: Fri, 23 Oct 2026 08:00:00 +0200
+Message-ID: <lena-1@abstergo.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<p>Hello Alex,</p>
+<p>I'm pleased to invite you to a video interview for the <strong>Security Engineer</strong> position.</p>
+<table>
+<tr><td>When</td><td>Tuesday 3 November 2026, 10:00 CET</td></tr>
+<tr><td>Duration</td><td>45 minutes</td></tr>
+<tr><td>With</td><td>Jonas Wolff, Engineering Manager</td></tr>
+</table>
+<p>A meeting link will follow in a separate calendar invitation.</p>
+<p>Kind regards,<br>Lena Fischer<br>Talent Acquisition, Abstergo</p>
+</body></html>
