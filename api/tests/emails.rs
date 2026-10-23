@@ -13,6 +13,8 @@ use serde_json::Value;
 use sqlx::PgPool;
 use waypoint_api::email::heuristics::KnownCompanies;
 use waypoint_api::email::{self, Ingested, NewEmail, Source, VerdictKind};
+use waypoint_api::events::EventBus;
+use waypoint_api::jobs::Wake;
 
 const IMPORT: &str = "/dev/emails/import-fixtures";
 const MANIFEST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/emails/manifest.json");
@@ -30,6 +32,8 @@ fn raw(headers: &[(&str, &str)]) -> Vec<u8> {
 async fn ingest(pool: &PgPool, id: &str, gmail_thread: Option<&str>, raw: Vec<u8>) -> Ingested {
     email::ingest(
         pool,
+        &EventBus::default(),
+        &Wake::default(),
         NewEmail {
             source: Source::Gmail,
             provider_message_id: id.into(),
@@ -43,8 +47,10 @@ async fn ingest(pool: &PgPool, id: &str, gmail_thread: Option<&str>, raw: Vec<u8
     .expect("ingest")
 }
 
+/// The API with a runner whose calls hang, so the classification runs an import queues
+/// stay in flight and log nothing.
 async fn client(pool: PgPool) -> (Client, common::Fake) {
-    let fake = common::fake("success", Duration::from_secs(10));
+    let fake = common::fake("hang", Duration::from_secs(10));
     let rocket = common::app(pool, fake.runner.clone(), Default::default());
     (Client::tracked(rocket).await.expect("valid rocket"), fake)
 }
@@ -373,6 +379,8 @@ async fn threads_group_by_gmail_id_headers_and_reply_subject(pool: PgPool) {
 async fn ingest_refuses_unparseable_bytes(pool: PgPool) {
     let err = email::ingest(
         &pool,
+        &EventBus::default(),
+        &Wake::default(),
         NewEmail {
             source: Source::Fixture,
             provider_message_id: "empty".into(),
@@ -462,9 +470,11 @@ async fn fixture_import_matches_manifest(pool: PgPool) {
         );
     }
 
-    // Nothing here calls a model or queues work.
+    // The import calls no model itself; it queues one classification run per candidate
+    // (whose model calls hang here).
     assert_eq!(count(&pool, "claude_calls").await, 0);
-    assert_eq!(count(&pool, "jobs").await, 0);
+    assert_eq!(count(&pool, "jobs").await, candidates as i64);
+    assert_eq!(body["classify_queued"], candidates, "{body}");
 }
 
 #[sqlx::test]

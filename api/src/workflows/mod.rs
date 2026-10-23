@@ -1,5 +1,6 @@
 //! The workflows and tools registered in the running app (see docs/agent-runtime.md).
 
+pub mod classify_email;
 pub mod memory_writer;
 pub mod tidy;
 
@@ -17,7 +18,7 @@ use crate::runs::Runtime;
 use crate::tools::Registry;
 
 /// The production runtime: the `tidy_application` sample workflow and its tools, and the
-/// `memory_writer` workflow (no tools).
+/// `memory_writer` and `classify_email` workflows (no tools).
 pub fn runtime() -> Runtime {
     let mut tools = Registry::default();
     tools
@@ -31,6 +32,7 @@ pub fn runtime() -> Runtime {
         vec![
             Arc::new(tidy::TidyApplication),
             Arc::new(memory_writer::MemoryWriter),
+            Arc::new(classify_email::ClassifyEmail),
         ],
         tools,
     )
@@ -42,6 +44,7 @@ pub fn eval_suites() -> Vec<Arc<dyn Suite>> {
     vec![
         Arc::new(tidy::TidyEval),
         Arc::new(memory_writer::MemoryWriterEval),
+        Arc::new(classify_email::ClassifyEmailEval),
     ]
 }
 
@@ -125,6 +128,15 @@ mod tests {
             .workflow("memory_writer")
             .expect("memory_writer is registered");
         assert_eq!(writer.steps(), ["write"]);
+        let classifier = runtime
+            .workflow("classify_email")
+            .expect("classify_email is registered");
+        assert_eq!(classifier.steps(), ["classify"]);
+        let suites: Vec<&str> = eval_suites().iter().map(|suite| suite.workflow()).collect();
+        assert_eq!(
+            suites,
+            ["tidy_application", "memory_writer", "classify_email"]
+        );
 
         let tools: Vec<(&str, Permission)> = runtime
             .tools()

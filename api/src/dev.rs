@@ -118,12 +118,15 @@ async fn jobs_test_prompt(
 /// in file-name order, with `source = 'fixture'` and the file stem as the provider message
 /// id. A file that can't be read or parsed is listed in `failed` and the rest still
 /// import; a database error answers 500. `threads` counts the distinct threads the
-/// imported emails belong to.
+/// imported emails belong to, and `classify_queued` the ingests that queued a
+/// `classify_email` run.
 #[rocket::post("/dev/emails/import-fixtures")]
 async fn emails_import_fixtures(
     _host: LocalHost,
     _dev: DevOnly,
     pool: &State<PgPool>,
+    bus: &State<EventBus>,
+    wake: &State<Wake>,
 ) -> Result<Json<Value>, Status> {
     let fail = |what: &str, err: &dyn std::fmt::Display| {
         rocket::warn!("dev: cannot import email fixtures: {what}: {err}");
@@ -140,6 +143,7 @@ async fn emails_import_fixtures(
         .map_err(|err| fail("load known companies", &err))?;
 
     let (mut inserted, mut updated, mut candidates, mut skipped) = (0, 0, 0, 0);
+    let mut classify_queued = 0;
     let mut threads = std::collections::BTreeSet::new();
     let mut failed = Vec::new();
     for path in &files {
@@ -165,8 +169,11 @@ async fn emails_import_fixtures(
             labels: Vec::new(),
             raw,
         };
-        match email::ingest(pool, new, &known).await {
+        match email::ingest(pool, bus, wake, new, &known).await {
             Ok(done) => {
+                if done.classify_run_id.is_some() {
+                    classify_queued += 1;
+                }
                 if done.inserted {
                     inserted += 1;
                 } else {
@@ -192,6 +199,7 @@ async fn emails_import_fixtures(
         "candidates": candidates,
         "skipped": skipped,
         "threads": threads.len(),
+        "classify_queued": classify_queued,
         "failed": failed,
     })))
 }

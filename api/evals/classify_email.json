@@ -1,0 +1,107 @@
+{
+  "workflow": "classify_email",
+  "cases": [
+    {
+      "name": "ashby-rejection",
+      "setup": {"emails": ["emails/ashby-rejection.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "rejection", "company": "Vandelay Industries"}}
+    },
+    {
+      "name": "forwarded-thread",
+      "setup": {"emails": ["emails/forwarded-thread.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Wonka"}}
+    },
+    {
+      "name": "gmail-reply-quoted",
+      "setup": {"emails": ["emails/gmail-reply-quoted.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "proposed_times": [{"start_utc": null}]}}
+    },
+    {
+      "name": "greenhouse-application-received",
+      "setup": {"emails": ["emails/greenhouse-application-received.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Acme Corp"}}
+    },
+    {
+      "name": "greenhouse-company-domain",
+      "setup": {"emails": ["emails/greenhouse-company-domain.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Initech"}}
+    },
+    {
+      "name": "greenhouse-second-company",
+      "setup": {"emails": ["emails/greenhouse-second-company.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Globex"}}
+    },
+    {
+      "name": "interview-invite-ics",
+      "setup": {"emails": ["emails/interview-invite-ics.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Stark Industries", "proposed_times": [{"start_utc": "2026-09-22T15:00:00Z"}]}}
+    },
+    {
+      "name": "lever-interview-invite",
+      "setup": {"emails": ["emails/lever-interview-invite.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "interview_invite", "company": "Hooli"}}
+    },
+    {
+      "name": "recruiter-bulk-tool",
+      "setup": {"emails": ["emails/recruiter-bulk-tool.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Massive Dynamic"}}
+    },
+    {
+      "name": "recruiter-outlook-reply",
+      "setup": {"emails": ["emails/recruiter-outreach.eml", "emails/recruiter-outlook-reply.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Soylent"}}
+    },
+    {
+      "name": "recruiter-outreach",
+      "setup": {"emails": ["emails/recruiter-outreach.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Soylent"}}
+    },
+    {
+      "name": "recruiter-reply-subject-only",
+      "setup": {"emails": ["emails/recruiter-outreach.eml", "emails/recruiter-reply-subject-only.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Soylent"}}
+    },
+    {
+      "name": "rfc2047-latin1",
+      "setup": {"emails": ["emails/rfc2047-latin1.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request"}}
+    },
+    {
+      "name": "workday-application-update",
+      "setup": {"emails": ["emails/workday-application-update.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Umbrella"}}
+    },
+    {
+      "name": "workday-candidate-home",
+      "setup": {"emails": ["emails/workday-candidate-home.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "other", "company": "Cyberdyne Systems"}}
+    },
+    {
+      "name": "offer",
+      "setup": {"emails": ["classify/offer.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "offer", "company": "Wayne Enterprises"}}
+    },
+    {
+      "name": "availability-pt",
+      "setup": {"emails": ["classify/availability-pt.eml"]},
+      "input": {"email_id": "${email_id}"},
+      "expect": {"status": "succeeded", "output": {"class": "availability_request", "company": "Initrode", "proposed_times": [{"start_utc": "2026-10-27T21:00:00Z"}, {"start_utc": "2026-11-03T22:00:00Z"}]}}
+    }
+  ]
+}
