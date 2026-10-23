@@ -4,6 +4,7 @@ pub mod tidy;
 
 use std::sync::Arc;
 
+use crate::evals::Suite;
 use crate::runs::Runtime;
 use crate::tools::Registry;
 
@@ -18,6 +19,11 @@ pub fn runtime() -> Runtime {
         .register(tidy::DraftFollowUp)
         .expect("draft_follow_up registers");
     Runtime::new(vec![Arc::new(tidy::TidyApplication)], tools).expect("a valid runtime")
+}
+
+/// The eval suites `cargo run --bin eval` can run, one per workflow (see docs/evals.md).
+pub fn eval_suites() -> Vec<Arc<dyn Suite>> {
+    vec![Arc::new(tidy::TidyEval)]
 }
 
 #[cfg(test)]

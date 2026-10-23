@@ -240,6 +240,8 @@ The production runtime (`workflows::runtime()`) registers one workflow, which ex
 
 The three tools are also in the MCP server's `tools/list`. The README's "Try the sample workflow" walks through it with curl.
 
+Its labelled eval set is `api/evals/tidy_application.json`, run with `cargo run --bin eval -- tidy_application` (see [evals.md](evals.md)).
+
 ## Routes
 
 Every route answers only a local `Host` (403 otherwise) and answers 500 on a database error. The `POST` routes also refuse a cross-site request (`Sec-Fetch-Site: cross-site`) and an HTML form body with 403, and the ones with a JSON body answer 415 to any other content type and 400 to a body that doesn't parse or has unknown fields.
