@@ -49,6 +49,7 @@ use crate::sourcing::postings::{self, JobPosting, JobPostingDetail};
 use crate::sourcing::{self, Source, SourceBoardQueued, SourceBoardRequest};
 use crate::tools::Permission;
 use crate::workflows::memory_writer::{self, MemoryWriterQueued};
+use crate::workflows::packet_actions::{MarkAppliedRequest, RequestApprovalRequest};
 use crate::workflows::prep_packet::{
     ApplicationPacket, PacketAnswer, PacketQuestion, PacketQueued, PacketReason, PacketStatus,
     PostingPackets, PreparePacketRequest,
@@ -118,6 +119,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         postings::packets,
         postings::show_packet,
         postings::prepare_packet,
+        postings::request_packet_approval,
+        postings::mark_packet_applied,
         runs::list,
         runs::show,
         approvals::list,
@@ -214,6 +217,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         ApplicationPacket,
         PostingPackets,
         PreparePacketRequest,
+        RequestApprovalRequest,
+        MarkAppliedRequest,
         PacketQueued,
         ValidationErrors,
         FieldError,

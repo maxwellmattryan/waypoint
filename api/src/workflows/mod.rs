@@ -3,6 +3,7 @@
 pub mod classify_email;
 pub mod match_email;
 pub mod memory_writer;
+pub mod packet_actions;
 pub mod plan_goal;
 pub mod prep_packet;
 pub mod propose_interview;
@@ -32,8 +33,10 @@ pub fn runtime() -> Runtime {
 /// The production runtime: the `tidy_application` sample workflow and its tools, the
 /// `memory_writer` and `classify_email` workflows (no tools), `match_email` with its two
 /// `write` tools, `propose_interview` with its `external` tool, which writes to Google
-/// Calendar through `google`, `score_fit` and `plan_goal` (no tools) and `prep_packet` with
-/// its one `write` tool, `save_application_packet`.
+/// Calendar through `google`, `score_fit` and `plan_goal` (no tools), `prep_packet` with
+/// its one `write` tool, `save_application_packet`, and the packet's `approve_packet` and
+/// `apply_packet` with their `write` tools, `approve_application_packet` (gated) and
+/// `mark_packet_applied`.
 pub fn runtime_with(google: google::Google) -> Runtime {
     let mut tools = Registry::default();
     tools
@@ -55,6 +58,12 @@ pub fn runtime_with(google: google::Google) -> Runtime {
     tools
         .register(prep_packet::SaveApplicationPacket)
         .expect("save_application_packet registers");
+    tools
+        .register(packet_actions::ApproveApplicationPacket)
+        .expect("approve_application_packet registers");
+    tools
+        .register(packet_actions::MarkPacketApplied)
+        .expect("mark_packet_applied registers");
     Runtime::new(
         vec![
             Arc::new(tidy::TidyApplication),
@@ -65,6 +74,8 @@ pub fn runtime_with(google: google::Google) -> Runtime {
             Arc::new(score_fit::ScoreFit),
             Arc::new(plan_goal::PlanGoal),
             Arc::new(prep_packet::PrepPacket),
+            Arc::new(packet_actions::ApprovePacket),
+            Arc::new(packet_actions::ApplyPacket),
         ],
         tools,
     )
@@ -189,6 +200,14 @@ mod tests {
             .workflow("prep_packet")
             .expect("prep_packet is registered");
         assert_eq!(preparer.steps(), ["prepare"]);
+        let approver = runtime
+            .workflow("approve_packet")
+            .expect("approve_packet is registered");
+        assert_eq!(approver.steps(), ["approve"]);
+        let applier = runtime
+            .workflow("apply_packet")
+            .expect("apply_packet is registered");
+        assert_eq!(applier.steps(), ["apply"]);
         let suites: Vec<&str> = eval_suites().iter().map(|suite| suite.workflow()).collect();
         assert_eq!(
             suites,
@@ -204,22 +223,24 @@ mod tests {
             ]
         );
 
-        let tools: Vec<(&str, Permission)> = runtime
+        let tools: Vec<(&str, Permission, bool)> = runtime
             .tools()
             .describe()
             .into_iter()
-            .map(|tool| (tool.name, tool.permission))
+            .map(|tool| (tool.name, tool.permission, tool.gated()))
             .collect();
         assert_eq!(
             tools,
             [
-                ("add_application_stage", Permission::Write),
-                ("add_note", Permission::Write),
-                ("create_calendar_event", Permission::External),
-                ("draft_follow_up", Permission::External),
-                ("get_application", Permission::Read),
-                ("save_application_packet", Permission::Write),
-                ("set_application_status", Permission::Write),
+                ("add_application_stage", Permission::Write, false),
+                ("add_note", Permission::Write, false),
+                ("approve_application_packet", Permission::Write, true),
+                ("create_calendar_event", Permission::External, true),
+                ("draft_follow_up", Permission::External, true),
+                ("get_application", Permission::Read, false),
+                ("mark_packet_applied", Permission::Write, false),
+                ("save_application_packet", Permission::Write, false),
+                ("set_application_status", Permission::Write, false),
             ]
         );
     }

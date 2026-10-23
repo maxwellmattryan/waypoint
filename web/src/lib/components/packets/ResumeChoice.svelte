@@ -32,12 +32,14 @@
 			<Badge tone="neutral">Deleted resume</Badge>
 		{/if}
 	</div>
-	<ul class="flex flex-col gap-4" aria-label="Why this resume">
-		{#each reasons as reason, i (i)}
-			<li class="flex flex-col gap-2">
-				<p class="text-sm break-words text-fg">{reason.text}</p>
-				<CitationList citations={reason.citations} />
-			</li>
-		{/each}
-	</ul>
+	{#if reasons.length > 0}
+		<ul class="flex flex-col gap-4" aria-label="Why this resume">
+			{#each reasons as reason, i (i)}
+				<li class="flex flex-col gap-2">
+					<p class="text-sm break-words text-fg">{reason.text}</p>
+					<CitationList citations={reason.citations} />
+				</li>
+			{/each}
+		</ul>
+	{/if}
 </div>

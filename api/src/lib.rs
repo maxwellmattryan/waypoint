@@ -131,6 +131,8 @@ pub fn rocket(
                 sourcing::postings::packets,
                 sourcing::postings::show_packet,
                 sourcing::postings::prepare_packet,
+                sourcing::postings::request_packet_approval,
+                sourcing::postings::mark_packet_applied,
                 jobs::show,
                 runs::list,
                 runs::show,

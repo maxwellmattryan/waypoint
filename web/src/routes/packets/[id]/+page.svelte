@@ -67,6 +67,16 @@
 	</div>
 {:else}
 	<div in:fade={{ duration: motionDuration('base') }}>
-		<PacketDetailView packet={view.packet} />
+		<PacketDetailView
+			packet={view.packet}
+			busy={store?.busy ?? null}
+			resumes={store?.resumes ?? { kind: 'idle' }}
+			onloadresumes={() => void store?.loadResumes()}
+			onapprove={async (input) => (await store?.approve(input)) ?? null}
+			onreject={async () => store?.reject()}
+			onrequest={() => void store?.requestApproval()}
+			onapply={() => void store?.markApplied()}
+			onundo={() => void store?.undo()}
+		/>
 	</div>
 {/if}

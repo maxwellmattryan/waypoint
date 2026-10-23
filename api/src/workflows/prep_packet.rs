@@ -52,6 +52,7 @@ use crate::runs::review::ReviewItem;
 use crate::runs::{self, RUN_COLUMNS, Run, StepContext, StepError, Workflow};
 use crate::sourcing::postings;
 use crate::tools::{Permission, Tool, ToolContext, ToolError, UndoError};
+use crate::workflows::packet_actions::{self, PacketActionError};
 
 /// The workflow's name.
 pub const WORKFLOW: &str = "prep_packet";
@@ -188,16 +189,22 @@ pub enum PacketStatus {
     Ready,
     /// A `prep_packet.packet` review item waits for the user.
     InReview,
-    /// The user dismissed its review item.
+    /// The user dismissed its review item, or rejected its approval.
     Dismissed,
+    /// The user approved it, possibly with edits (the `approved_*` fields).
+    Approved,
+    /// The user marked it applied after submitting it themselves.
+    Applied,
 }
 
 impl PacketStatus {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Ready => "ready",
             Self::InReview => "in_review",
             Self::Dismissed => "dismissed",
+            Self::Approved => "approved",
+            Self::Applied => "applied",
         }
     }
 }
@@ -243,6 +250,35 @@ pub struct ApplicationPacket {
     pub cost_usd: f64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// The resume version the user approved; `null` before approval and once it has been
+    /// deleted.
+    #[schema(required = true)]
+    pub approved_resume_version_id: Option<i64>,
+    /// The approved resume's name when it was approved.
+    #[schema(required = true)]
+    pub approved_resume_name: Option<String>,
+    /// The five answers the user approved, in question order; `null` before approval.
+    #[schema(value_type = Option<Vec<PacketAnswer>>, required = true)]
+    pub approved_answers: Option<sqlx::types::Json<Vec<PacketAnswer>>>,
+    #[schema(required = true)]
+    pub approved_at: Option<DateTime<Utc>>,
+    /// The application marking it applied created or updated; `null` before that and once
+    /// that application has been deleted.
+    #[schema(required = true)]
+    pub application_id: Option<i64>,
+    #[schema(required = true)]
+    pub applied_at: Option<DateTime<Utc>>,
+    /// The `pending` approval action for this packet, if any.
+    #[schema(required = true)]
+    pub pending_action_id: Option<i64>,
+    /// The action that undoes the packet's current state: its approval while `approved`,
+    /// its mark applied while `applied`, otherwise `null`.
+    #[schema(required = true)]
+    pub undo_action_id: Option<i64>,
+    /// The latest `approve_packet` or `apply_packet` run for the packet.
+    #[schema(required = true)]
+    #[sqlx(skip)]
+    pub latest_run: Option<FitRun>,
 }
 
 /// The `GET /postings/{id}/packets` body.
@@ -263,10 +299,12 @@ pub struct PostingPackets {
 #[serde(deny_unknown_fields)]
 pub struct PreparePacketRequest {}
 
-/// The `POST /postings/{id}/packet` answer, and what [`queue`] returns.
+/// The `POST /postings/{id}/packet`, `POST /packets/{id}/approval` and
+/// `POST /packets/{id}/applied` answer, and what [`queue`],
+/// [`packet_actions::request_approval`] and [`packet_actions::queue_apply`] return.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct PacketQueued {
-    /// The `prep_packet` run that will prepare the packet.
+    /// The `prep_packet`, `approve_packet` or `apply_packet` run.
     pub run: Run,
     /// Whether this run was already waiting or running rather than a new one.
     pub reused: bool,
@@ -752,6 +790,7 @@ async fn prepare(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, StepE
         .await
         .map_err(db("read the stored packet"))?
     {
+        request_ready_approval(ctx, &done).await?;
         return Ok(done);
     }
 
@@ -881,10 +920,38 @@ async fn prepare(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, StepE
         }),
     )
     .await?;
-    stored_output(&pool, run_id)
+    let done = stored_output(&pool, run_id)
         .await
         .map_err(db("read the stored packet"))?
-        .ok_or_else(|| StepError::Retry("the stored packet is missing".into()))
+        .ok_or_else(|| StepError::Retry("the stored packet is missing".into()))?;
+    request_ready_approval(ctx, &done).await?;
+    Ok(done)
+}
+
+/// Queues the approval request of the packet `done` describes when it is `ready`, in its
+/// own transaction, and publishes the new run. A packet that is no longer `ready` (or is
+/// gone) gets none.
+async fn request_ready_approval(ctx: &StepContext<'_>, done: &Value) -> Result<(), StepError> {
+    if done["status"] != json!(PacketStatus::Ready) {
+        return Ok(());
+    }
+    let Some(packet) = done["packet_id"].as_i64() else {
+        return Ok(());
+    };
+    let what = "request the packet's approval";
+    let mut tx = ctx.pool().begin().await.map_err(db(what))?;
+    match packet_actions::request_approval(&mut tx, ctx.bus(), packet).await {
+        Ok(queued) => {
+            tx.commit().await.map_err(db(what))?;
+            if !queued.reused {
+                ctx.bus()
+                    .publish(crate::events::Event::RunUpdated { run: queued.run });
+            }
+            Ok(())
+        }
+        Err(PacketActionError::Database(err)) => Err(db(what)(err)),
+        Err(_) => Ok(()),
+    }
 }
 
 /// The workflow. Its input is `{"posting_id"}`.
@@ -1139,6 +1206,8 @@ impl Tool for SaveApplicationPacket {
             UndoError::Conflict("the undo data doesn't fit save_application_packet".into())
         })?;
         let id = undo.packet_id;
+        // A decided approval would be lost; a pending one is rejected, without a signal.
+        packet_actions::reject_pending_approvals(conn, id).await?;
         let deleted: Option<Option<i64>> = sqlx::query_scalar(
             "DELETE FROM application_packets WHERE id = $1 \
              AND status IN ('ready', 'in_review') RETURNING review_item_id",
@@ -1165,25 +1234,34 @@ impl Tool for SaveApplicationPacket {
 }
 
 /// Accepting `prep_packet.packet` item `item` inside `tx`: its `in_review` packet becomes
-/// `ready`, as it is. A packet that isn't `in_review` (or is gone) is a conflict.
+/// `ready`, as it is, and gets its approval request ([`packet_actions::request_approval`]).
+/// A packet that isn't `in_review` (or is gone) is a conflict. Returns the queued
+/// `approve_packet` run when it is new, for the caller to publish after commit.
 pub(crate) async fn accept(
     tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
     item: &ReviewItem,
-) -> Result<(), DecisionError> {
-    let done = sqlx::query(
+) -> Result<Option<Run>, DecisionError> {
+    let packet: Option<i64> = sqlx::query_scalar(
         "UPDATE application_packets SET status = 'ready', updated_at = now() \
-         WHERE review_item_id = $1 AND status = 'in_review'",
+         WHERE review_item_id = $1 AND status = 'in_review' RETURNING id",
     )
     .bind(item.id)
-    .execute(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await?;
-    if done.rows_affected() == 0 {
+    let Some(packet) = packet else {
         return Err(DecisionError::Conflict(format!(
             "review item {} has no packet waiting for review",
             item.id
         )));
+    };
+    match packet_actions::request_approval(tx, bus, packet).await {
+        Ok(queued) => Ok((!queued.reused).then_some(queued.run)),
+        Err(PacketActionError::Database(err)) => Err(DecisionError::Db(err)),
+        Err(err) => Err(DecisionError::Conflict(format!(
+            "packet {packet} can't be approved: {err:?}"
+        ))),
     }
-    Ok(())
 }
 
 /// Dismissing `prep_packet.packet` item `item` inside `tx`: its packet becomes
@@ -1265,22 +1343,41 @@ async fn is_scored<'e>(executor: impl sqlx::PgExecutor<'e>, posting_id: i64) -> 
     .await
 }
 
-/// The columns of [`ApplicationPacket`], from `application_packets p` joined to its
-/// posting `j`.
+/// The columns of [`ApplicationPacket`] but `latest_run`, from `application_packets p`
+/// joined to its posting `j`. The tool and workflow names are
+/// [`packet_actions::APPROVE_TOOL`], [`packet_actions::APPLY_TOOL`] and
+/// [`packet_actions::APPROVE_WORKFLOW`].
 const PACKET_SELECT: &str = "SELECT p.id, p.posting_id, j.company, j.title, p.run_id, \
                              p.status, p.resume_version_id, p.resume_name, \
                              p.resume_reasons, p.answers, p.fit_score_id, p.fit_score, \
                              p.fit_band, p.confidence, p.review_item_id, p.cost_usd, \
-                             p.created_at, p.updated_at \
+                             p.created_at, p.updated_at, p.approved_resume_version_id, \
+                             p.approved_resume_name, p.approved_answers, p.approved_at, \
+                             p.application_id, p.applied_at, \
+                             (SELECT pa.id FROM pending_actions pa \
+                              JOIN agent_runs r ON r.id = pa.run_id \
+                              WHERE pa.tool = 'approve_application_packet' \
+                              AND pa.status = 'pending' AND r.workflow = 'approve_packet' \
+                              AND r.input -> 'packet_id' = to_jsonb(p.id) \
+                              ORDER BY pa.id DESC LIMIT 1) AS pending_action_id, \
+                             (SELECT a.id FROM agent_actions a \
+                              WHERE a.undone_at IS NULL \
+                              AND a.undo_data -> 'packet_id' = to_jsonb(p.id) \
+                              AND a.tool = CASE p.status \
+                                WHEN 'approved' THEN 'approve_application_packet' \
+                                WHEN 'applied' THEN 'mark_packet_applied' END \
+                              ORDER BY a.id DESC LIMIT 1) AS undo_action_id \
                              FROM application_packets p \
                              JOIN job_postings j ON j.id = p.posting_id";
 
 /// Most packets `GET /postings/{id}/packets` returns.
 pub const MAX_LISTED: i64 = 20;
 
-/// Clears `memory_id` on every citation of `packets` whose memory has been deleted.
+/// Clears `memory_id` on every citation of `packets` whose memory has been deleted, and
+/// fills each packet's `latest_run`.
 async fn forget_deleted(pool: &PgPool, packets: &mut [ApplicationPacket]) -> sqlx::Result<()> {
     let mut citations: Vec<&mut FitCitation> = Vec::new();
+    let ids: Vec<i64> = packets.iter().map(|packet| packet.id).collect();
     for packet in packets.iter_mut() {
         for reason in packet.resume_reasons.iter_mut() {
             citations.extend(reason.citations.iter_mut());
@@ -1288,8 +1385,18 @@ async fn forget_deleted(pool: &PgPool, packets: &mut [ApplicationPacket]) -> sql
         for answer in packet.answers.iter_mut() {
             citations.extend(answer.citations.iter_mut());
         }
+        if let Some(approved) = packet.approved_answers.as_mut() {
+            for answer in approved.iter_mut() {
+                citations.extend(answer.citations.iter_mut());
+            }
+        }
     }
-    forget_deleted_memories(pool, citations.into_iter()).await
+    forget_deleted_memories(pool, citations.into_iter()).await?;
+    let latest = packet_actions::latest_runs(pool, &ids).await?;
+    for packet in packets.iter_mut() {
+        packet.latest_run = latest.get(&packet.id).cloned();
+    }
+    Ok(())
 }
 
 /// Posting `posting_id`'s packets and latest run (see [`PostingPackets`]). The caller

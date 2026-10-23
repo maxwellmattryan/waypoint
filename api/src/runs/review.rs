@@ -186,8 +186,9 @@ pub async fn dismiss(
 /// kinds the email's interview times are proposed in the same transaction, and
 /// `application.created` or `application.updated` and the queued `propose_interview` runs
 /// are published after the commit. A `score_fit.score` item's score becomes `applied`, a
-/// `prep_packet.packet` item's packet becomes `ready`, and the item's run is published
-/// after the commit.
+/// `prep_packet.packet` item's packet becomes `ready` and gets its `approve_packet` run
+/// (no signal is recorded), and the item's run and that new run are published after the
+/// commit.
 pub async fn accept(pool: &PgPool, bus: &EventBus, id: i64) -> Result<ReviewItem, DecisionError> {
     let mut tx = pool.begin().await?;
     let item: ReviewItem = sqlx::query_as(&format!(
@@ -203,14 +204,18 @@ pub async fn accept(pool: &PgPool, bus: &EventBus, id: i64) -> Result<ReviewItem
         )));
     }
     if item.kind == score_fit::REVIEW_KIND || item.kind == prep_packet::REVIEW_KIND {
-        if item.kind == score_fit::REVIEW_KIND {
+        let approval = if item.kind == score_fit::REVIEW_KIND {
             score_fit::accept(&mut tx, &item).await?;
+            None
         } else {
-            prep_packet::accept(&mut tx, &item).await?;
-        }
+            prep_packet::accept(&mut tx, bus, &item).await?
+        };
         let item = mark_accepted(&mut tx, id).await?;
         tx.commit().await?;
         super::publish(pool, bus, item.run_id).await;
+        if let Some(run) = approval {
+            bus.publish(Event::RunUpdated { run });
+        }
         return Ok(item);
     }
     if item.kind == plan_goal::REVIEW_KIND {

@@ -631,6 +631,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/packets/{id}/applied": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * `POST /packets/{id}/applied`: queues the `apply_packet` run that records that the user
+         *     applied with an `approved` packet, or returns the one already waiting or running.
+         */
+        post: operations["mark_packet_applied"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/packets/{id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * `POST /packets/{id}/approval`: queues the `approve_packet` run that asks the user to
+         *     approve a `ready` packet, or returns the one already waiting.
+         */
+        post: operations["request_packet_approval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pending-actions": {
         parameters: {
             query?: never;
@@ -1069,6 +1109,26 @@ export interface components {
         ApplicationPacket: {
             /** @description The five answers, in question order. */
             answers: components["schemas"]["PacketAnswer"][];
+            /**
+             * Format: int64
+             * @description The application marking it applied created or updated; `null` before that and once
+             *     that application has been deleted.
+             */
+            application_id: number | null;
+            /** Format: date-time */
+            applied_at: string | null;
+            /** @description The five answers the user approved, in question order; `null` before approval. */
+            approved_answers: components["schemas"]["PacketAnswer"][] | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** @description The approved resume's name when it was approved. */
+            approved_resume_name: string | null;
+            /**
+             * Format: int64
+             * @description The resume version the user approved; `null` before approval and once it has been
+             *     deleted.
+             */
+            approved_resume_version_id: number | null;
             /** @description The posting's company. */
             company: string;
             /**
@@ -1097,6 +1157,12 @@ export interface components {
             fit_score_id: number | null;
             /** Format: int64 */
             id: number;
+            latest_run: null | components["schemas"]["FitRun"];
+            /**
+             * Format: int64
+             * @description The `pending` approval action for this packet, if any.
+             */
+            pending_action_id: number | null;
             /** Format: int64 */
             posting_id: number;
             /** @description The chosen resume's name when the packet was prepared. */
@@ -1121,6 +1187,12 @@ export interface components {
             status: components["schemas"]["PacketStatus"];
             /** @description The posting's title. */
             title: string;
+            /**
+             * Format: int64
+             * @description The action that undoes the packet's current state: its approval while `approved`,
+             *     its mark applied while `applied`, otherwise `null`.
+             */
+            undo_action_id: number | null;
             /** Format: date-time */
             updated_at: string;
         };
@@ -1632,6 +1704,8 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description The `POST /packets/{id}/applied` body: `{}`. */
+        MarkAppliedRequest: Record<string, never>;
         /** @description One `memories` row: the body of every route that returns a memory. */
         Memory: {
             /**
@@ -1773,11 +1847,15 @@ export interface components {
          * @enum {string}
          */
         PacketQuestion: "work_authorization" | "notice_period" | "salary_expectation" | "why_leaving" | "why_company";
-        /** @description The `POST /postings/{id}/packet` answer, and what [`queue`] returns. */
+        /**
+         * @description The `POST /postings/{id}/packet`, `POST /packets/{id}/approval` and
+         *     `POST /packets/{id}/applied` answer, and what [`queue`],
+         *     [`packet_actions::request_approval`] and [`packet_actions::queue_apply`] return.
+         */
         PacketQueued: {
             /** @description Whether this run was already waiting or running rather than a new one. */
             reused: boolean;
-            /** @description The `prep_packet` run that will prepare the packet. */
+            /** @description The `prep_packet`, `approve_packet` or `apply_packet` run. */
             run: components["schemas"]["Run"];
         };
         /** @description One checked resume reason, as stored. */
@@ -1790,7 +1868,7 @@ export interface components {
          * @description Where a packet is.
          * @enum {string}
          */
-        PacketStatus: "ready" | "in_review" | "dismissed";
+        PacketStatus: "ready" | "in_review" | "dismissed" | "approved" | "applied";
         /**
          * @description One `pending_actions` row: an `external` tool call waiting for, or past, the user's
          *     decision.
@@ -2076,6 +2154,8 @@ export interface components {
             /** @description What to change; trimmed, at most 1000 characters, blank means none. */
             instruction?: string | null;
         };
+        /** @description The `POST /packets/{id}/approval` body: `{}`. */
+        RequestApprovalRequest: Record<string, never>;
         /** @description The `PUT /applications/{id}/resume` body. `null` clears the link. */
         ResumeLink: {
             /** Format: int64 */
@@ -5036,6 +5116,148 @@ export interface operations {
             };
         };
     };
+    mark_packet_applied: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The packet's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkAppliedRequest"];
+            };
+        };
+        responses: {
+            /** @description The `apply_packet` run: the one already waiting (`queued` or `paused`) or `running` with `reused: true`, or a new one (`paused` while the kill switch is on). It creates or updates the posting's application; nothing is submitted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PacketQueued"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No packet has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The packet is not `approved`, or its approved resume was deleted; nothing was queued */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run could not be queued */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    request_packet_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The packet's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description The `approve_packet` run: the one already waiting (`queued` or `paused`), `running` or `awaiting_approval` with `reused: true`, or a new one (`paused` while the kill switch is on). It parks with one `pending` action for the packet's draft */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PacketQueued"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No packet has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The packet is not `ready`; nothing was queued */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run could not be queued */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_pending_actions: {
         parameters: {
             query?: never;
@@ -5118,7 +5340,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The action is not `pending`, its run is not `awaiting_approval`, or its tool is no longer registered */
+            /** @description The action is not `pending`, its run is not `awaiting_approval`, its tool is no longer registered, or the application packet it approves is gone or no longer `ready` */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5132,7 +5354,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The edited `input` breaks the tool's input schema */
+            /** @description The edited `input` breaks the tool's input schema, or an application packet's approval changes `packet_id`, names no existing resume or has an answer over 1,500 characters */
             422: {
                 headers: {
                     [name: string]: unknown;
