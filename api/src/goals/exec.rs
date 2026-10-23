@@ -1,6 +1,7 @@
 //! Plan execution: the `plan_step` job. Each job is one **tick** for one goal: it locks the
 //! goal row for its whole run, walks the current plan from its first unfinished step, and
-//! stops at a step that waits for `source_board` jobs or `score_fit` runs, at a failed step
+//! stops at a step that waits for `source_board` jobs, `score_fit` runs or `prep_packet`
+//! runs, at a failed step
 //! (which replans, up to [`super::MAX_AUTO_REPLANS`] times) or at the end. The worker calls
 //! [`job_settled`] when a `source_board` or `agent_run` job ends, which requests a tick for
 //! every running goal waiting on it, and [`resume_running`] when it starts. See
@@ -8,27 +9,38 @@
 
 use std::collections::HashSet;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use super::store::{self, PlanRow};
 use super::{
-    GoalStatus, MAX_AUTO_REPLANS, PlanConfig, PlanStepKind, PlanStepStatus, lock_goal,
+    GoalStatus, MAX_AUTO_REPLANS, PlanConfig, PlanStepKind, PlanStepStatus, PrepOutcome, lock_goal,
     queue_planner, set_status,
 };
 use crate::events::{Event, EventBus};
 use crate::jobs::{self, AGENT_RUN, COLUMNS, Job, PLAN_STEP, SOURCE_BOARD, Wake};
 use crate::runs::Run;
 use crate::sourcing::{self, Source};
+use crate::workflows::prep_packet::{self, QueueError};
 use crate::workflows::{plan_goal, score_fit};
 
-/// The `prep` placeholder's output note.
-pub const PREP_NOTE: &str = "Application prep isn't available yet";
 /// The `target_companies` error for an empty list.
 pub const NO_COMPANIES: &str = "No target companies";
 /// The `score` error when no posting matches.
 pub const NO_CANDIDATES: &str = "No live posting on the target boards matches the filters";
+/// A `prep` entry's error when its posting was deleted.
+pub const PREP_GONE: &str = "The posting is gone";
+/// A `prep` entry's error when its posting has no applied fit score.
+pub const PREP_NOT_SCORED: &str = "The posting has no applied fit score";
+/// A `prep` entry's error when its run succeeded without a packet (say, the save was undone).
+pub const NO_PACKET: &str = "No packet was saved";
+/// A `prep` entry's error when its run row was deleted.
+pub const RUN_GONE: &str = "The run is gone";
+/// The `prep` error for an empty shortlist (which `shortlist` fails on first).
+pub const NO_SHORTLIST: &str = "No shortlisted posting to prepare";
+/// The packet statuses `prep` reuses instead of preparing again.
+const REUSED_PACKETS: [&str; 4] = ["ready", "in_review", "approved", "applied"];
 
 /// What one tick decided; `jobs::worker` maps it onto its outcome.
 #[derive(Debug, Clone, PartialEq)]
@@ -119,7 +131,6 @@ struct Effects {
 #[derive(Debug, Clone, PartialEq)]
 enum StepResult {
     Succeeded(Value),
-    Skipped(Value),
     Failed(String),
     /// Waiting for jobs or runs; a later tick goes on.
     Waiting,
@@ -186,25 +197,31 @@ async fn tick(pool: &PgPool, bus: &EventBus, wake: &Wake, goal_id: i64) -> sqlx:
             PlanStepKind::Shortlist => {
                 shortlist(&mut tx, step.id, score_output.as_ref(), config).await?
             }
-            PlanStepKind::Prep => StepResult::Skipped(json!({"note": PREP_NOTE})),
+            PlanStepKind::Prep => {
+                prep(
+                    &mut tx,
+                    bus,
+                    plan.id,
+                    step.id,
+                    step.output,
+                    config,
+                    &mut effects,
+                )
+                .await?
+            }
         };
         match decided {
             StepResult::Waiting => {
                 result = "waiting";
                 break;
             }
-            StepResult::Succeeded(output) | StepResult::Skipped(output) => {
-                let status = if matches!(step.kind, PlanStepKind::Prep) {
-                    PlanStepStatus::Skipped
-                } else {
-                    PlanStepStatus::Succeeded
-                };
+            StepResult::Succeeded(output) => {
                 sqlx::query(
                     "UPDATE plan_steps SET status = $2, output = $3, last_error = NULL, \
                      finished_at = now(), updated_at = now() WHERE id = $1",
                 )
                 .bind(step.id)
-                .bind(status.as_str())
+                .bind(PlanStepStatus::Succeeded.as_str())
                 .bind(&output)
                 .execute(&mut *tx)
                 .await?;
@@ -483,9 +500,10 @@ async fn score(
     .bind(step_id)
     .fetch_all(&mut **tx)
     .await?;
-    let settled =
-        |status: Option<&str>| matches!(status, None | Some("succeeded" | "failed" | "rejected"));
-    if runs.iter().any(|(status, _)| !settled(status.as_deref())) {
+    if runs
+        .iter()
+        .any(|(status, _)| !settled_run(status.as_deref()))
+    {
         return Ok(StepResult::Waiting);
     }
     let failed: Vec<&(Option<String>, Option<String>)> = runs
@@ -606,6 +624,208 @@ async fn shortlist(
         "shortlisted": picked.len(),
         "in_review": in_review,
     })))
+}
+
+/// Whether a recorded run has ended: `succeeded`, `failed` or `rejected`, or deleted
+/// (`None`). A `paused` run hasn't.
+fn settled_run(status: Option<&str>) -> bool {
+    matches!(status, None | Some("succeeded" | "failed" | "rejected"))
+}
+
+/// One posting of the `prep` step's output.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PrepEntry {
+    pub posting_id: i64,
+    pub packet_id: Option<i64>,
+    pub run_id: Option<i64>,
+    pub outcome: PrepOutcome,
+    pub error: Option<String>,
+}
+
+impl PrepEntry {
+    fn failed(posting_id: i64, run_id: Option<i64>, error: &str) -> Self {
+        Self {
+            posting_id,
+            packet_id: None,
+            run_id,
+            outcome: PrepOutcome::Failed,
+            error: Some(error.to_owned()),
+        }
+    }
+}
+
+/// What the `prep` step stored on its first tick.
+#[derive(Debug, Serialize, Deserialize)]
+struct PrepProgress {
+    packets: Vec<PrepEntry>,
+}
+
+/// A `prep` task's run with the packet it saved.
+#[derive(sqlx::FromRow)]
+struct PrepRun {
+    run_id: Option<i64>,
+    status: Option<String>,
+    error: Option<String>,
+    packet_id: Option<i64>,
+}
+
+/// `prep`: on its first tick, for each shortlisted posting in rank order, reuses its newest
+/// packet when that is `ready`, `in_review`, `approved` or `applied`, otherwise queues a
+/// `prep_packet` run with the plan's prep notes (reusing an active one), and stores its
+/// progress, all in the tick's transaction; then waits for the queued runs to end and
+/// resolves each one to `prepared` or `failed`. It succeeds when any packet came out.
+async fn prep(
+    tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
+    plan_id: i64,
+    step_id: i64,
+    progress: Option<Value>,
+    config: &PlanConfig,
+    effects: &mut Effects,
+) -> sqlx::Result<StepResult> {
+    let progress = match progress.and_then(|value| PrepProgress::deserialize(value).ok()) {
+        Some(progress) => progress,
+        None => {
+            let shortlist: Vec<i64> = sqlx::query_scalar(
+                "SELECT l.posting_id FROM plan_shortlist l JOIN plan_steps s ON s.id = l.step_id \
+                 WHERE s.plan_id = $1 AND s.kind = 'shortlist' ORDER BY l.rank",
+            )
+            .bind(plan_id)
+            .fetch_all(&mut **tx)
+            .await?;
+            if shortlist.is_empty() {
+                return Ok(StepResult::Failed(NO_SHORTLIST.into()));
+            }
+            let notes = Some(config.prep_notes.trim()).filter(|notes| !notes.is_empty());
+            let mut packets = Vec::with_capacity(shortlist.len());
+            for posting_id in shortlist {
+                let newest: Option<(i64, Option<i64>, String)> = sqlx::query_as(
+                    "SELECT id, run_id, status FROM application_packets WHERE posting_id = $1 \
+                     ORDER BY id DESC LIMIT 1",
+                )
+                .bind(posting_id)
+                .fetch_optional(&mut **tx)
+                .await?;
+                if let Some((packet_id, run_id, status)) = newest
+                    && REUSED_PACKETS.contains(&status.as_str())
+                {
+                    packets.push(PrepEntry {
+                        posting_id,
+                        packet_id: Some(packet_id),
+                        run_id,
+                        outcome: PrepOutcome::Reused,
+                        error: None,
+                    });
+                    continue;
+                }
+                let entry = match prep_packet::queue(tx, bus, posting_id, notes).await {
+                    Ok(queued) => {
+                        sqlx::query(
+                            "INSERT INTO plan_step_tasks (step_id, run_id, posting_id) \
+                             VALUES ($1, $2, $3)",
+                        )
+                        .bind(step_id)
+                        .bind(queued.run.id)
+                        .bind(posting_id)
+                        .execute(&mut **tx)
+                        .await?;
+                        let run_id = queued.run.id;
+                        if !queued.reused {
+                            effects.runs.push(queued.run);
+                            effects.wake = true;
+                        }
+                        PrepEntry {
+                            posting_id,
+                            packet_id: None,
+                            run_id: Some(run_id),
+                            outcome: PrepOutcome::Queued,
+                            error: None,
+                        }
+                    }
+                    Err(QueueError::NotFound) => PrepEntry::failed(posting_id, None, PREP_GONE),
+                    Err(QueueError::NotScored) => {
+                        PrepEntry::failed(posting_id, None, PREP_NOT_SCORED)
+                    }
+                    Err(QueueError::Database(err)) => return Err(err),
+                };
+                packets.push(entry);
+            }
+            let progress = PrepProgress { packets };
+            sqlx::query("UPDATE plan_steps SET output = $2, updated_at = now() WHERE id = $1")
+                .bind(step_id)
+                .bind(json!(progress))
+                .execute(&mut **tx)
+                .await?;
+            effects.changed = true;
+            progress
+        }
+    };
+    let runs: Vec<PrepRun> = sqlx::query_as(
+        "SELECT t.run_id, r.status, r.error, p.id AS packet_id FROM plan_step_tasks t \
+         LEFT JOIN agent_runs r ON r.id = t.run_id \
+         LEFT JOIN application_packets p ON p.run_id = t.run_id \
+         WHERE t.step_id = $1 ORDER BY t.id",
+    )
+    .bind(step_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    if runs.iter().any(|run| !settled_run(run.status.as_deref())) {
+        return Ok(StepResult::Waiting);
+    }
+    let packets: Vec<PrepEntry> = progress
+        .packets
+        .into_iter()
+        .map(|entry| {
+            if entry.outcome != PrepOutcome::Queued {
+                return entry;
+            }
+            let found = entry
+                .run_id
+                .and_then(|id| runs.iter().find(|run| run.run_id == Some(id)));
+            match found {
+                None | Some(PrepRun { status: None, .. }) => {
+                    PrepEntry::failed(entry.posting_id, entry.run_id, RUN_GONE)
+                }
+                Some(run) if run.status.as_deref() == Some("succeeded") => match run.packet_id {
+                    Some(packet_id) => PrepEntry {
+                        packet_id: Some(packet_id),
+                        outcome: PrepOutcome::Prepared,
+                        error: None,
+                        ..entry
+                    },
+                    None => PrepEntry::failed(entry.posting_id, entry.run_id, NO_PACKET),
+                },
+                Some(run) => PrepEntry::failed(
+                    entry.posting_id,
+                    entry.run_id,
+                    run.error.as_deref().unwrap_or(NO_PACKET),
+                ),
+            }
+        })
+        .collect();
+    let count = |outcome: PrepOutcome| packets.iter().filter(|e| e.outcome == outcome).count();
+    let (prepared, reused, failed) = (
+        count(PrepOutcome::Prepared),
+        count(PrepOutcome::Reused),
+        count(PrepOutcome::Failed),
+    );
+    let output = json!({
+        "packets": packets, "prepared": prepared, "reused": reused, "failed": failed,
+    });
+    if prepared + reused > 0 {
+        return Ok(StepResult::Succeeded(output));
+    }
+    // Keeps the resolved entries, so the goal page shows why each one failed.
+    sqlx::query("UPDATE plan_steps SET output = $2, updated_at = now() WHERE id = $1")
+        .bind(step_id)
+        .bind(&output)
+        .execute(&mut **tx)
+        .await?;
+    let first = packets
+        .first()
+        .and_then(|entry| entry.error.as_deref())
+        .unwrap_or(NO_PACKET);
+    Ok(StepResult::Failed(format!("Every packet failed: {first}")))
 }
 
 /// The worker's hook after it recorded a terminal outcome of `job`. For a `source_board`

@@ -21,8 +21,8 @@ use crate::gmail::{self, GmailSyncQueued, GmailSyncStatus, SyncActivity, SyncCou
 use crate::goals::{
     self, DroppedCompany, Goal, GoalAnswer, GoalAnswers, GoalConflict, GoalDetail, GoalQuestion,
     GoalRun, GoalStatus, NewGoal, Plan, PlanAuthor, PlanCompany, PlanCompanyInput, PlanDropped,
-    PlanEdit, PlanStatus, PlanStep, PlanStepKind, PlanStepStatus, PlanTrigger, PlanVersion,
-    ReplanGoal, RunGoal, ShortlistEntry,
+    PlanEdit, PlanPacket, PlanStatus, PlanStep, PlanStepKind, PlanStepStatus, PlanTrigger,
+    PlanVersion, PrepOutcome, ReplanGoal, RunGoal, ShortlistEntry,
 };
 use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleRevocation, GoogleStatus};
 use crate::health::{self, Health};
@@ -207,6 +207,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         PlanStepStatus,
         PlanVersion,
         ShortlistEntry,
+        PrepOutcome,
+        PlanPacket,
         PlanEdit,
         RunGoal,
         ReplanGoal,

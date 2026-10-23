@@ -4,6 +4,7 @@ import type {
 	GoalDetail,
 	GoalQuestion,
 	Plan,
+	PlanPacket,
 	PlanStep,
 	PlanStepKind,
 	PlanStepStatus
@@ -69,6 +70,21 @@ export function makePlan(overrides: Partial<Plan> = {}): Plan {
 		updated_at: '2026-10-22T00:00:00Z',
 		steps: [0, 1, 2, 3, 4].map((ordinal) => makeStep(ordinal)),
 		shortlist: [],
+		packets: [],
+		...overrides
+	};
+}
+
+export function makePlanPacket(overrides: Partial<PlanPacket> = {}): PlanPacket {
+	return {
+		posting_id: 42,
+		company: 'Example Labs',
+		title: 'Senior Frontend Engineer',
+		outcome: 'prepared',
+		packet_id: 7,
+		status: 'ready',
+		run_id: 30,
+		error: null,
 		...overrides
 	};
 }

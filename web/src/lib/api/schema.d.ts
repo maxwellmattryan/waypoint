@@ -1944,6 +1944,8 @@ export interface components {
             max_to_score: number;
             /** Format: int32 */
             min_score: number;
+            /** @description The prep step's postings in shortlist order, from its output; empty until it ran. */
+            packets: components["schemas"]["PlanPacket"][];
             prep_notes: string;
             remote_only: boolean;
             /** Format: int64 */
@@ -2031,6 +2033,27 @@ export interface components {
             shortlist_size: number | null;
             title_keywords?: string[];
         };
+        /** @description One posting of the `prep` step, with its packet's live status. */
+        PlanPacket: {
+            company: string;
+            /** @description Why no packet came out; `null` unless `failed`. */
+            error: string | null;
+            outcome: components["schemas"]["PrepOutcome"];
+            /**
+             * Format: int64
+             * @description The prepared or reused packet; `null` while queued or when it failed.
+             */
+            packet_id: number | null;
+            /** Format: int64 */
+            posting_id: number;
+            /**
+             * Format: int64
+             * @description The `prep_packet` run that made (or is making) the packet; `null` when none ran.
+             */
+            run_id: number | null;
+            status: null | components["schemas"]["PacketStatus"];
+            title: string;
+        };
         /**
          * @description Whether a plan version may run.
          * @enum {string}
@@ -2116,6 +2139,11 @@ export interface components {
             /** @description Whether the posting has an applied fit score, so a packet can be prepared. */
             scored: boolean;
         };
+        /**
+         * @description What the `prep` step did for one shortlisted posting.
+         * @enum {string}
+         */
+        PrepOutcome: "queued" | "prepared" | "reused" | "failed";
         /** @description The `POST /postings/{id}/packet` body: `{}`. */
         PreparePacketRequest: Record<string, never>;
         /** @description The `POST /resumes/{id}/profile` body. */
@@ -4114,7 +4142,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The goal, its questions by ordinal, its current plan with steps and shortlist, its versions newest first and its latest `plan_goal` run */
+            /** @description The goal, its questions by ordinal, its current plan with steps, shortlist and prep packets (with their live status), its versions newest first and its latest `plan_goal` run */
             200: {
                 headers: {
                     [name: string]: unknown;

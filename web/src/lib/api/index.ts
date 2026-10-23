@@ -11,11 +11,13 @@ export type {
 	PlanCompanyInput,
 	PlanDropped,
 	PlanEdit,
+	PlanPacket,
 	PlanStatus,
 	PlanStep,
 	PlanStepKind,
 	PlanStepStatus,
 	PlanVersion,
+	PrepOutcome,
 	ShortlistEntry
 } from './client';
 export type {

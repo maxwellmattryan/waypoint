@@ -178,6 +178,10 @@ export type PlanVersion = components['schemas']['PlanVersion'];
 export type PlanDropped = components['schemas']['PlanDropped'];
 /** One shortlisted posting. */
 export type ShortlistEntry = components['schemas']['ShortlistEntry'];
+/** What the `prep` step did for one shortlisted posting. */
+export type PrepOutcome = components['schemas']['PrepOutcome'];
+/** One posting of the `prep` step, with its packet's live status. */
+export type PlanPacket = components['schemas']['PlanPacket'];
 /** The `PUT /goals/{id}/plan` body. */
 export type PlanEdit = components['schemas']['PlanEdit'];
 /** One company in {@link PlanEdit}. */

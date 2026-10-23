@@ -33,6 +33,7 @@ use crate::jobs::Wake;
 use crate::runs::{self, RunStatus};
 use crate::sourcing::{BAD_BOARD, BAD_SOURCE, Source, is_board_slug};
 use crate::workflows::plan_goal;
+use crate::workflows::prep_packet::PacketStatus;
 use crate::workflows::score_fit::FitBand;
 
 /// Most characters in a goal's text.
@@ -178,11 +179,12 @@ crate::memories::text_enum!(PlanStepKind, "plan step kind", [
 #[serde(rename_all = "snake_case")]
 pub enum PlanStepStatus {
     Pending,
-    /// Started, possibly waiting for its `source_board` jobs or `score_fit` runs.
+    /// Started, possibly waiting for its `source_board` jobs, `score_fit` runs or
+    /// `prep_packet` runs.
     Running,
     Succeeded,
     Failed,
-    /// Nothing to do (the `prep` placeholder).
+    /// Legacy: the `prep` placeholder before prep ran; never written now.
     Skipped,
 }
 
@@ -364,6 +366,41 @@ pub struct ShortlistEntry {
     pub band: FitBand,
 }
 
+/// What the `prep` step did for one shortlisted posting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PrepOutcome {
+    /// A `prep_packet` run is queued or running; the step is still waiting.
+    Queued,
+    /// The step's run saved a packet.
+    Prepared,
+    /// The posting already had a `ready`, `in_review`, `approved` or `applied` packet.
+    Reused,
+    /// No packet: the posting is gone or unscored, or the run failed or saved none.
+    Failed,
+}
+
+/// One posting of the `prep` step, with its packet's live status.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+pub struct PlanPacket {
+    pub posting_id: i64,
+    pub company: String,
+    pub title: String,
+    pub outcome: PrepOutcome,
+    /// The prepared or reused packet; `null` while queued or when it failed.
+    #[schema(required = true)]
+    pub packet_id: Option<i64>,
+    /// The packet's status now; `null` without a packet or when it was deleted.
+    #[schema(required = true)]
+    pub status: Option<PacketStatus>,
+    /// The `prep_packet` run that made (or is making) the packet; `null` when none ran.
+    #[schema(required = true)]
+    pub run_id: Option<i64>,
+    /// Why no packet came out; `null` unless `failed`.
+    #[schema(required = true)]
+    pub error: Option<String>,
+}
+
 /// One plan version.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct Plan {
@@ -405,6 +442,8 @@ pub struct Plan {
     pub steps: Vec<PlanStep>,
     /// The shortlist step's postings, by rank.
     pub shortlist: Vec<ShortlistEntry>,
+    /// The prep step's postings in shortlist order, from its output; empty until it ran.
+    pub packets: Vec<PlanPacket>,
 }
 
 /// One version in a goal's history.
@@ -928,7 +967,7 @@ pub async fn list(_host: LocalHost, pool: &State<PgPool>) -> Result<Json<Vec<Goa
     operation_id = "get_goal",
     params(("id" = i64, Path, description = "The goal's id")),
     responses(
-        (status = 200, description = "The goal, its questions by ordinal, its current plan with steps and shortlist, its versions newest first and its latest `plan_goal` run", body = GoalDetail),
+        (status = 200, description = "The goal, its questions by ordinal, its current plan with steps, shortlist and prep packets (with their live status), its versions newest first and its latest `plan_goal` run", body = GoalDetail),
         (status = 403, description = "The `Host` header is not a local address"),
         (status = 404, description = "No goal has this id"),
         (status = 500, description = "The goal could not be read"),

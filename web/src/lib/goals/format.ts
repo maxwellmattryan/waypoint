@@ -109,6 +109,7 @@ export function stepSummary(step: PlanStep): string {
 	if (step.status === 'running' || !output) {
 		if (step.kind === 'source') return 'Reading the boards…';
 		if (step.kind === 'score') return 'Scoring postings…';
+		if (step.kind === 'prep') return 'Preparing packets…';
 		return 'Running…';
 	}
 	switch (step.kind) {
@@ -131,8 +132,14 @@ export function stepSummary(step: PlanStep): string {
 			const waiting = count(output, 'in_review');
 			return waiting ? `${shortlisted} · ${waiting} waiting in review` : shortlisted;
 		}
-		case 'prep':
-			return typeof output.note === 'string' ? output.note : 'Skipped';
+		case 'prep': {
+			// A legacy placeholder step keeps its note.
+			if (typeof output.note === 'string') return output.note;
+			const parts = [`${count(output, 'prepared')} prepared`];
+			if (count(output, 'reused')) parts.push(`${count(output, 'reused')} already prepared`);
+			if (count(output, 'failed')) parts.push(`${count(output, 'failed')} failed`);
+			return parts.join(' · ');
+		}
 	}
 }
 

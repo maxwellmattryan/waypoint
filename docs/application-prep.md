@@ -6,11 +6,13 @@ The code is in `api/src/workflows/prep_packet.rs` (prep, the packet reads) and `
 
 ## Starting prep
 
-`prep_packet::queue(tx, bus, posting_id)` is the one entry point; the posting page's **Prepare packet** button calls it through `POST /postings/{id}/packet`, and the planner will call it directly. It locks the posting, then:
+`prep_packet::queue(tx, bus, posting_id, notes)` is the one entry point; the posting page's **Prepare packet** button calls it through `POST /postings/{id}/packet` without notes, and a goal's [`prep` step](goals.md#execution) calls it with the plan's prep notes. It locks the posting, then:
 
 - refuses a posting with no *applied* fit score (`posting_fit_scores.status = 'applied'`), so score its fit first;
 - returns the `prep_packet` run for that posting that is already `queued`, `paused` or `running`, with `reused: true`, and queues nothing;
-- otherwise queues a run with input `{"posting_id": id}` (`paused` while the kill switch is on).
+- otherwise queues a run with input `{"posting_id": id}`, plus `"notes"` when the notes aren't blank after trimming (`paused` while the kill switch is on).
+
+Notes come only from a goal's prep step. The prompt shows them, cut to 1,000 characters, in a fenced `<prep_notes>` block before the questions, as the job seeker's emphasis for this search: a preference about what to stress, never a fact about them. A Rules line says they are data, not instructions. Without notes the prompt is exactly what it was, so the eval set is unaffected.
 
 Removed postings can still be prepared. The step itself doesn't need a fit score; only the entry point does.
 

@@ -1,8 +1,9 @@
 //! Running a goal's plan: `POST /goals/{id}/run` and the `plan_step` ticks that source the
 //! boards (wiremock, `fixtures/sourcing/greenhouse_board.json`), score the matching postings
-//! with `score_fit` (`fake-claude.sh`), shortlist them and skip the prep placeholder; the
-//! automatic replans after a failed step; and resuming a running goal when the worker
-//! starts. Plans are seeded through `goals::store::write_version`.
+//! with `score_fit` (`fake-claude.sh`), shortlist them and prepare a packet for each with
+//! `prep_packet`, ending with packets waiting for approval; the automatic replans after a
+//! failed step; and resuming a running goal when the worker starts. Plans are seeded
+//! through `goals::store::write_version`.
 
 mod common;
 
@@ -102,6 +103,41 @@ async fn count(pool: &PgPool, sql: &str) -> i64 {
         .unwrap_or_else(|err| panic!("{sql}: {err}"))
 }
 
+/// Polls until `sql` counts at least one row.
+async fn eventually(pool: &PgPool, sql: &str) {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    while count(pool, sql).await == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "never true: {sql}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// What `prep_packet_goal.jsonl` cites, after [`seed_memory`]: resume 1 "Backend",
+/// confirmed answer memories 2 to 5 (one per answer-bank topic) and confirmed fact 6, which
+/// matches the engineer posting.
+async fn seed_prep(pool: &PgPool) {
+    sqlx::query(
+        "INSERT INTO resume_versions (name, filename, size_bytes, sha256, pdf, text) \
+         VALUES ('Backend', 'Backend.pdf', 9, md5('Backend'), $1, \
+         'Backend engineer: Rust services and PostgreSQL')",
+    )
+    .bind(b"%PDF-test".as_slice())
+    .execute(pool)
+    .await
+    .expect("seed a resume");
+    sqlx::query(
+        "INSERT INTO memories (kind, topic, content, status, confirmed_at) VALUES \
+         ('answer', 'work_authorization', 'EU citizen, no sponsorship needed', 'confirmed', now()), \
+         ('answer', 'notice_period', 'Four weeks notice', 'confirmed', now()), \
+         ('answer', 'salary_expectation', 'Around 90,000 EUR a year', 'confirmed', now()), \
+         ('answer', 'why_leaving', 'Wants to own a larger platform', 'confirmed', now()), \
+         ('fact', 'skill', 'Shipped Rust services on Postgres', 'confirmed', now())",
+    )
+    .execute(pool)
+    .await
+    .expect("seed prep memories");
+}
+
 /// The one confirmed memory the fit fixtures cite (id 1 in a fresh database).
 async fn seed_memory(pool: &PgPool) {
     sqlx::query(
@@ -184,12 +220,21 @@ async fn engineer(pool: &PgPool) -> i64 {
         .expect("the engineer posting")
 }
 
+/// `(id, run_id)` of the newest packet.
+async fn newest_packet(pool: &PgPool) -> (i64, i64) {
+    sqlx::query_as("SELECT id, run_id FROM application_packets ORDER BY id DESC LIMIT 1")
+        .fetch_one(pool)
+        .await
+        .expect("a packet")
+}
+
 #[sqlx::test]
-async fn runs_a_plan_to_a_shortlist(pool: PgPool) {
+async fn runs_a_goal_to_packets_awaiting_approval(pool: PgPool) {
     seed_memory(&pool).await;
+    seed_prep(&pool).await;
     let (goal, _) = seed_goal(&pool, "planned").await;
     let server = board_server(true).await;
-    let (client, _fake) = app(&pool, &server, "score_fit").await;
+    let (client, _fake) = app(&pool, &server, "route_goal_runs_prep").await;
     let mut events = client
         .rocket()
         .state::<EventBus>()
@@ -236,11 +281,49 @@ async fn runs_a_plan_to_a_shortlist(pool: PgPool) {
         json!([{"rank": 1, "posting_id": posting, "company": "Example Labs Inc.",
                 "title": "Senior Backend Engineer", "score": 82, "band": "strong"}])
     );
+    let (packet, prep_run) = newest_packet(&pool).await;
     let prep = step(&done, "prep");
-    assert_eq!(prep["status"], "skipped");
+    assert_eq!(prep["status"], "succeeded");
     assert_eq!(
         prep["output"],
-        json!({"note": "Application prep isn't available yet"})
+        json!({"packets": [{"posting_id": posting, "packet_id": packet, "run_id": prep_run,
+                            "outcome": "prepared", "error": null}],
+               "prepared": 1, "reused": 0, "failed": 0})
+    );
+    let prepped: Vec<Value> =
+        sqlx::query_scalar("SELECT input FROM agent_runs WHERE workflow = 'prep_packet'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        prepped,
+        [json!({"posting_id": posting, "notes": "Lead with Rust and Postgres work"})]
+    );
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        let shown = get(&client, &format!("/packets/{packet}")).await;
+        assert_eq!(shown["status"], "ready");
+        if shown["pending_action_id"].is_i64() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "packet {packet} never awaits approval: {shown}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    eventually(
+        &pool,
+        "SELECT count(*) FROM agent_runs \
+         WHERE workflow = 'approve_packet' AND status = 'awaiting_approval'",
+    )
+    .await;
+    let done = get(&client, &format!("/goals/{goal}")).await;
+    assert_eq!(
+        done["plan"]["packets"],
+        json!([{"posting_id": posting, "company": "Example Labs Inc.",
+                "title": "Senior Backend Engineer", "outcome": "prepared",
+                "packet_id": packet, "status": "ready", "run_id": prep_run, "error": null}])
     );
     assert_eq!(
         step(&done, "target_companies")["output"],
@@ -253,7 +336,7 @@ async fn runs_a_plan_to_a_shortlist(pool: PgPool) {
         "goal.updated"
     );
 
-    // An equivalent plan reuses the applied score.
+    // An equivalent plan reuses the applied score and the ready packet.
     let (again, _) = seed_goal(&pool, "planned").await;
     run(&client, again).await;
     let done = until(&client, again, "completed").await;
@@ -270,11 +353,81 @@ async fn runs_a_plan_to_a_shortlist(pool: PgPool) {
         .await,
         1
     );
+    assert_eq!(
+        step(&done, "prep")["output"],
+        json!({"packets": [{"posting_id": posting, "packet_id": packet, "run_id": prep_run,
+                            "outcome": "reused", "error": null}],
+               "prepared": 0, "reused": 1, "failed": 0})
+    );
+    assert_eq!(done["plan"]["packets"][0]["outcome"], "reused");
+    assert_eq!(done["plan"]["packets"][0]["status"], "ready");
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM agent_runs WHERE workflow = 'prep_packet'"
+        )
+        .await,
+        1
+    );
+}
+
+#[sqlx::test]
+async fn failing_prep_replans_then_fails(pool: PgPool) {
+    seed_memory(&pool).await;
+    seed_prep(&pool).await;
+    let (goal, _) = seed_goal(&pool, "planned").await;
+    let server = board_server(true).await;
+    let (client, _fake) = app(&pool, &server, "route_goal_runs_prep_fails").await;
+
+    run(&client, goal).await;
+    let failed = until(&client, goal, "failed").await;
+    assert_eq!(failed["auto_replans"], 2);
+    let error = failed["error"].as_str().expect("an error");
+    assert!(
+        error.starts_with("prep failed: Every packet failed: "),
+        "{error}"
+    );
+    let prep = step(&failed, "prep");
+    assert_eq!(prep["status"], "failed");
+    assert!(
+        prep["last_error"]
+            .as_str()
+            .is_some_and(|e| e.starts_with("Every packet failed: ")),
+        "{prep}"
+    );
+    assert_eq!(prep["output"]["failed"], 1);
+    assert_eq!(prep["output"]["packets"][0]["outcome"], "failed");
+    assert_eq!(failed["plan"]["packets"][0]["outcome"], "failed");
+    assert!(failed["plan"]["packets"][0]["status"].is_null());
+    for kind in ["target_companies", "source", "score", "shortlist"] {
+        assert_eq!(step(&failed, kind)["status"], "succeeded", "{kind}");
+    }
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM agent_runs WHERE workflow = 'plan_goal'"
+        )
+        .await,
+        2
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM agent_runs WHERE workflow = 'score_fit'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM application_packets").await,
+        0
+    );
 }
 
 #[sqlx::test]
 async fn failed_step_replans_and_keeps_finished_steps(pool: PgPool) {
     seed_memory(&pool).await;
+    seed_prep(&pool).await;
     let (goal, v1) = seed_goal(&pool, "planned").await;
     let server = board_server(true).await;
     let (client, _fake) = app(&pool, &server, "route_goal_runs_replan").await;
@@ -335,6 +488,12 @@ async fn failed_step_replans_and_keeps_finished_steps(pool: PgPool) {
     assert_eq!(plan["shortlist"][0]["posting_id"], posting);
     assert_eq!(plan["shortlist"][0]["score"], 55);
     assert_eq!(plan["shortlist"][0]["band"], "partial");
+    let prep = step(&done, "prep");
+    assert_eq!(prep["status"], "succeeded");
+    assert!(prep["kept_from"].is_null());
+    assert_eq!(prep["output"]["prepared"], 1);
+    assert_eq!(plan["packets"][0]["posting_id"], posting);
+    assert_eq!(plan["packets"][0]["outcome"], "prepared");
 }
 
 #[sqlx::test]
@@ -406,6 +565,27 @@ async fn running_goal_resumes_on_start(pool: PgPool) {
     .execute(&pool)
     .await
     .expect("a score");
+    // An approved packet from an earlier prep run.
+    let prep_run: i64 = sqlx::query_scalar(
+        "INSERT INTO agent_runs (workflow, input, status) \
+         VALUES ('prep_packet', jsonb_build_object('posting_id', $1::bigint), 'succeeded') \
+         RETURNING id",
+    )
+    .bind(posting)
+    .fetch_one(&pool)
+    .await
+    .expect("a prep run");
+    let packet: i64 = sqlx::query_scalar(
+        "INSERT INTO application_packets (posting_id, run_id, status, resume_name, \
+         resume_reasons, answers, confidence, approved_resume_name, approved_answers, \
+         approved_at) VALUES ($1, $2, 'approved', 'Backend', '[]', '[]', 0.9, 'Backend', \
+         '[]', now()) RETURNING id",
+    )
+    .bind(posting)
+    .bind(prep_run)
+    .fetch_one(&pool)
+    .await
+    .expect("a packet");
     for (ordinal, output) in [
         (0, json!({"companies": 1, "unverified": 0})),
         (1, json!({"boards": 1, "inserted": 1, "updated": 0})),
@@ -434,6 +614,14 @@ async fn running_goal_resumes_on_start(pool: PgPool) {
         json!([{"rank": 1, "posting_id": posting, "company": "Example Labs",
                 "title": "Senior Backend Engineer", "score": 75, "band": "strong"}])
     );
-    assert_eq!(step(&done, "prep")["status"], "skipped");
+    let prep = step(&done, "prep");
+    assert_eq!(prep["status"], "succeeded");
+    assert_eq!(
+        prep["output"],
+        json!({"packets": [{"posting_id": posting, "packet_id": packet, "run_id": prep_run,
+                            "outcome": "reused", "error": null}],
+               "prepared": 0, "reused": 1, "failed": 0})
+    );
+    assert_eq!(done["plan"]["packets"][0]["status"], "approved");
     assert_eq!(count(&pool, "SELECT count(*) FROM claude_calls").await, 0);
 }
