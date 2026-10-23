@@ -92,10 +92,7 @@ pub fn html_to_text(html: &str) -> String {
     let mut writer = Writer::default();
     // Each frame: the element's break count, whether it's an `li`, and its children.
     let mut stack = vec![(0, false, fragment.root_element().children())];
-    loop {
-        let Some(top) = stack.last_mut() else {
-            break;
-        };
+    while let Some(top) = stack.last_mut() {
         let Some(child) = top.2.next() else {
             let (n, li, _) = stack.pop().expect("the stack has a top");
             if n > 0 {
