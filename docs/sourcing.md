@@ -1,6 +1,6 @@
 # Board sourcing
 
-Waypoint reads target companies' public Greenhouse, Lever and Ashby job boards into one table, `job_postings`. One `source_board` job reads one board, identified by its source and its slug, and keeps that board's rows in step with what it lists. There is no UI and no schedule yet: you ask for a board with `POST /sourcing/boards` each time. The code lives in `api/src/sourcing/`.
+Waypoint reads target companies' public Greenhouse, Lever and Ashby job boards into one table, `job_postings`. One `source_board` job reads one board, identified by its source and its slug, and keeps that board's rows in step with what it lists. You ask for a board with the **Source company** button on the [Postings page](#postings-page), which calls `POST /sourcing/boards`. There's no schedule yet, so you ask again each time you want a board refreshed. The code lives in `api/src/sourcing/`.
 
 ## Route
 
@@ -18,6 +18,32 @@ curl -s -X POST -H 'Content-Type: application/json' \
 - Like every route that changes something, it accepts only a local `Host` and refuses cross-site and form-encoded requests with 403.
 
 It answers **202** `{"job": Job, "reused": bool}`. If a `source_board` job for the same source and board is already running, that job comes back with `reused: true`. If one is queued, its `run_at` is pulled forward to now and it comes back with `reused: true`. Otherwise a new job is queued with `reused: false`. The check and the insert run in one transaction under an advisory lock on the source and board, so two requests can't both queue a fetch. Follow the job with `GET /jobs/<id>` or the event stream. A database error is 500.
+
+## Reading postings
+
+Two read-only routes serve `job_postings`. Both accept only a local `Host` (403 otherwise), and a database error is 500.
+
+`GET /postings` lists postings, newest first by `id` (the order Waypoint first saw them). Every query parameter is optional, a blank or whitespace-only value counts as absent, and the filters combine with AND:
+
+| Parameter | Matches |
+|---|---|
+| `company` | Postings whose `company` contains the text, ignoring case. `%` and `_` are plain characters. |
+| `source` | `greenhouse`, `lever` or `ashby`, exactly. Anything else is 422 `Unknown source`. |
+| `location` | Postings whose `location_raw`, `city`, `region` or `country` contains the text, ignoring case. |
+| `remote` | `true` for only remote postings, `false` for only non-remote ones. Anything else is 422 `Must be true or false`. |
+| `include_removed` | `true` also lists postings the board stopped listing (`removed_at` set). Absent or `false` hides them. Anything else is 422 `Must be true or false`. |
+| `limit` | The most postings to return: 50 by default, clamped to 1–200. |
+| `before` | Only postings with an `id` below this one. Pass the smallest `id` of a page to get the next one. |
+
+Every failing parameter is listed in one 422 body. Each item is a `JobPosting`: every `job_postings` column except `description`, so a page stays small.
+
+`GET /postings/{id}` returns one posting with every column, `description` included (plain text, possibly `""`). A removed posting is still returned. An unknown id is 404.
+
+## Postings page
+
+The web app's **Postings** page (`/postings`) lists the postings with filters for company, location, source, remote and removed postings, 50 at a time with **Load more**. The text filters reload 300 ms after the last keystroke. Each posting links to its own page (`/postings/<id>`), which shows its details, links to the posting and its apply page when they're http(s) URLs, and the description as plain text.
+
+**Source company** opens a dialog that takes a board and a slug, checks them the way the route does, and queues the fetch. When a fetch the page started finishes, it shows a toast with the counts (`example-labs: 3 new, 1 updated, 0 removed`) or the failure. The list refreshes after any `source_board` job succeeds.
 
 ## The job
 
