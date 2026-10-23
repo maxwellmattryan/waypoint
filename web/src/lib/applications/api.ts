@@ -7,7 +7,9 @@ import type {
 	EntryKind,
 	FieldError,
 	NewApplication,
-	Stage
+	Run,
+	Stage,
+	TidyRequest
 } from '#lib/api';
 
 /**
@@ -183,4 +185,16 @@ export function addEntry(
 			body: { kind, body }
 		})
 	);
+}
+
+/**
+ * Starts the `tidy_application` sample workflow for an application; resolves to the queued
+ * run. A 422 maps to `note`, `message` or `confidence`.
+ */
+export function startTidy(
+	client: ApiClient,
+	id: number,
+	body: TidyRequest
+): Promise<Result<Run>> {
+	return run(201, () => client.POST('/applications/{id}/tidy', { ...path(id), body }));
 }

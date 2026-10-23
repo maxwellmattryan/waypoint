@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 // AGENTS.md invariants for screens: interactive elements come from the primitives (which bake in
 // cursor and state styles), and spacing stays on the 4px grid. Covers the app shell, the dashboard
-// cards, the applications, resumes and runs components and pages, and the root layout and page.
+// cards, the applications, resumes, runs and review components and pages, and the root layout and page.
 const sources = import.meta.glob(
 	[
 		'../app/*.svelte',
@@ -10,11 +10,13 @@ const sources = import.meta.glob(
 		'../applications/*.svelte',
 		'../resumes/*.svelte',
 		'../runs/*.svelte',
+		'../review/*.svelte',
 		'/src/routes/+layout.svelte',
 		'/src/routes/+page.svelte',
 		'/src/routes/applications/**/*.svelte',
 		'/src/routes/resumes/**/*.svelte',
-		'/src/routes/runs/**/*.svelte'
+		'/src/routes/runs/**/*.svelte',
+		'/src/routes/review/**/*.svelte'
 	],
 	{ query: '?raw', import: 'default', eager: true }
 ) as Record<string, string>;
@@ -48,6 +50,7 @@ describe('primitives only', () => {
 				'/src/lib/components/applications/StageRow.svelte',
 				'/src/lib/components/applications/StatusBadge.svelte',
 				'/src/lib/components/applications/StatusSelect.svelte',
+				'/src/lib/components/applications/TidyDialog.svelte',
 				'/src/lib/components/applications/Timeline.svelte',
 				'/src/lib/components/applications/TimelineItem.svelte',
 				'/src/routes/+layout.svelte',
@@ -71,7 +74,15 @@ describe('primitives only', () => {
 				'/src/lib/components/runs/ToolCallItem.svelte',
 				'/src/lib/components/runs/ToolCallStatusBadge.svelte',
 				'/src/routes/runs/+page.svelte',
-				'/src/routes/runs/[id]/+page.svelte'
+				'/src/routes/runs/[id]/+page.svelte',
+				'/src/lib/components/review/ActionLogItem.svelte',
+				'/src/lib/components/review/EditActionDialog.svelte',
+				'/src/lib/components/review/ItemMeta.svelte',
+				'/src/lib/components/review/PendingActionItem.svelte',
+				'/src/lib/components/review/RejectActionDialog.svelte',
+				'/src/lib/components/review/ReviewItemCard.svelte',
+				'/src/lib/components/review/RunLink.svelte',
+				'/src/routes/review/+page.svelte'
 			])
 		);
 		const offenders = files.flatMap((file) =>

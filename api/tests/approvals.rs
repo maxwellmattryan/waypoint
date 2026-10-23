@@ -467,7 +467,12 @@ async fn dismiss_resolves_a_review_item(pool: PgPool) {
     assert_eq!(status, Status::Conflict);
     assert_eq!(stored().await, before, "the second dismiss changed nothing");
 
-    let (status, _) = post(&client, &format!("/review-items/{}/dismiss", i64::MAX), None).await;
+    let (status, _) = post(
+        &client,
+        &format!("/review-items/{}/dismiss", i64::MAX),
+        None,
+    )
+    .await;
     assert_eq!(status, Status::NotFound);
 }
 
