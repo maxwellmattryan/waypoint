@@ -59,6 +59,9 @@ pub struct Case {
     /// The run's input, after placeholder substitution.
     pub input: Value,
     pub expect: Expect,
+    /// A one-line rationale for a borderline label. Scoring and the report ignore it.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 /// What a case's run must look like once it has settled.
@@ -1031,11 +1034,20 @@ mod tests {
             {"name": "a", "setup": {"x": 1}, "input": {"k": 1}, "expect": {
                 "status": "awaiting_approval", "output": {}, "error_contains": "x",
                 "pending_actions": [], "review_items": [], "actions": [], "memories": []
-            }},
+            }, "note": "borderline: why this label"},
             case("b", "failed")
         ]));
         let dataset = parse(&valid, "tidy_application").unwrap();
         assert_eq!(dataset.cases.len(), 2);
+        assert_eq!(
+            dataset.cases[0].note.as_deref(),
+            Some("borderline: why this label")
+        );
+        assert_eq!(dataset.cases[0].setup, json!({"x": 1}));
+        assert_eq!(dataset.cases[0].input, json!({"k": 1}));
+        assert_eq!(dataset.cases[0].expect.status, RunStatus::AwaitingApproval);
+        assert_eq!(dataset.cases[0].expect.error_contains.as_deref(), Some("x"));
+        assert_eq!(dataset.cases[1].note, None);
         assert_eq!(dataset.cases[1].setup, Value::Null);
         assert_eq!(dataset.select(&["b".into()]).unwrap()[0].name, "b");
         assert!(dataset.select(&["c".into()]).unwrap_err().contains("\"c\""));
@@ -1044,7 +1056,16 @@ mod tests {
         extra["expect"]["surprise"] = json!(1);
         let mut memories = case("memories", "failed");
         memories["expect"]["memories"] = json!({"step": "draft"});
+        let mut note = case("note", "failed");
+        note["note"] = json!(1);
+        let mut top_level = case("top", "failed");
+        top_level["surprise"] = json!(1);
         let cases = [
+            (dataset_with(json!([note])), "case \"note\": invalid type"),
+            (
+                dataset_with(json!([top_level])),
+                "case \"top\": unknown field `surprise`",
+            ),
             (
                 dataset_with(json!([memories])),
                 "case \"memories\": invalid type: map, expected a sequence",

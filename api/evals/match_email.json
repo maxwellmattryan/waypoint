@@ -215,6 +215,182 @@
         "actions": [],
         "review_items": []
       }
+    },
+    {
+      "name": "workday-sender-name-and-role",
+      "setup": {
+        "applications": [{"name": "cogswell", "company": "Cogswell Cogs", "title": "Backend Engineer", "status": "applied"}],
+        "emails": [{"file": "classify/workday-invite-offset.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "role": "Backend Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_cogswell}", "reasons": ["sender_name", "role"], "ops": [{"op": "set_status", "from": "applied", "to": "interviewing"}]},
+        "actions": [{"tool": "set_application_status", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "agency-company-proposes-new",
+      "setup": {
+        "applications": [{"name": "fabrikam", "company": "Fabrikam", "title": "Platform Engineer", "status": "interviewing"}],
+        "emails": [{"file": "classify/offer-agency.eml", "classification": {"class": "offer", "confidence": 0.9, "company": "HireWell Partners", "role": "Platform Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "review", "application_id": null, "review_kind": "email.new_application"},
+        "actions": [],
+        "review_items": [{"kind": "email.new_application", "confidence": 0.9, "payload": {"class": "offer", "application": {"company": "HireWell Partners", "title": "Platform Engineer", "status": "offer"}}}]
+      },
+      "note": "The model named the agency, not the client: a role match alone (0.3) is no candidate, so the agency is proposed as a new application for the user to dismiss."
+    },
+    {
+      "name": "agency-no-company-unmatched",
+      "setup": {
+        "applications": [{"name": "nakatomi", "company": "Nakatomi Trading", "title": "Staff Engineer", "status": "applied"}],
+        "emails": [{"file": "classify/agency-rejection-client.eml", "classification": {"class": "rejection", "confidence": 0.9, "role": "Staff Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "unmatched", "application_id": null, "review_item_id": null},
+        "actions": [],
+        "review_items": []
+      },
+      "note": "No company and an agency sender: the role alone is no candidate."
+    },
+    {
+      "name": "thread-reply-rejection",
+      "setup": {
+        "applications": [{"name": "gringotts", "company": "Gringotts", "title": "Senior Backend Engineer", "status": "interviewing", "stages": ["Onsite"]}],
+        "emails": [
+          {"file": "classify/gringotts-onsite-invite.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "company": "Gringotts", "role": "Senior Backend Engineer", "stage": "Onsite"}, "matched_to": "gringotts"},
+          {"file": "classify/rejection-after-onsite-thread.eml", "classification": {"class": "rejection", "confidence": 0.95}}
+        ]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_gringotts}", "reasons": ["thread", "sender_domain"], "ops": [{"op": "set_status", "from": "interviewing", "to": "rejected"}]},
+        "actions": [{"tool": "set_application_status", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "html-only-rejection-company-and-role",
+      "setup": {
+        "applications": [{"name": "piedpiper", "company": "Pied Piper", "title": "Senior Engineer", "status": "applied"}],
+        "emails": [{"file": "classify/ashby-rejection-html-only.eml", "classification": {"class": "rejection", "confidence": 0.95, "company": "Pied Piper", "role": "Senior Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_piedpiper}", "ops": [{"op": "set_status", "from": "applied", "to": "rejected"}]},
+        "actions": [{"tool": "set_application_status", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "offer-on-interviewing",
+      "setup": {
+        "applications": [{"name": "tailspin", "company": "Tailspin Toys", "title": "Data Engineer", "status": "interviewing"}],
+        "emails": [{"file": "classify/ashby-offer-deadline.eml", "classification": {"class": "offer", "confidence": 0.95, "company": "Tailspin Toys", "role": "Data Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_tailspin}", "ops": [{"op": "set_status", "from": "interviewing", "to": "offer"}]},
+        "actions": [{"tool": "set_application_status", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "low-confidence-rejection-to-review",
+      "setup": {
+        "applications": [{"name": "blackmesa", "company": "Black Mesa", "title": "Research Software Engineer", "status": "applied"}],
+        "emails": [{"file": "classify/lever-rejection-qp.eml", "classification": {"class": "rejection", "confidence": 0.55, "company": "Black Mesa", "role": "Research Software Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "review", "application_id": "${application_blackmesa}", "review_kind": "email.match"},
+        "actions": [],
+        "review_items": [{"kind": "email.match", "confidence": 0.55, "payload": {"application_id": "${application_blackmesa}", "review_reasons": ["low_confidence"], "ops": [{"op": "set_status", "from": "applied", "to": "rejected"}]}}]
+      }
+    },
+    {
+      "name": "role-picks-one-of-two",
+      "setup": {
+        "applications": [
+          {"name": "backend", "company": "Sirius Cybernetics", "title": "Backend Engineer", "status": "applied"},
+          {"name": "data", "company": "Sirius Cybernetics", "title": "Data Engineer", "status": "applied"}
+        ],
+        "emails": [{"file": "classify/greenhouse-invite-ics.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "company": "Sirius Cybernetics", "role": "Data Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_data}", "ops": [{"op": "set_status", "from": "applied", "to": "interviewing"}]},
+        "actions": [{"tool": "set_application_status", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "own-reply-no-action",
+      "setup": {
+        "applications": [{"name": "oceanic", "company": "Oceanic", "title": "Staff Engineer", "status": "applied"}],
+        "emails": [{"file": "classify/own-reply-decline.eml", "classification": {"class": "other", "confidence": 0.9, "company": "Oceanic", "role": "Staff Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "no_action", "application_id": "${application_oceanic}", "ops": []},
+        "actions": [],
+        "review_items": []
+      }
+    },
+    {
+      "name": "invite-stage-exists",
+      "setup": {
+        "applications": [{"name": "zorg", "company": "Zorg Industries", "title": "Platform Engineer", "status": "interviewing", "stages": ["Recruiter screen", "Technical interview"]}],
+        "emails": [{"file": "classify/invite-offset-ist.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "company": "Zorg Industries", "role": "Platform Engineer", "stage": "Technical Interview"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "no_action", "application_id": "${application_zorg}", "ops": []},
+        "actions": [],
+        "review_items": []
+      }
+    },
+    {
+      "name": "company-only-in-ats-body",
+      "setup": {
+        "applications": [{"name": "bnl", "company": "Buy n Large", "title": "Software Engineer", "status": "applied"}],
+        "emails": [{"file": "classify/greenhouse-availability-company-in-body.eml", "classification": {"class": "availability_request", "confidence": 0.9, "company": "Buy n Large", "role": "Software Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_bnl}", "reasons": ["company", "role"], "ops": [{"op": "set_status", "from": "applied", "to": "interviewing"}]},
+        "actions": [{"tool": "set_application_status", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "company-differs-from-sender-domain",
+      "setup": {
+        "applications": [{"name": "vehement", "company": "Vehement Capital", "title": "Staff Engineer", "status": "sourced"}],
+        "emails": [{"file": "classify/linkedin-cold-outreach.eml", "classification": {"class": "other", "confidence": 0.9, "company": "Vehement Capital", "role": "Staff Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "no_action", "application_id": "${application_vehement}", "reasons": ["company", "role"], "ops": []},
+        "actions": [],
+        "review_items": []
+      }
     }
   ]
 }

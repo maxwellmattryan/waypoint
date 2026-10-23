@@ -1,0 +1,15 @@
+From: Contoso People Team <people@contoso.example>
+To: Alex Doe <me@home.example>
+Subject: Your offer letter from Contoso
+Date: Wed, 21 Oct 2026 16:00:00 +0000
+Message-ID: <contoso-offer-1@contoso.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<h2>Welcome aboard, Alex!</h2>
+<p>We're thrilled to offer you the position of <b>Engineering Manager</b> at Contoso.</p>
+<p>Your offer letter is attached for review. It covers your base salary, bonus target and a proposed start date of December 7, 2026.</p>
+<p>Please sign the offer letter in the candidate portal once you've reviewed it. Your recruiter is happy to answer any questions.</p>
+<p>Warmly,<br>Contoso People Team</p>
+</body></html>

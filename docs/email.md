@@ -214,7 +214,7 @@ The `match_email` workflow (`api/src/workflows/match_email.rs`) matches one clas
 
 ### Table
 
-Migration `20261022000017_email_matches.sql` adds **`email_matches`**, one row per classification (`classification_id` is unique, so queuing is idempotent). Deleting the classification or email deletes the row, and `DELETE /data` empties the table.
+Migration `20261022000018_email_matches.sql` adds **`email_matches`**, one row per classification (`classification_id` is unique, so queuing is idempotent). Deleting the classification or email deletes the row, and `DELETE /data` empties the table.
 
 | Column | Holds |
 |---|---|

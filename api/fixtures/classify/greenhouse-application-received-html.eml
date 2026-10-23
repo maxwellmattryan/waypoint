@@ -1,0 +1,14 @@
+From: Bluth Company <no-reply@greenhouse.io>
+To: Alex Doe <me@home.example>
+Subject: Thank you for applying to Bluth Company
+Date: Wed, 21 Oct 2026 10:00:00 +0000
+Message-ID: <gh-bluth-1@greenhouse.io>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<p>Hi Alex,</p>
+<p>Thank you for your interest in Bluth Company! We've received your application for the <b>Backend Developer</b> role.</p>
+<p>Our hiring team is reviewing applications and will contact you if your qualifications match our needs.</p>
+<p>Regards,<br>Bluth Company</p>
+</body></html>

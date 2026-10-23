@@ -1,0 +1,33 @@
+From: Sirius Cybernetics <no-reply@greenhouse-mail.io>
+To: Alex Doe <me@home.example>
+Subject: Interview invitation: Sirius Cybernetics
+Date: Wed, 21 Oct 2026 20:00:00 +0000
+Message-ID: <gh-sirius-1@greenhouse-mail.io>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="gh-sirius"
+
+--gh-sirius
+Content-Type: text/plain; charset=utf-8
+
+Hi Alex,
+
+You're invited to a technical interview for the Data Engineer role at
+Sirius Cybernetics on Tuesday, November 3, 2026 at 1:00 PM ET. The
+calendar invitation is attached; please accept it to confirm.
+
+Sirius Cybernetics
+
+--gh-sirius
+Content-Type: text/calendar; charset=utf-8; method=REQUEST
+
+BEGIN:VCALENDAR
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:gh-sirius-1@greenhouse-mail.io
+DTSTART;TZID=America/New_York:20261103T130000
+DTEND;TZID=America/New_York:20261103T140000
+SUMMARY:Technical interview - Sirius Cybernetics
+END:VEVENT
+END:VCALENDAR
+--gh-sirius--

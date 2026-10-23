@@ -1132,8 +1132,9 @@ mod tests {
     fn classify_email_dataset_parses() {
         let dataset = evals::load(&evals::default_path(WORKFLOW), WORKFLOW)
             .expect("the shipped dataset loads");
-        assert_eq!(dataset.cases.len(), 17);
-        let mut classes = std::collections::BTreeSet::new();
+        let len = dataset.cases.len();
+        assert!((50..=100).contains(&len), "{len} cases");
+        let mut classes = std::collections::BTreeMap::<String, usize>::new();
         for case in &dataset.cases {
             let setup = EvalSetup::deserialize(&case.setup)
                 .unwrap_or_else(|err| panic!("{}: invalid setup: {err}", case.name));
@@ -1144,6 +1145,27 @@ mod tests {
                     case.name
                 );
             }
+            // The classified email must be one the heuristics send to the model, as
+            // `email::store::store` does with no known companies.
+            let last = setup
+                .emails
+                .last()
+                .unwrap_or_else(|| panic!("{}: no emails", case.name));
+            let raw = std::fs::read(Path::new(EVAL_FIXTURES).join(last)).unwrap();
+            let parsed = email::mime::parse(&raw)
+                .unwrap_or_else(|err| panic!("{}: {last} doesn't parse: {err:?}", case.name));
+            let normalized = email::normalize::normalize(&parsed);
+            let verdict = email::heuristics::score(
+                &email::heuristics::HeuristicInput::new(&parsed, &normalized),
+                &KnownCompanies::default(),
+            );
+            assert_eq!(
+                verdict.verdict,
+                email::VerdictKind::Candidate,
+                "{}: {last} is skipped: {:?}",
+                case.name,
+                verdict.reasons
+            );
             let class = case
                 .expect
                 .output
@@ -1151,7 +1173,7 @@ mod tests {
                 .and_then(|output| output["class"].as_str())
                 .unwrap_or_else(|| panic!("{}: no class label", case.name));
             assert!(EmailClass::parse(class).is_some(), "{}: {class}", case.name);
-            classes.insert(class.to_owned());
+            *classes.entry(class.to_owned()).or_default() += 1;
             assert_eq!(
                 case.input,
                 json!({"email_id": "${email_id}"}),
@@ -1159,11 +1181,33 @@ mod tests {
                 case.name
             );
         }
-        assert_eq!(
-            classes.len(),
-            EmailClass::ALL.len(),
-            "every class has a case"
-        );
+        let minimums = [
+            ("rejection", 8),
+            ("interview_invite", 8),
+            ("availability_request", 8),
+            ("offer", 5),
+            ("other", 10),
+        ];
+        assert_eq!(minimums.len(), EmailClass::ALL.len());
+        for (class, min) in minimums {
+            let count = classes.get(class).copied().unwrap_or(0);
+            assert!(count >= min, "{class}: {count} cases, want at least {min}");
+        }
+
+        // A file stem becomes `provider_message_id`, so no two fixtures may share one.
+        let mut stems = std::collections::BTreeMap::<String, String>::new();
+        for dir in ["emails", "classify"] {
+            for entry in std::fs::read_dir(Path::new(EVAL_FIXTURES).join(dir)).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().is_some_and(|ext| ext == "eml") {
+                    let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+                    let file = format!("{dir}/{}", path.file_name().unwrap().to_string_lossy());
+                    if let Some(other) = stems.insert(stem.clone(), file.clone()) {
+                        panic!("{file} and {other} share the stem {stem}");
+                    }
+                }
+            }
+        }
     }
 
     fn base() -> Value {
