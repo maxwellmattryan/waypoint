@@ -454,7 +454,7 @@ pub async fn prepare_packet(
     let PreparePacketRequest {} = parsed(body)?;
     let failed = |err: sqlx::Error| internal("queue a packet")(err);
     let mut tx = pool.begin().await.map_err(failed)?;
-    let queued = match prep_packet::queue(&mut tx, bus, id).await {
+    let queued = match prep_packet::queue(&mut tx, bus, id, None).await {
         Ok(queued) => queued,
         Err(QueueError::NotFound) => return Err(ApiError::NotFound),
         Err(QueueError::NotScored) => return Err(ApiError::Conflict),

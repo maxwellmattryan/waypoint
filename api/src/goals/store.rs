@@ -4,17 +4,20 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::types::Json;
 use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 
+use super::exec::PrepEntry;
 use super::{
     GOAL_COLUMNS, Goal, GoalDetail, GoalQuestion, GoalRun, MAX_GOALS, Plan, PlanAuthor,
-    PlanCompany, PlanCompanyConfig, PlanConfig, PlanDropped, PlanStatus, PlanStep, PlanStepKind,
-    PlanStepStatus, PlanTrigger, PlanVersion, ShortlistEntry,
+    PlanCompany, PlanCompanyConfig, PlanConfig, PlanDropped, PlanPacket, PlanStatus, PlanStep,
+    PlanStepKind, PlanStepStatus, PlanTrigger, PlanVersion, ShortlistEntry,
 };
 use crate::sourcing::Source;
 use crate::workflows::plan_goal;
+use crate::workflows::prep_packet::PacketStatus;
 
 /// The step kinds, in plan order.
 pub const STEP_KINDS: [PlanStepKind; 5] = [
@@ -122,8 +125,8 @@ pub fn step_configs(config: &PlanConfig) -> [Value; 5] {
 
 /// The keep rule: for each new step, the index of the previous version's step it is
 /// copied from, or `None` to start `pending`. Step `i` is kept when the previous step `i`
-/// `succeeded` or was `skipped`, its config equals the new one, and every earlier step was
-/// kept.
+/// `succeeded`, its config equals the new one, and every earlier step was kept. A legacy
+/// `skipped` prep step is never kept, so the next version runs prep for real.
 pub fn kept_steps(previous: &[StepRow], configs: &[Value; 5]) -> Vec<Option<usize>> {
     let mut keeping = true;
     configs
@@ -133,7 +136,7 @@ pub fn kept_steps(previous: &[StepRow], configs: &[Value; 5]) -> Vec<Option<usiz
             keeping = keeping
                 && previous.get(index).is_some_and(|step| {
                     step.kind == STEP_KINDS[index]
-                        && step.status.is_done()
+                        && step.status == PlanStepStatus::Succeeded
                         && step.config == *config
                 });
             keeping.then_some(index)
@@ -343,6 +346,7 @@ pub async fn plan(pool: &PgPool, id: i64) -> sqlx::Result<Option<Plan>> {
     .bind(id)
     .fetch_all(pool)
     .await?;
+    let packets = plan_packets(pool, &steps).await?;
     let config = row.config.0;
     let known = known_boards(pool, &pairs(&config.companies)).await?;
     let failed_step: Option<String> = match (row.trigger, row.run_id) {
@@ -382,7 +386,51 @@ pub async fn plan(pool: &PgPool, id: i64) -> sqlx::Result<Option<Plan>> {
         updated_at: row.updated_at,
         steps,
         shortlist,
+        packets,
     }))
+}
+
+/// The `prep` step's entries among `steps` (from its output, in order), with each
+/// posting's company and title and each packet's live status. An output that doesn't
+/// parse gives none; an entry whose posting is gone is left out.
+async fn plan_packets(pool: &PgPool, steps: &[PlanStep]) -> sqlx::Result<Vec<PlanPacket>> {
+    let entries: Vec<PrepEntry> = steps
+        .iter()
+        .find(|step| step.kind == PlanStepKind::Prep)
+        .and_then(|step| step.output.as_ref()?.get("packets"))
+        .and_then(|packets| Vec::<PrepEntry>::deserialize(packets).ok())
+        .unwrap_or_default();
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let posting_ids: Vec<i64> = entries.iter().map(|entry| entry.posting_id).collect();
+    let packet_ids: Vec<Option<i64>> = entries.iter().map(|entry| entry.packet_id).collect();
+    let rows: Vec<(i64, String, String, Option<PacketStatus>)> = sqlx::query_as(
+        "SELECT e.n, p.company, p.title, k.status FROM \
+         unnest($1::bigint[], $2::bigint[]) WITH ORDINALITY AS e (posting_id, packet_id, n) \
+         JOIN job_postings p ON p.id = e.posting_id \
+         LEFT JOIN application_packets k ON k.id = e.packet_id ORDER BY e.n",
+    )
+    .bind(&posting_ids)
+    .bind(&packet_ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(n, company, title, status)| {
+            let entry = entries.get(usize::try_from(n - 1).ok()?)?;
+            Some(PlanPacket {
+                posting_id: entry.posting_id,
+                company,
+                title,
+                outcome: entry.outcome,
+                packet_id: entry.packet_id,
+                status,
+                run_id: entry.run_id,
+                error: entry.error.clone(),
+            })
+        })
+        .collect())
 }
 
 /// Goal `id` with its questions, current plan, versions and latest `plan_goal` run.
@@ -504,7 +552,7 @@ mod tests {
             patch(&mut config);
             step_configs(&config)
         };
-        let done = [Succeeded, Succeeded, Succeeded, Succeeded, Skipped];
+        let done = [Succeeded; 5];
         let all = vec![Some(0), Some(1), Some(2), Some(3), Some(4)];
         let none = vec![None; 5];
 
@@ -576,6 +624,18 @@ mod tests {
                 [Failed, Pending, Pending, Pending, Pending],
                 base_configs.clone(),
                 none,
+            ),
+            (
+                "a skipped prep step is rerun",
+                [Succeeded, Succeeded, Succeeded, Succeeded, Skipped],
+                base_configs.clone(),
+                vec![Some(0), Some(1), Some(2), Some(3), None],
+            ),
+            (
+                "a succeeded prep step is kept",
+                [Succeeded; 5],
+                base_configs.clone(),
+                vec![Some(0), Some(1), Some(2), Some(3), Some(4)],
             ),
         ];
         for (name, statuses, configs, expected) in cases {

@@ -1,0 +1,5 @@
+# The `route_goal_runs_prep` mode of fake-claude.sh (api/tests/goal_runs.rs): the prep run
+# saves a ready packet and every fit score is 82. The prep line comes first, because the
+# prep prompt also contains <posting>.
+You prepare a job application packet	prep_packet_goal.jsonl
+<posting>	score_fit.jsonl

@@ -1,0 +1,5 @@
+# The `route_goal_runs_prep_fails` mode of fake-claude.sh (api/tests/goal_runs.rs): the
+# planner answers the same plan, every prep run fails validation, and every fit score is 82.
+You plan a job search	plan_goal.jsonl
+You prepare a job application packet	prep_packet_invalid.jsonl
+<posting>	score_fit.jsonl

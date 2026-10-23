@@ -1539,7 +1539,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The goal, its questions by ordinal, its current plan with steps and shortlist, its versions newest first and its latest `plan_goal` run",
+            "description": "The goal, its questions by ordinal, its current plan with steps, shortlist and prep packets (with their live status), its versions newest first and its latest `plan_goal` run",
             "content": {
               "application/json": {
                 "schema": {
@@ -6364,7 +6364,8 @@
           "created_at",
           "updated_at",
           "steps",
-          "shortlist"
+          "shortlist",
+          "packets"
         ],
         "properties": {
           "author": {
@@ -6435,6 +6436,13 @@
           "min_score": {
             "type": "integer",
             "format": "int32"
+          },
+          "packets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanPacket"
+            },
+            "description": "The prep step's postings in shortlist order, from its output; empty until it ran."
           },
           "prep_notes": {
             "type": "string"
@@ -6677,6 +6685,69 @@
           }
         },
         "additionalProperties": false
+      },
+      "PlanPacket": {
+        "type": "object",
+        "description": "One posting of the `prep` step, with its packet's live status.",
+        "required": [
+          "posting_id",
+          "company",
+          "title",
+          "outcome",
+          "packet_id",
+          "status",
+          "run_id",
+          "error"
+        ],
+        "properties": {
+          "company": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why no packet came out; `null` unless `failed`."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/PrepOutcome"
+          },
+          "packet_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The prepared or reused packet; `null` while queued or when it failed."
+          },
+          "posting_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The `prep_packet` run that made (or is making) the packet; `null` when none ran."
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PacketStatus",
+                "description": "The packet's status now; `null` without a packet or when it was deleted."
+              }
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        }
       },
       "PlanStatus": {
         "type": "string",
@@ -6926,6 +6997,16 @@
             "description": "Whether the posting has an applied fit score, so a packet can be prepared."
           }
         }
+      },
+      "PrepOutcome": {
+        "type": "string",
+        "description": "What the `prep` step did for one shortlisted posting.",
+        "enum": [
+          "queued",
+          "prepared",
+          "reused",
+          "failed"
+        ]
       },
       "PreparePacketRequest": {
         "type": "object",
