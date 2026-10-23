@@ -4,6 +4,7 @@ pub mod classify_email;
 pub mod match_email;
 pub mod memory_writer;
 pub mod plan_goal;
+pub mod prep_packet;
 pub mod propose_interview;
 pub mod score_fit;
 pub mod tidy;
@@ -31,7 +32,8 @@ pub fn runtime() -> Runtime {
 /// The production runtime: the `tidy_application` sample workflow and its tools, the
 /// `memory_writer` and `classify_email` workflows (no tools), `match_email` with its two
 /// `write` tools, `propose_interview` with its `external` tool, which writes to Google
-/// Calendar through `google`, and `score_fit` and `plan_goal` (no tools).
+/// Calendar through `google`, `score_fit` and `plan_goal` (no tools) and `prep_packet` with
+/// its one `write` tool, `save_application_packet`.
 pub fn runtime_with(google: google::Google) -> Runtime {
     let mut tools = Registry::default();
     tools
@@ -50,6 +52,9 @@ pub fn runtime_with(google: google::Google) -> Runtime {
     tools
         .register(propose_interview::CreateCalendarEvent { google })
         .expect("create_calendar_event registers");
+    tools
+        .register(prep_packet::SaveApplicationPacket)
+        .expect("save_application_packet registers");
     Runtime::new(
         vec![
             Arc::new(tidy::TidyApplication),
@@ -59,6 +64,7 @@ pub fn runtime_with(google: google::Google) -> Runtime {
             Arc::new(propose_interview::ProposeInterview),
             Arc::new(score_fit::ScoreFit),
             Arc::new(plan_goal::PlanGoal),
+            Arc::new(prep_packet::PrepPacket),
         ],
         tools,
     )
@@ -75,6 +81,7 @@ pub fn eval_suites() -> Vec<Arc<dyn Suite>> {
         Arc::new(propose_interview::ProposeInterviewEval),
         Arc::new(score_fit::ScoreFitEval),
         Arc::new(plan_goal::PlanGoalEval),
+        Arc::new(prep_packet::PrepPacketEval),
     ]
 }
 
@@ -83,7 +90,7 @@ pub fn eval_suites() -> Vec<Arc<dyn Suite>> {
 #[serde(deny_unknown_fields)]
 pub(crate) struct EvalMemory {
     name: String,
-    kind: MemoryKind,
+    pub(crate) kind: MemoryKind,
     topic: MemoryTopic,
     content: String,
     #[serde(default)]
@@ -178,6 +185,10 @@ mod tests {
             .workflow("plan_goal")
             .expect("plan_goal is registered");
         assert_eq!(planner.steps(), ["plan"]);
+        let preparer = runtime
+            .workflow("prep_packet")
+            .expect("prep_packet is registered");
+        assert_eq!(preparer.steps(), ["prepare"]);
         let suites: Vec<&str> = eval_suites().iter().map(|suite| suite.workflow()).collect();
         assert_eq!(
             suites,
@@ -188,7 +199,8 @@ mod tests {
                 "match_email",
                 "propose_interview",
                 "score_fit",
-                "plan_goal"
+                "plan_goal",
+                "prep_packet"
             ]
         );
 
@@ -206,6 +218,7 @@ mod tests {
                 ("create_calendar_event", Permission::External),
                 ("draft_follow_up", Permission::External),
                 ("get_application", Permission::Read),
+                ("save_application_packet", Permission::Write),
                 ("set_application_status", Permission::Write),
             ]
         );

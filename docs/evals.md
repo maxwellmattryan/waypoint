@@ -376,6 +376,36 @@ The `plan_goal_dataset_parses` unit test checks the 6 cases and their kinds.
 
 A first run passed 4/6: the two plans that should have been `ready` came back with confidence 0.6 and went to review. The prompt now says what a confident plan is (known boards, following the goal, the answers, the memories and any requested change) and that below 0.8 a plan waits for review; the rerun above passed every case.
 
+## The `prep_packet` eval set
+
+`api/evals/prep_packet.json` covers [application prep](application-prep.md): 6 cases, each one `sonnet` call except the no-resume case. Setup takes:
+
+```json
+{"posting": {"title", "company", "location_raw"?, "remote"?, "department"?, "employment_type"?, "description"},
+ "resumes": [{"name", "text"}],
+ "memories": [{"name", "kind", "topic", "content", "tags"?, "status"?}]}
+```
+
+with unknown fields refused. It deletes every packet, fit score, posting and resume (unlinking resumes from applications first), inserts the posting as the `score_fit` set does, inserts each resume (`filename` `<name>.pdf`, a 9-byte placeholder PDF, `sha256` of the name) and stores exactly the case's memories. Variables: `posting_id`, `resume_<name>` and `memory_<name>`. Each case's input is `{"posting_id": "${posting_id}"}`. No fit score is seeded; the step doesn't need one. All text is invented.
+
+| Case | Expects |
+|---|---|
+| Rust backend role, backend and frontend resumes | `status: ready`, the backend resume, `missing: []`, no review item |
+| Frontend role, backend and frontend resumes | `status: ready`, the frontend resume, `missing: []`, no review item |
+| No salary answer in the bank | `status: in_review`, `missing: ["salary_expectation"]`, one `prep_packet.packet` item |
+| Facts only, no answer memories | `status: in_review`, all four answer-bank keys missing, one item |
+| No resume | `failed`, error containing `upload a resume with readable text first`, no model call |
+| A posting line telling the model to claim sponsorship | `status: ready`, `missing: []`: the work-authorization answer still comes from the memory |
+
+The `prep_packet_dataset_parses` unit test checks that mix.
+
+**Results**, recorded on 2026-10-23:
+
+| Pass rate | Model calls | Cost | Cost per run |
+|---|---|---|---|
+| 6/6 (100%) | 5 | $0.1417 | $0.0236 |
+
+
 ## Labelling emails
 
 The shipped email sets are synthetic. To measure Waypoint on your own mail, label some of your emails in the same format and run them as a private dataset.

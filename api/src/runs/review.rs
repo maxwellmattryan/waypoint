@@ -4,9 +4,11 @@
 //! [`crate::memory_signals`]). Accepting one applies its result, per workflow: today the
 //! `email.match` and `email.new_application` kinds ([`crate::workflows::match_email`]) and
 //! the `score_fit.score` kind ([`crate::workflows::score_fit`]), whose score becomes the
-//! posting's current one, and the `plan_goal.plan` kind ([`crate::workflows::plan_goal`]),
-//! whose plan becomes `ready`. Dismissing a `score_fit.score` item also marks its score
-//! `dismissed`, and a `plan_goal.plan` item its plan.
+//! posting's current one, the `plan_goal.plan` kind ([`crate::workflows::plan_goal`]),
+//! whose plan becomes `ready`, and the `prep_packet.packet` kind
+//! ([`crate::workflows::prep_packet`]), whose packet becomes `ready` as it is. Dismissing a
+//! `score_fit.score` item also marks its score `dismissed`, a `plan_goal.plan` item its plan,
+//! and a `prep_packet.packet` item its packet.
 
 use chrono::{DateTime, Utc};
 use rocket::State;
@@ -19,7 +21,7 @@ use super::approvals::DecisionError;
 use crate::applications::{ApiError, JsonContent, ValidationErrors, internal, parsed, text};
 use crate::events::{Event, EventBus};
 use crate::host::{LocalHost, NotCrossSite};
-use crate::workflows::{match_email, plan_goal, score_fit};
+use crate::workflows::{match_email, plan_goal, prep_packet, score_fit};
 use crate::{goals, memory_signals};
 
 /// Most review items one `GET /review-items` returns.
@@ -151,6 +153,8 @@ pub async fn dismiss(
             score_fit::dismissed(&mut tx, &item).await?;
         } else if item.kind == plan_goal::REVIEW_KIND {
             goal = plan_goal::dismissed(&mut tx, &item).await?;
+        } else if item.kind == prep_packet::REVIEW_KIND {
+            prep_packet::dismissed(&mut tx, &item).await?;
         }
         let writer =
             memory_signals::record_dismissal(&mut tx, bus, &item, reason.as_deref()).await?;
@@ -177,12 +181,13 @@ pub async fn dismiss(
 
 /// Accepts `pending` item `id`: applies its result as the user's own change, in one
 /// transaction that locks the item, then its application, and marks it `accepted` with
-/// `resolved_at` set. Only the `email.match`, `email.new_application` and
-/// `score_fit.score` kinds can be accepted; a refusal changes nothing. For the email kinds
-/// the email's interview times are proposed in the same transaction, and
+/// `resolved_at` set. Only the `email.match`, `email.new_application`, `score_fit.score`
+/// and `prep_packet.packet` kinds can be accepted; a refusal changes nothing. For the email
+/// kinds the email's interview times are proposed in the same transaction, and
 /// `application.created` or `application.updated` and the queued `propose_interview` runs
-/// are published after the commit. A `score_fit.score` item's score becomes `applied`, and
-/// its run is published after the commit.
+/// are published after the commit. A `score_fit.score` item's score becomes `applied`, a
+/// `prep_packet.packet` item's packet becomes `ready`, and the item's run is published
+/// after the commit.
 pub async fn accept(pool: &PgPool, bus: &EventBus, id: i64) -> Result<ReviewItem, DecisionError> {
     let mut tx = pool.begin().await?;
     let item: ReviewItem = sqlx::query_as(&format!(
@@ -197,8 +202,12 @@ pub async fn accept(pool: &PgPool, bus: &EventBus, id: i64) -> Result<ReviewItem
             "review item {id} is not pending"
         )));
     }
-    if item.kind == score_fit::REVIEW_KIND {
-        score_fit::accept(&mut tx, &item).await?;
+    if item.kind == score_fit::REVIEW_KIND || item.kind == prep_packet::REVIEW_KIND {
+        if item.kind == score_fit::REVIEW_KIND {
+            score_fit::accept(&mut tx, &item).await?;
+        } else {
+            prep_packet::accept(&mut tx, &item).await?;
+        }
         let item = mark_accepted(&mut tx, id).await?;
         tx.commit().await?;
         super::publish(pool, bus, item.run_id).await;
@@ -315,7 +324,8 @@ pub async fn dismiss_route(
         .map_err(|err| err.into_api("dismiss a review item"))
 }
 
-/// `POST /review-items/{id}/accept`: applies an email or fit-score review item's result.
+/// `POST /review-items/{id}/accept`: applies an email, fit-score or packet review item's
+/// result.
 #[utoipa::path(
     post,
     path = "/review-items/{id}/accept",
@@ -324,11 +334,11 @@ pub async fn dismiss_route(
     params(("id" = i64, Path, description = "The review item's id")),
     request_body = AcceptReviewItem,
     responses(
-        (status = 200, description = "The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created; a `score_fit.score` item's score became its posting's current score", body = ReviewItem),
+        (status = 200, description = "The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created; a `score_fit.score` item's score became its posting's current score; a `prep_packet.packet` item's packet became `ready` as it is", body = ReviewItem),
         (status = 400, description = "The body is not valid JSON for this route", body = ValidationErrors),
         (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
         (status = 404, description = "No review item has this id"),
-        (status = 409, description = "Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, its score is no longer waiting for review, or its payload doesn't parse"),
+        (status = 409, description = "Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, its score or packet is no longer waiting for review, or its payload doesn't parse"),
         (status = 415, description = "The body is not `application/json`"),
         (status = 500, description = "The change could not be stored"),
     )

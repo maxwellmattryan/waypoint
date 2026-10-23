@@ -122,6 +122,20 @@ export type FitRun = components['schemas']['FitRun'];
 export type PostingFit = components['schemas']['PostingFit'];
 /** The `POST /postings/{id}/fit` 202 body: the scoring run, new or reused. */
 export type ScoreFitQueued = components['schemas']['ScoreFitQueued'];
+/** One of the fixed application questions a packet answers. */
+export type PacketQuestion = components['schemas']['PacketQuestion'];
+/** Where a packet is: `ready`, `in_review` or `dismissed`. */
+export type PacketStatus = components['schemas']['PacketStatus'];
+/** One cited reason for a packet's resume choice. */
+export type PacketReason = components['schemas']['PacketReason'];
+/** One of a packet's answers; `answer` is `null` when it is missing. */
+export type PacketAnswer = components['schemas']['PacketAnswer'];
+/** One application packet with its posting's company and title. */
+export type ApplicationPacket = components['schemas']['ApplicationPacket'];
+/** The `GET /postings/{id}/packets` body. */
+export type PostingPackets = components['schemas']['PostingPackets'];
+/** The `POST /postings/{id}/packet` 202 body: the prep run, new or reused. */
+export type PacketQueued = components['schemas']['PacketQueued'];
 /** The `POST /sourcing/boards` 202 body: the board's fetch job, new or reused. */
 export type SourceBoardQueued = components['schemas']['SourceBoardQueued'];
 /** What a profile import did: the LinkedIn import's body and the resume import job's `result`. */

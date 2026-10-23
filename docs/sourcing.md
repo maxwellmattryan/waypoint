@@ -89,6 +89,8 @@ The [`score_fit` eval set](evals.md#the-score_fit-eval-set) measures the scores.
 
 [Goals](goals.md#execution) reuse both halves of this page: a plan's `source` step queues `source_board` jobs through `sourcing::request` (so it shares a fetch already queued or running), and its `score` step queues `score_fit` runs through `score_fit::request`, which `POST /postings/{id}/fit` also uses, reusing a posting's applied score instead of rescoring it.
 
+A **Packets** section sits below the Fit section. Once the posting has an applied fit score, **Prepare packet** queues a `prep_packet` run that picks a resume and drafts cited answers to five standard application questions; each packet links to its read-only page at `/packets/<id>`. Until then the button is disabled and the section says "Score this posting's fit before preparing a packet." See [application prep](application-prep.md).
+
 ## The job
 
 A `source_board` job's payload is `{"source": …, "board": …}`. Each attempt:

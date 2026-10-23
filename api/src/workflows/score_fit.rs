@@ -353,7 +353,7 @@ pub struct Validated {
 
 /// Lowercase, with every whitespace run collapsed to one space and the ends trimmed, so
 /// an excerpt matches however the model wrapped or cased it.
-fn squash(text: &str) -> String {
+pub(crate) fn squash(text: &str) -> String {
     text.split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -361,7 +361,7 @@ fn squash(text: &str) -> String {
 }
 
 /// The first `max` characters of `text`.
-fn head_chars(text: &str, max: usize) -> String {
+pub(crate) fn head_chars(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
@@ -444,7 +444,7 @@ pub fn validate(
 }
 
 /// The stored form of one citation, or `None` when it must be dropped.
-fn check_citation(
+pub(crate) fn check_citation(
     citation: &ResponseCitation,
     shown_ids: &HashSet<i64>,
     memories: &HashMap<i64, &Memory>,
@@ -484,19 +484,24 @@ fn check_citation(
 }
 
 /// `text` with every case of `</posting` broken up, so the posting can't close its block.
-fn fence(text: &str) -> String {
-    const TAG: &str = "</posting";
+pub(crate) fn fence(text: &str) -> String {
+    fence_tag(text, "</posting")
+}
+
+/// `text` with every case of closing tag `tag` (which starts with `</`) broken up into
+/// `</ …`, so the text can't close a block named by it.
+pub(crate) fn fence_tag(text: &str, tag: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest
         .as_bytes()
-        .windows(TAG.len())
-        .position(|window| window.eq_ignore_ascii_case(TAG.as_bytes()))
+        .windows(tag.len())
+        .position(|window| window.eq_ignore_ascii_case(tag.as_bytes()))
     {
         out.push_str(&rest[..at]);
         out.push_str("</ ");
-        out.push_str(&rest[at + 2..at + TAG.len()]);
-        rest = &rest[at + TAG.len()..];
+        out.push_str(&rest[at + 2..at + tag.len()]);
+        rest = &rest[at + tag.len()..];
     }
     out.push_str(rest);
     out
@@ -525,6 +530,23 @@ pub fn posting_block(posting: &JobPostingDetail) -> String {
         or_none(p.employment_type.as_deref()),
         head_chars(&posting.description, MAX_DESCRIPTION),
     ))
+}
+
+/// The text memories are retrieved on: the posting's title, department, employment type,
+/// location and description.
+pub(crate) fn search_text(posting: &JobPostingDetail) -> String {
+    let p = &posting.posting;
+    [
+        Some(p.title.as_str()),
+        p.department.as_deref(),
+        p.employment_type.as_deref(),
+        p.location_raw.as_deref(),
+        Some(posting.description.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ")
 }
 
 /// The prompt: the instructions, the user's memories and the posting block.
@@ -645,20 +667,9 @@ async fn score(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, StepErr
         .await
         .map_err(db("read the preferences"))?;
     let p = &posting.posting;
-    let text = [
-        Some(p.title.as_str()),
-        p.department.as_deref(),
-        p.employment_type.as_deref(),
-        p.location_raw.as_deref(),
-        Some(posting.description.as_str()),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join(" ");
     let retrieved = ctx
         .memories(&Query {
-            text,
+            text: search_text(&posting),
             kinds: vec![MemoryKind::Fact, MemoryKind::Answer],
             limit: Some(MAX_RETRIEVED),
             ..Default::default()
@@ -904,24 +915,28 @@ pub async fn posting_fit(pool: &PgPool, posting_id: i64) -> sqlx::Result<Posting
         in_review,
         run,
     };
-    forget_deleted_memories(pool, &mut fit).await?;
+    let citations = [&mut fit.current, &mut fit.in_review]
+        .into_iter()
+        .flatten()
+        .flat_map(|score| score.reasons.iter_mut())
+        .flat_map(|reason| reason.citations.iter_mut());
+    forget_deleted_memories(pool, citations).await?;
     Ok(fit)
 }
 
-/// Clears `memory_id` on every citation of `fit`'s scores whose memory has been deleted; the
+/// Clears `memory_id` on every one of `citations` whose memory has been deleted; the
 /// snapshot stays.
-async fn forget_deleted_memories(pool: &PgPool, fit: &mut PostingFit) -> sqlx::Result<()> {
-    let citations = || {
-        [&fit.current, &fit.in_review]
-            .into_iter()
-            .flatten()
-            .flat_map(|score| score.reasons.iter())
-            .flat_map(|reason| reason.citations.iter())
-    };
-    let cited: Vec<i64> = citations().filter_map(|c| c.memory_id).collect();
-    if cited.is_empty() {
+pub(crate) async fn forget_deleted_memories<'a>(
+    pool: &PgPool,
+    citations: impl Iterator<Item = &'a mut FitCitation>,
+) -> sqlx::Result<()> {
+    let mut citations: Vec<&mut FitCitation> = citations
+        .filter(|citation| citation.memory_id.is_some())
+        .collect();
+    if citations.is_empty() {
         return Ok(());
     }
+    let cited: Vec<i64> = citations.iter().filter_map(|c| c.memory_id).collect();
     let existing: HashSet<i64> =
         sqlx::query_scalar::<_, i64>("SELECT id FROM memories WHERE id = ANY($1)")
             .bind(&cited)
@@ -929,22 +944,18 @@ async fn forget_deleted_memories(pool: &PgPool, fit: &mut PostingFit) -> sqlx::R
             .await?
             .into_iter()
             .collect();
-    for score in [&mut fit.current, &mut fit.in_review].into_iter().flatten() {
-        for reason in score.reasons.iter_mut() {
-            for citation in reason.citations.iter_mut() {
-                if citation.memory_id.is_some_and(|id| !existing.contains(&id)) {
-                    citation.memory_id = None;
-                }
-            }
+    for citation in citations.iter_mut() {
+        if citation.memory_id.is_some_and(|id| !existing.contains(&id)) {
+            citation.memory_id = None;
         }
     }
     Ok(())
 }
 
-/// The posting a `score_fit` eval case scores.
+/// The posting a `score_fit` (or `prep_packet`) eval case works on.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct EvalPosting {
+pub(crate) struct EvalPosting {
     title: String,
     company: String,
     #[serde(default)]
@@ -955,7 +966,30 @@ struct EvalPosting {
     department: Option<String>,
     #[serde(default)]
     employment_type: Option<String>,
-    description: String,
+    pub(crate) description: String,
+}
+
+/// Stores an eval case's posting (`greenhouse`, board `eval`) and returns its id.
+pub(crate) async fn insert_eval_posting(
+    pool: &PgPool,
+    posting: &EvalPosting,
+) -> Result<i64, String> {
+    sqlx::query_scalar(
+        "INSERT INTO job_postings (source, board, external_id, title, company, url, \
+         location_raw, remote, department, employment_type, description) \
+         VALUES ('greenhouse', 'eval', 'eval', $1, $2, 'https://example.com/eval', $3, $4, \
+         $5, $6, $7) RETURNING id",
+    )
+    .bind(&posting.title)
+    .bind(&posting.company)
+    .bind(&posting.location_raw)
+    .bind(posting.remote)
+    .bind(&posting.department)
+    .bind(&posting.employment_type)
+    .bind(&posting.description)
+    .fetch_one(pool)
+    .await
+    .map_err(|err| format!("cannot insert the posting: {err}"))
 }
 
 /// A `score_fit` eval case's `setup`.
@@ -986,23 +1020,7 @@ impl Suite for ScoreFitEval {
                 .await
                 .map_err(|err| format!("cannot clear {table}: {err}"))?;
         }
-        let posting = setup.posting;
-        let posting_id: i64 = sqlx::query_scalar(
-            "INSERT INTO job_postings (source, board, external_id, title, company, url, \
-             location_raw, remote, department, employment_type, description) \
-             VALUES ('greenhouse', 'eval', 'eval', $1, $2, 'https://example.com/eval', $3, $4, \
-             $5, $6, $7) RETURNING id",
-        )
-        .bind(&posting.title)
-        .bind(&posting.company)
-        .bind(&posting.location_raw)
-        .bind(posting.remote)
-        .bind(&posting.department)
-        .bind(&posting.employment_type)
-        .bind(&posting.description)
-        .fetch_one(pool)
-        .await
-        .map_err(|err| format!("cannot insert the posting: {err}"))?;
+        let posting_id = insert_eval_posting(pool, &setup.posting).await?;
         let mut vars = Map::new();
         vars.insert("posting_id".into(), json!(posting_id));
         seed_memories(pool, setup.memories, &mut vars).await?;

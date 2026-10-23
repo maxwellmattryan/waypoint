@@ -2507,6 +2507,48 @@
         }
       }
     },
+    "/packets/{id}": {
+      "get": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "`GET /packets/{id}`: one application packet.",
+        "operationId": "get_packet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The packet's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The packet with its posting's company and title. A citation's `memory_id` is `null` once its memory is deleted, and `resume_version_id` once the resume is",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationPacket"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No packet has this id"
+          },
+          "500": {
+            "description": "The packet could not be read"
+          }
+        }
+      }
+    },
     "/pending-actions": {
       "get": {
         "tags": [
@@ -2914,6 +2956,116 @@
         }
       }
     },
+    "/postings/{id}/packet": {
+      "post": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "`POST /postings/{id}/packet`: queues a `prep_packet` run for the posting, or returns the\none already waiting or running.",
+        "operationId": "prepare_posting_packet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The posting's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreparePacketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The `prep_packet` run: the one already waiting (`queued` or `paused`) or `running` with `reused: true`, or a new one (`paused` while the kill switch is on)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PacketQueued"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No posting has this id"
+          },
+          "409": {
+            "description": "The posting has no applied fit score yet; nothing was queued"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "500": {
+            "description": "The run could not be queued"
+          }
+        }
+      }
+    },
+    "/postings/{id}/packets": {
+      "get": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "`GET /postings/{id}/packets`: the posting's application packets and latest prep run.",
+        "operationId": "list_posting_packets",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The posting's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether the posting has an applied fit score, up to 20 packets (`id` descending) and the latest `prep_packet` run. A citation's `memory_id` is `null` once its memory is deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostingPackets"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No posting has this id"
+          },
+          "500": {
+            "description": "The packets could not be read"
+          }
+        }
+      }
+    },
     "/profile/linkedin": {
       "post": {
         "tags": [
@@ -3294,7 +3446,7 @@
         "tags": [
           "runs"
         ],
-        "summary": "`POST /review-items/{id}/accept`: applies an email or fit-score review item's result.",
+        "summary": "`POST /review-items/{id}/accept`: applies an email, fit-score or packet review item's\nresult.",
         "operationId": "accept_review_item",
         "parameters": [
           {
@@ -3320,7 +3472,7 @@
         },
         "responses": {
           "200": {
-            "description": "The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created; a `score_fit.score` item's score became its posting's current score",
+            "description": "The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created; a `score_fit.score` item's score became its posting's current score; a `prep_packet.packet` item's packet became `ready` as it is",
             "content": {
               "application/json": {
                 "schema": {
@@ -3346,7 +3498,7 @@
             "description": "No review item has this id"
           },
           "409": {
-            "description": "Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, its score is no longer waiting for review, or its payload doesn't parse"
+            "description": "Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, its score or packet is no longer waiting for review, or its payload doesn't parse"
           },
           "415": {
             "description": "The body is not `application/json`"
@@ -3859,6 +4011,134 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "ApplicationPacket": {
+        "type": "object",
+        "description": "One `application_packets` row, with its posting's company and title.",
+        "required": [
+          "id",
+          "posting_id",
+          "company",
+          "title",
+          "run_id",
+          "status",
+          "resume_version_id",
+          "resume_name",
+          "resume_reasons",
+          "answers",
+          "fit_score_id",
+          "fit_score",
+          "fit_band",
+          "confidence",
+          "review_item_id",
+          "cost_usd",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PacketAnswer"
+            },
+            "description": "The five answers, in question order."
+          },
+          "company": {
+            "type": "string",
+            "description": "The posting's company."
+          },
+          "confidence": {
+            "type": "number",
+            "format": "double",
+            "description": "The model's confidence, 0 to 1."
+          },
+          "cost_usd": {
+            "type": "number",
+            "format": "double",
+            "description": "The model call's reported cost in US dollars."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fit_band": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FitBand"
+              }
+            ]
+          },
+          "fit_score": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "That score, 0 to 100; `null` when the posting wasn't scored."
+          },
+          "fit_score_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The posting's applied fit score when the packet was prepared; `null` when there was\nnone or it has been deleted."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "posting_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "resume_name": {
+            "type": "string",
+            "description": "The chosen resume's name when the packet was prepared."
+          },
+          "resume_reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PacketReason"
+            },
+            "description": "Why that resume, one to four reasons."
+          },
+          "resume_version_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The chosen resume version; `null` once it has been deleted."
+          },
+          "review_item_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The `prep_packet.packet` review item, if the packet went to review."
+          },
+          "run_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The `prep_packet` run that prepared it."
+          },
+          "status": {
+            "$ref": "#/components/schemas/PacketStatus"
+          },
+          "title": {
+            "type": "string",
+            "description": "The posting's title."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -5638,6 +5918,97 @@
           }
         }
       },
+      "PacketAnswer": {
+        "type": "object",
+        "description": "One answer, as stored.",
+        "required": [
+          "key",
+          "question",
+          "answer",
+          "citations"
+        ],
+        "properties": {
+          "answer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The drafted answer; `null` when it is missing (nothing grounded it)."
+          },
+          "citations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FitCitation"
+            },
+            "description": "Up to four citations; none for a missing answer."
+          },
+          "key": {
+            "$ref": "#/components/schemas/PacketQuestion"
+          },
+          "question": {
+            "type": "string",
+            "description": "The question's text."
+          }
+        }
+      },
+      "PacketQuestion": {
+        "type": "string",
+        "description": "One of the fixed application questions a packet answers.",
+        "enum": [
+          "work_authorization",
+          "notice_period",
+          "salary_expectation",
+          "why_leaving",
+          "why_company"
+        ]
+      },
+      "PacketQueued": {
+        "type": "object",
+        "description": "The `POST /postings/{id}/packet` answer, and what [`queue`] returns.",
+        "required": [
+          "run",
+          "reused"
+        ],
+        "properties": {
+          "reused": {
+            "type": "boolean",
+            "description": "Whether this run was already waiting or running rather than a new one."
+          },
+          "run": {
+            "$ref": "#/components/schemas/Run",
+            "description": "The `prep_packet` run that will prepare the packet."
+          }
+        }
+      },
+      "PacketReason": {
+        "type": "object",
+        "description": "One checked resume reason, as stored.",
+        "required": [
+          "text",
+          "citations"
+        ],
+        "properties": {
+          "citations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FitCitation"
+            },
+            "description": "One to four citations."
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "PacketStatus": {
+        "type": "string",
+        "description": "Where a packet is.",
+        "enum": [
+          "ready",
+          "in_review",
+          "dismissed"
+        ]
+      },
       "PendingAction": {
         "type": "object",
         "description": "One `pending_actions` row: an `external` tool call waiting for, or past, the user's\ndecision.",
@@ -6291,6 +6662,49 @@
             ]
           }
         }
+      },
+      "PostingPackets": {
+        "type": "object",
+        "description": "The `GET /postings/{id}/packets` body.",
+        "required": [
+          "posting_id",
+          "scored",
+          "packets",
+          "run"
+        ],
+        "properties": {
+          "packets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApplicationPacket"
+            },
+            "description": "Up to 20 packets, newest first."
+          },
+          "posting_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FitRun",
+                "description": "The latest `prep_packet` run for the posting, whatever its status."
+              }
+            ]
+          },
+          "scored": {
+            "type": "boolean",
+            "description": "Whether the posting has an applied fit score, so a packet can be prepared."
+          }
+        }
+      },
+      "PreparePacketRequest": {
+        "type": "object",
+        "description": "The `POST /postings/{id}/packet` body: `{}`.",
+        "additionalProperties": false
       },
       "ProfileImportQueued": {
         "type": "object",

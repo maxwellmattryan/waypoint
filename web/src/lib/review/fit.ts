@@ -19,15 +19,16 @@ export interface FitReview {
 
 type Json = Record<string, unknown>;
 
-const isObject = (value: unknown): value is Json =>
+export const isObject = (value: unknown): value is Json =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);
-const isString = (value: unknown): value is string => typeof value === 'string';
+export const isString = (value: unknown): value is string => typeof value === 'string';
 const isBand = (value: unknown): value is FitBand =>
 	value === 'strong' || value === 'partial' || value === 'weak';
 const isTopic = (value: unknown): value is keyof typeof TOPIC_LABELS =>
 	isString(value) && Object.hasOwn(TOPIC_LABELS, value);
 
-function parseCitation(value: unknown): FitCitation | null {
+/** A citation from a review payload, or null when it doesn't have the stored shape. */
+export function parseCitation(value: unknown): FitCitation | null {
 	if (!isObject(value)) return null;
 	const { source, memory_id, topic, text } = value;
 	if (!isString(text)) return null;
