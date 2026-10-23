@@ -6,8 +6,13 @@
 //!
 //! Before drafting, `draft` retrieves the confirmed memories matching the application's
 //! company and title and the message, and records them on the step, so the run inspector
-//! and the evals show retrieval provenance end to end. It makes no model call, so it
-//! doesn't render them into a prompt ([`crate::retrieval::context`] is for steps that do).
+//! and the evals show retrieval provenance end to end. It then appends the confirmed
+//! `answer` and `preference` memories to the message it drafts: a blank line, then one
+//! line per memory in retrieval order (content trimmed, newlines turned into spaces, blank
+//! and duplicate lines skipped). `fact` memories are recorded but don't change the draft,
+//! and with no usable memory the message is the run input's, unchanged. It still makes no
+//! model call, so it doesn't render them into a prompt ([`crate::retrieval::context`] is
+//! for steps that do).
 //!
 //! `POST /applications/{id}/tidy` starts it.
 
@@ -26,6 +31,7 @@ use crate::evals::Suite;
 use crate::events::EventBus;
 use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
+use crate::memories::MemoryKind;
 use crate::retrieval;
 use crate::runs::{self, Run, Runtime, StepContext, StepError, Workflow};
 use crate::tools::{Permission, Tool, ToolContext, ToolError, UndoError};
@@ -311,6 +317,31 @@ fn string_field<'a>(input: &'a Value, name: &str) -> Result<&'a str, StepError> 
         .ok_or_else(|| StepError::Fail(format!("the run input's {name:?} must be a string")))
 }
 
+/// The message `draft` passes to `draft_follow_up`: `message`, then a blank line and one
+/// line per usable memory (see module docs), or `message` unchanged when none is usable.
+fn draft_message(message: &str, memories: &[retrieval::Retrieved]) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for found in memories {
+        if !matches!(
+            found.memory.kind,
+            MemoryKind::Answer | MemoryKind::Preference
+        ) {
+            continue;
+        }
+        let line = found.memory.content.replace(['\r', '\n'], " ");
+        let line = line.trim();
+        if line.is_empty() || lines.iter().any(|seen| seen == line) {
+            continue;
+        }
+        lines.push(line.to_owned());
+    }
+    if lines.is_empty() {
+        message.to_owned()
+    } else {
+        format!("{message}\n\n{}", lines.join("\n"))
+    }
+}
+
 #[rocket::async_trait]
 impl Workflow for TidyApplication {
     fn name(&self) -> &'static str {
@@ -380,12 +411,14 @@ impl Workflow for TidyApplication {
                     .chain([message])
                     .collect::<Vec<_>>()
                     .join(" ");
-                ctx.memories(&retrieval::Query {
-                    text,
-                    ..Default::default()
-                })
-                .await
-                .map_err(|err| StepError::Retry(format!("cannot retrieve memories: {err}")))?;
+                let found = ctx
+                    .memories(&retrieval::Query {
+                        text,
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(|err| StepError::Retry(format!("cannot retrieve memories: {err}")))?;
+                let message = draft_message(message, &found);
                 return Ok(ctx
                     .tool(
                         DraftFollowUp::NAME,
@@ -550,4 +583,83 @@ pub async fn start_tidy(
             ApiError::Internal
         })?;
     Ok((Status::Created, Json(run)))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::*;
+    use crate::memories::{Memory, MemoryStatus, MemoryTopic, SourceKind};
+
+    fn retrieved(id: i64, kind: MemoryKind, content: &str) -> retrieval::Retrieved {
+        let now = Utc::now();
+        retrieval::Retrieved {
+            memory: Memory {
+                id,
+                kind,
+                topic: MemoryTopic::Other,
+                content: content.into(),
+                tags: Vec::new(),
+                status: MemoryStatus::Confirmed,
+                confirmed_at: Some(now),
+                source_kind: SourceKind::Manual,
+                source_ref: None,
+                source_label: None,
+                created_at: now,
+                updated_at: now,
+            },
+            score: 0.5,
+        }
+    }
+
+    #[test]
+    fn draft_message_folds_answers_and_preferences() {
+        use MemoryKind::{Answer, Fact, Preference};
+        let message = "Following up on the remote role";
+        let cases: Vec<(Vec<retrieval::Retrieved>, String)> = vec![
+            (Vec::new(), message.into()),
+            (
+                vec![retrieved(1, Fact, "Acme is in Berlin")],
+                message.into(),
+            ),
+            (
+                vec![
+                    retrieved(1, Preference, "Remote only"),
+                    retrieved(2, Answer, "Two weeks notice"),
+                ],
+                format!("{message}\n\nRemote only\nTwo weeks notice"),
+            ),
+            (
+                vec![
+                    retrieved(1, Answer, "Two weeks notice"),
+                    retrieved(2, Fact, "Acme is in Berlin"),
+                    retrieved(3, Preference, "Remote only"),
+                ],
+                format!("{message}\n\nTwo weeks notice\nRemote only"),
+            ),
+            (
+                vec![retrieved(1, Answer, "  Two weeks\nnegotiable\r  ")],
+                format!("{message}\n\nTwo weeks negotiable"),
+            ),
+            (
+                vec![
+                    retrieved(1, Preference, " \n\t "),
+                    retrieved(2, Preference, "Remote only"),
+                ],
+                format!("{message}\n\nRemote only"),
+            ),
+            (vec![retrieved(1, Preference, "   ")], message.into()),
+            (
+                vec![
+                    retrieved(1, Preference, "Remote only"),
+                    retrieved(2, Answer, " Remote only "),
+                ],
+                format!("{message}\n\nRemote only"),
+            ),
+        ];
+        for (memories, expected) in cases {
+            assert_eq!(draft_message(message, &memories), expected, "{memories:?}");
+        }
+    }
 }
