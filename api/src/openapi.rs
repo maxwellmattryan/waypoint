@@ -15,6 +15,7 @@ use crate::capture::{
     CaptureRequest, CapturedFields,
 };
 use crate::events::{self, Event};
+use crate::gmail::{self, GmailSyncQueued, GmailSyncStatus, SyncActivity, SyncCounts, SyncMode};
 use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleRevocation, GoogleStatus};
 use crate::health::{self, Health};
 use crate::jobs::{self, Job};
@@ -49,6 +50,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         google::callback,
         google::status,
         google::disconnect,
+        gmail::status,
+        gmail::sync_now,
         applications::list,
         applications::create,
         applications::show,
@@ -101,6 +104,11 @@ use crate::workflows::tidy::{self, TidyRequest};
         GoogleStatus,
         ConnectionState,
         GoogleDisconnect,
+        GmailSyncStatus,
+        GmailSyncQueued,
+        SyncActivity,
+        SyncMode,
+        SyncCounts,
         Application,
         ApplicationStatus,
         NewApplication,

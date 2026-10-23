@@ -126,6 +126,8 @@ pub fn rocket(
                 google::callback,
                 google::status,
                 google::disconnect,
+                gmail::status,
+                gmail::sync_now,
                 kill_switch::show,
                 kill_switch::update,
                 kill_switch::delete_all,

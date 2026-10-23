@@ -327,6 +327,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gmail/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reports the Gmail sync's status. Never calls Google or decrypts a token. */
+        get: operations["get_gmail_sync"];
+        put?: never;
+        /**
+         * "Sync now": starts a Gmail sync, or returns the one already queued or running (a
+         *     queued page waiting out a delay is pulled forward to now).
+         */
+        post: operations["sync_gmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -952,6 +973,41 @@ export interface components {
             field: string;
             message: string;
         };
+        /** @description The `POST /gmail/sync` body. */
+        GmailSyncQueued: {
+            /** @description The queued or running page job. */
+            job: components["schemas"]["Job"];
+            /** @description `true` when a sync was already queued or running and nothing new was enqueued. */
+            reused: boolean;
+        };
+        /** @description The `GET /gmail/sync` body. */
+        GmailSyncStatus: {
+            activity: components["schemas"]["SyncActivity"];
+            /**
+             * Format: int64
+             * @description Stored emails from Gmail.
+             */
+            emails_stored: number;
+            /** @description Why the last page didn't succeed; cleared when a run finishes. */
+            last_error: string | null;
+            /** Format: date-time */
+            last_error_at: string | null;
+            /**
+             * Format: date-time
+             * @description When a run last finished its last page.
+             */
+            last_finished_at: string | null;
+            mode: null | components["schemas"]["SyncMode"];
+            /**
+             * Format: date-time
+             * @description When the queued page may start; `null` unless `activity` is `queued`.
+             */
+            next_run_at: string | null;
+            /** @description The current or most recent run's counts; all 0 before the first run. */
+            run: components["schemas"]["SyncCounts"];
+            /** Format: date-time */
+            run_started_at: string | null;
+        };
         /** @description The `DELETE /auth/google` body. */
         GoogleDisconnect: {
             /**
@@ -1483,6 +1539,46 @@ export interface components {
          * @enum {string}
          */
         StepStatus: "pending" | "running" | "succeeded" | "failed" | "awaiting_approval";
+        /**
+         * @description Whether a sync is pending, from the `gmail_sync` jobs.
+         * @enum {string}
+         */
+        SyncActivity: "idle" | "queued" | "running";
+        /** @description What a page or a run did with the messages it listed. `seen` is the sum of the rest. */
+        SyncCounts: {
+            /**
+             * Format: int32
+             * @description Didn't parse or came back with another id; not stored.
+             */
+            failed: number;
+            /**
+             * Format: int32
+             * @description Stored as new rows.
+             */
+            inserted: number;
+            /**
+             * Format: int32
+             * @description Over the size cap; not stored.
+             */
+            oversized: number;
+            /** Format: int32 */
+            seen: number;
+            /**
+             * Format: int32
+             * @description Already stored; refreshed in place.
+             */
+            updated: number;
+            /**
+             * Format: int32
+             * @description Deleted between listing and fetching.
+             */
+            vanished: number;
+        };
+        /**
+         * @description How a sync run reads the mailbox.
+         * @enum {string}
+         */
+        SyncMode: "backfill" | "resync" | "incremental";
         /** @description The `POST /applications/{id}/tidy` body. */
         TidyRequest: {
             /**
@@ -2879,6 +2975,83 @@ export interface operations {
             };
             /** @description The `Host` header is not a local address */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_gmail_sync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Gmail sync's status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GmailSyncStatus"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The status could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    sync_gmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The first page's job: a new one, or (`reused: true`) the sync already queued or running */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GmailSyncQueued"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Google isn't configured, connected, or needs reconnecting */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description The sync could not be queued */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

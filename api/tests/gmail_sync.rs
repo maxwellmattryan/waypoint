@@ -11,6 +11,8 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
+use rocket::http::{ContentType, Header, Status};
+use rocket::local::asynchronous::{Client, LocalResponse};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tokio::sync::watch;
@@ -304,6 +306,33 @@ fn page_results(events: &[Event]) -> Vec<Value> {
             _ => None,
         })
         .collect()
+}
+
+/// The API with these Google settings; its worker starts (and runs catch-up) at once.
+async fn client(pool: &PgPool, config: google::Config) -> Client {
+    let rocket = waypoint_api::rocket(
+        rocket::Config::figment(),
+        pool.clone(),
+        ClaudeRunner::new("claude", Duration::from_secs(1)),
+        common::fast_config(),
+        config,
+        waypoint_api::capture::Config::default(),
+    );
+    Client::tracked(rocket).await.expect("valid rocket")
+}
+
+fn host() -> Header<'static> {
+    Header::new("Host", common::HOST)
+}
+
+async fn sync_now(client: &Client) -> LocalResponse<'_> {
+    client.post("/gmail/sync").header(host()).dispatch().await
+}
+
+async fn sync_status(client: &Client) -> Value {
+    let response = client.get("/gmail/sync").header(host()).dispatch().await;
+    assert_eq!(response.status(), Status::Ok);
+    response.into_json().await.expect("json")
 }
 
 /// A running worker with Google settings, plus what a test needs to drive it.
@@ -715,6 +744,14 @@ async fn no_sync_without_google(pool: PgPool) {
                     .expect("catch up"),
                 None
             );
+            let client = client(&pool, google.config.clone()).await;
+            let response = sync_now(&client).await;
+            assert_eq!(response.status(), Status::Conflict);
+            assert_eq!(response.content_type(), Some(ContentType::Plain));
+            assert_eq!(
+                response.into_string().await.as_deref(),
+                Some("Connect Google before syncing Gmail.")
+            );
         }
     };
 
@@ -903,4 +940,130 @@ async fn rate_limit_and_unauthorized_retry(pool: PgPool) {
     assert_eq!(gets[0], stale);
     assert!(gets[1..].iter().all(|auth| *auth == fresh), "{gets:?}");
     server.verify().await;
+}
+
+#[sqlx::test]
+async fn status_and_sync_now_routes(pool: PgPool) {
+    let server = MockServer::start().await;
+    let gmail = fake_gmail(&server).await;
+    gmail.list(&[
+        "recruiter-outreach",
+        "newsletter",
+        "personal-email",
+        "ashby-rejection",
+    ]);
+    mark_fresh(&pool).await;
+    let client = client(&pool, google_config(&server, gmail_config(&server))).await;
+    seed_account(&pool, &fake("access"), "connected").await;
+    let bus = client.rocket().state::<EventBus>().expect("the bus");
+    let mut subscriber = bus.subscribe();
+
+    let before = sync_status(&client).await;
+    assert_eq!(before["activity"], "idle");
+    assert_eq!(before["next_run_at"], Value::Null);
+    assert_eq!(before["mode"], Value::Null);
+    assert_eq!(before["last_error"], Value::Null);
+    assert_eq!(before["emails_stored"], 0);
+    assert_eq!(
+        before["run"],
+        json!({"seen": 0, "inserted": 0, "updated": 0, "oversized": 0, "failed": 0, "vanished": 0})
+    );
+
+    // A page waiting out a rate limit shows as queued until its run_at.
+    let waiting: (i64, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
+        "INSERT INTO jobs (kind, payload, max_attempts, run_at) \
+         VALUES ('gmail_sync', '{\"trigger\": \"manual\"}', 5, now() + interval '1 hour') \
+         RETURNING id, run_at",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("queue a delayed page");
+    let queued = sync_status(&client).await;
+    assert_eq!(queued["activity"], "queued");
+    let next: chrono::DateTime<chrono::Utc> =
+        serde_json::from_value(queued["next_run_at"].clone()).expect("a time");
+    assert_eq!(next, waiting.1);
+
+    // Sync now reuses it, pulled forward, and the worker runs it.
+    let response = sync_now(&client).await;
+    assert_eq!(response.status(), Status::Accepted);
+    let body: Value = response.into_json().await.expect("json");
+    assert_eq!(body["reused"], true);
+    assert_eq!(body["job"]["id"], waiting.0);
+    assert_eq!(body["job"]["kind"], "gmail_sync");
+    let events = common::events(&mut subscriber, TIMEOUT, ends_run).await;
+    assert!(events.last().is_some_and(ends_run), "{events:?}");
+
+    let after = sync_status(&client).await;
+    assert_eq!(after["activity"], "idle");
+    assert_eq!(after["mode"], "backfill");
+    assert_eq!(after["emails_stored"], 4);
+    assert_eq!(after["run"]["inserted"], 4);
+    assert_eq!(after["run"]["seen"], 4);
+    assert!(after["last_finished_at"].is_string());
+    assert!(after["run_started_at"].is_string());
+    assert_eq!(after["last_error"], Value::Null);
+
+    // A new run: 202 with a fresh job.
+    let response = sync_now(&client).await;
+    assert_eq!(response.status(), Status::Accepted);
+    let body: Value = response.into_json().await.expect("json");
+    assert_eq!(body["reused"], false);
+    assert_ne!(body["job"]["id"], waiting.0);
+    let events = common::events(&mut subscriber, TIMEOUT, ends_run).await;
+    assert!(events.last().is_some_and(ends_run), "{events:?}");
+
+    // A running page and a recorded error.
+    execute(
+        &pool,
+        "INSERT INTO jobs (kind, payload, status, max_attempts) \
+         VALUES ('gmail_sync', '{}', 'running', 5)",
+    )
+    .await;
+    execute(
+        &pool,
+        "UPDATE gmail_sync_state SET last_error = 'Gmail answered HTTP 500', last_error_at = now()",
+    )
+    .await;
+    let running = sync_status(&client).await;
+    assert_eq!(running["activity"], "running");
+    assert_eq!(running["next_run_at"], Value::Null);
+    assert_eq!(running["mode"], "incremental");
+    assert_eq!(running["last_error"], "Gmail answered HTTP 500");
+    assert!(running["last_error_at"].is_string());
+}
+
+#[sqlx::test]
+async fn sync_now_rejects_cross_site_and_forms(pool: PgPool) {
+    let server = MockServer::start().await;
+    fake_gmail(&server).await;
+    mark_fresh(&pool).await;
+    let client = client(&pool, google_config(&server, gmail_config(&server))).await;
+    seed_account(&pool, &fake("access"), "connected").await;
+
+    let cross_site = client
+        .post("/gmail/sync")
+        .header(host())
+        .header(Header::new("Sec-Fetch-Site", "cross-site"))
+        .dispatch()
+        .await;
+    assert_eq!(cross_site.status(), Status::Forbidden);
+    let form = client
+        .post("/gmail/sync")
+        .header(host())
+        .header(ContentType::Form)
+        .body("a=b")
+        .dispatch()
+        .await;
+    assert_eq!(form.status(), Status::Forbidden);
+    assert_eq!(count(&pool, "SELECT count(*) FROM jobs").await, 0);
+
+    // The web app's own request (another localhost port) passes.
+    let same_site = client
+        .post("/gmail/sync")
+        .header(host())
+        .header(Header::new("Sec-Fetch-Site", "same-site"))
+        .dispatch()
+        .await;
+    assert_eq!(same_site.status(), Status::Accepted);
 }
