@@ -2549,6 +2549,142 @@
         }
       }
     },
+    "/packets/{id}/applied": {
+      "post": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "`POST /packets/{id}/applied`: queues the `apply_packet` run that records that the user\napplied with an `approved` packet, or returns the one already waiting or running.",
+        "operationId": "mark_packet_applied",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The packet's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkAppliedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The `apply_packet` run: the one already waiting (`queued` or `paused`) or `running` with `reused: true`, or a new one (`paused` while the kill switch is on). It creates or updates the posting's application; nothing is submitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PacketQueued"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No packet has this id"
+          },
+          "409": {
+            "description": "The packet is not `approved`, or its approved resume was deleted; nothing was queued"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "500": {
+            "description": "The run could not be queued"
+          }
+        }
+      }
+    },
+    "/packets/{id}/approval": {
+      "post": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "`POST /packets/{id}/approval`: queues the `approve_packet` run that asks the user to\napprove a `ready` packet, or returns the one already waiting.",
+        "operationId": "request_packet_approval",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The packet's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The `approve_packet` run: the one already waiting (`queued` or `paused`), `running` or `awaiting_approval` with `reused: true`, or a new one (`paused` while the kill switch is on). It parks with one `pending` action for the packet's draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PacketQueued"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No packet has this id"
+          },
+          "409": {
+            "description": "The packet is not `ready`; nothing was queued"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "500": {
+            "description": "The run could not be queued"
+          }
+        }
+      }
+    },
     "/pending-actions": {
       "get": {
         "tags": [
@@ -2636,13 +2772,13 @@
             "description": "No pending action has this id"
           },
           "409": {
-            "description": "The action is not `pending`, its run is not `awaiting_approval`, or its tool is no longer registered"
+            "description": "The action is not `pending`, its run is not `awaiting_approval`, its tool is no longer registered, or the application packet it approves is gone or no longer `ready`"
           },
           "415": {
             "description": "The body is not `application/json`"
           },
           "422": {
-            "description": "The edited `input` breaks the tool's input schema",
+            "description": "The edited `input` breaks the tool's input schema, or an application packet's approval changes `packet_id`, names no existing resume or has an answer over 1,500 characters",
             "content": {
               "application/json": {
                 "schema": {
@@ -4035,7 +4171,16 @@
           "review_item_id",
           "cost_usd",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "approved_resume_version_id",
+          "approved_resume_name",
+          "approved_answers",
+          "approved_at",
+          "application_id",
+          "applied_at",
+          "pending_action_id",
+          "undo_action_id",
+          "latest_run"
         ],
         "properties": {
           "answers": {
@@ -4044,6 +4189,53 @@
               "$ref": "#/components/schemas/PacketAnswer"
             },
             "description": "The five answers, in question order."
+          },
+          "application_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The application marking it applied created or updated; `null` before that and once\nthat application has been deleted."
+          },
+          "applied_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approved_answers": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/PacketAnswer"
+            },
+            "description": "The five answers the user approved, in question order; `null` before approval."
+          },
+          "approved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approved_resume_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The approved resume's name when it was approved."
+          },
+          "approved_resume_version_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The resume version the user approved; `null` before approval and once it has been\ndeleted."
           },
           "company": {
             "type": "string",
@@ -4093,6 +4285,25 @@
             "type": "integer",
             "format": "int64"
           },
+          "latest_run": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FitRun",
+                "description": "The latest `approve_packet` or `apply_packet` run for the packet."
+              }
+            ]
+          },
+          "pending_action_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The `pending` approval action for this packet, if any."
+          },
           "posting_id": {
             "type": "integer",
             "format": "int64"
@@ -4135,6 +4346,14 @@
           "title": {
             "type": "string",
             "description": "The posting's title."
+          },
+          "undo_action_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The action that undoes the packet's current state: its approval while `approved`,\nits mark applied while `applied`, otherwise `null`."
           },
           "updated_at": {
             "type": "string",
@@ -5575,6 +5794,11 @@
           }
         }
       },
+      "MarkAppliedRequest": {
+        "type": "object",
+        "description": "The `POST /packets/{id}/applied` body: `{}`.",
+        "additionalProperties": false
+      },
       "Memory": {
         "type": "object",
         "description": "One `memories` row: the body of every route that returns a memory.",
@@ -5964,7 +6188,7 @@
       },
       "PacketQueued": {
         "type": "object",
-        "description": "The `POST /postings/{id}/packet` answer, and what [`queue`] returns.",
+        "description": "The `POST /postings/{id}/packet`, `POST /packets/{id}/approval` and\n`POST /packets/{id}/applied` answer, and what [`queue`],\n[`packet_actions::request_approval`] and [`packet_actions::queue_apply`] return.",
         "required": [
           "run",
           "reused"
@@ -5976,7 +6200,7 @@
           },
           "run": {
             "$ref": "#/components/schemas/Run",
-            "description": "The `prep_packet` run that will prepare the packet."
+            "description": "The `prep_packet`, `approve_packet` or `apply_packet` run."
           }
         }
       },
@@ -6006,7 +6230,9 @@
         "enum": [
           "ready",
           "in_review",
-          "dismissed"
+          "dismissed",
+          "approved",
+          "applied"
         ]
       },
       "PendingAction": {
@@ -6766,6 +6992,11 @@
             "description": "What to change; trimmed, at most 1000 characters, blank means none."
           }
         },
+        "additionalProperties": false
+      },
+      "RequestApprovalRequest": {
+        "type": "object",
+        "description": "The `POST /packets/{id}/approval` body: `{}`.",
         "additionalProperties": false
       },
       "ResumeLink": {

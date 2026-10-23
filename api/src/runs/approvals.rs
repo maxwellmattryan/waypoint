@@ -22,7 +22,7 @@ use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
 use crate::memory_signals;
 use crate::tools::{Registry, ToolCallError};
-use crate::workflows::propose_interview;
+use crate::workflows::{packet_actions, propose_interview};
 
 /// Most pending actions one `GET /pending-actions` returns.
 pub const MAX_PENDING: i64 = 200;
@@ -176,7 +176,8 @@ async fn lock(
 }
 
 /// Approves pending action `id`, with `input` replacing the requested input when given.
-/// When it was the run's last `pending` action, the run is queued again (`paused` while
+/// An application packet's approval is checked against its packet first
+/// ([`packet_actions::check_approval`]). When it was the run's last `pending` action, the run is queued again (`paused` while
 /// the kill switch is on) with a new job in the same transaction, the worker is woken and `run.updated` is published after commit.
 pub async fn approve(
     pool: &PgPool,
@@ -206,6 +207,7 @@ pub async fn approve(
         }
         None => action.input.clone(),
     };
+    packet_actions::check_approval(&mut tx, &action, &approved).await?;
     let action: PendingAction = sqlx::query_as(&format!(
         "UPDATE pending_actions SET status = 'approved', approved_input = $2, \
          decided_at = now() WHERE id = $1 RETURNING {PENDING_ACTION_COLUMNS}"
@@ -245,8 +247,9 @@ pub async fn approve(
 }
 
 /// Rejects pending action `id` and every other `pending` action of its run, fails the run's
-/// parked steps, ends the run `rejected` and marks its `proposed` interview proposals
-/// `rejected`, in one transaction. The handler never runs.
+/// parked steps, ends the run `rejected`, marks its `proposed` interview proposals
+/// `rejected` and its `ready` application packet `dismissed`, in one transaction. The
+/// handler never runs.
 /// Publishes `run.updated` after commit.
 pub async fn reject(
     pool: &PgPool,
@@ -288,6 +291,7 @@ pub async fn reject(
     // Only the action the user looked at; the run's other rejected actions get no signal.
     let writer = memory_signals::record_rejection(&mut tx, bus, &action).await?;
     propose_interview::mark_rejected(&mut tx, action.run_id).await?;
+    packet_actions::mark_rejected(&mut tx, action.run_id).await?;
     tx.commit().await?;
     if let Some(run) = writer {
         bus.publish(Event::RunUpdated { run });
@@ -333,9 +337,9 @@ pub async fn list(
         (status = 400, description = "The body is not valid JSON for this route", body = ValidationErrors),
         (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
         (status = 404, description = "No pending action has this id"),
-        (status = 409, description = "The action is not `pending`, its run is not `awaiting_approval`, or its tool is no longer registered"),
+        (status = 409, description = "The action is not `pending`, its run is not `awaiting_approval`, its tool is no longer registered, or the application packet it approves is gone or no longer `ready`"),
         (status = 415, description = "The body is not `application/json`"),
-        (status = 422, description = "The edited `input` breaks the tool's input schema", body = ValidationErrors),
+        (status = 422, description = "The edited `input` breaks the tool's input schema, or an application packet's approval changes `packet_id`, names no existing resume or has an answer over 1,500 characters", body = ValidationErrors),
         (status = 500, description = "The decision could not be stored"),
     )
 )]

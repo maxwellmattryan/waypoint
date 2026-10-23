@@ -2,7 +2,9 @@
 //! `GET /postings/{id}`, and a posting's fit scores, `GET /postings/{id}/fit` and
 //! `POST /postings/{id}/fit` ([`crate::workflows::score_fit`]), and its application
 //! packets, `GET /postings/{id}/packets`, `GET /packets/{id}` and
-//! `POST /postings/{id}/packet` ([`crate::workflows::prep_packet`]). The list leaves out
+//! `POST /postings/{id}/packet` ([`crate::workflows::prep_packet`]), and the packet's
+//! `POST /packets/{id}/approval` and `POST /packets/{id}/applied`
+//! ([`crate::workflows::packet_actions`]). The list leaves out
 //! `description`, which can run to 100,000 characters, so a page stays small; each
 //! posting carries its current fit score. See `docs/sourcing.md`.
 
@@ -19,6 +21,9 @@ use crate::events::{Event, EventBus};
 use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
 use crate::memories::{filter, present};
+use crate::workflows::packet_actions::{
+    self, MarkAppliedRequest, PacketActionError, RequestApprovalRequest,
+};
 use crate::workflows::prep_packet::{
     self, ApplicationPacket, PacketQueued, PostingPackets, PreparePacketRequest, QueueError,
 };
@@ -463,4 +468,106 @@ pub async fn prepare_packet(
         wake.0.notify_one();
     }
     Ok((Status::Accepted, Json(queued)))
+}
+
+/// Commits `queued` (or maps its error), then publishes a new run and wakes the worker.
+async fn packet_queued(
+    tx: sqlx::Transaction<'_, sqlx::Postgres>,
+    bus: &EventBus,
+    wake: &Wake,
+    queued: Result<PacketQueued, PacketActionError>,
+    what: &'static str,
+) -> Result<(Status, Json<PacketQueued>), ApiError> {
+    let queued = match queued {
+        Ok(queued) => queued,
+        Err(PacketActionError::NotFound) => return Err(ApiError::NotFound),
+        Err(PacketActionError::NotReady | PacketActionError::NotApproved) => {
+            return Err(ApiError::Conflict);
+        }
+        Err(PacketActionError::Database(err)) => return Err(internal(what)(err)),
+    };
+    tx.commit().await.map_err(internal(what))?;
+    if !queued.reused {
+        bus.publish(Event::RunUpdated {
+            run: queued.run.clone(),
+        });
+        wake.0.notify_one();
+    }
+    Ok((Status::Accepted, Json(queued)))
+}
+
+/// `POST /packets/{id}/approval`: queues the `approve_packet` run that asks the user to
+/// approve a `ready` packet, or returns the one already waiting.
+#[utoipa::path(
+    post,
+    path = "/packets/{id}/approval",
+    tag = "sourcing",
+    operation_id = "request_packet_approval",
+    params(("id" = i64, Path, description = "The packet's id")),
+    request_body = RequestApprovalRequest,
+    responses(
+        (status = 202, description = "The `approve_packet` run: the one already waiting (`queued` or `paused`), `running` or `awaiting_approval` with `reused: true`, or a new one (`paused` while the kill switch is on). It parks with one `pending` action for the packet's draft", body = PacketQueued),
+        (status = 400, description = "The body is not valid JSON for this route", body = ValidationErrors),
+        (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
+        (status = 404, description = "No packet has this id"),
+        (status = 409, description = "The packet is not `ready`; nothing was queued"),
+        (status = 415, description = "The body is not `application/json`"),
+        (status = 500, description = "The run could not be queued"),
+    )
+)]
+#[allow(clippy::too_many_arguments)]
+#[rocket::post("/packets/<id>/approval", data = "<body>")]
+pub async fn request_packet_approval(
+    _host: LocalHost,
+    _site: NotCrossSite,
+    _json: JsonContent,
+    id: i64,
+    pool: &State<PgPool>,
+    bus: &State<EventBus>,
+    wake: &State<Wake>,
+    body: Result<Json<RequestApprovalRequest>, json::Error<'_>>,
+) -> Result<(Status, Json<PacketQueued>), ApiError> {
+    let RequestApprovalRequest {} = parsed(body)?;
+    let what = "request a packet's approval";
+    let mut tx = pool.begin().await.map_err(internal(what))?;
+    let queued = packet_actions::request_approval(&mut tx, bus, id).await;
+    packet_queued(tx, bus, wake, queued, what).await
+}
+
+/// `POST /packets/{id}/applied`: queues the `apply_packet` run that records that the user
+/// applied with an `approved` packet, or returns the one already waiting or running.
+#[utoipa::path(
+    post,
+    path = "/packets/{id}/applied",
+    tag = "sourcing",
+    operation_id = "mark_packet_applied",
+    params(("id" = i64, Path, description = "The packet's id")),
+    request_body = MarkAppliedRequest,
+    responses(
+        (status = 202, description = "The `apply_packet` run: the one already waiting (`queued` or `paused`) or `running` with `reused: true`, or a new one (`paused` while the kill switch is on). It creates or updates the posting's application; nothing is submitted", body = PacketQueued),
+        (status = 400, description = "The body is not valid JSON for this route", body = ValidationErrors),
+        (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
+        (status = 404, description = "No packet has this id"),
+        (status = 409, description = "The packet is not `approved`, or its approved resume was deleted; nothing was queued"),
+        (status = 415, description = "The body is not `application/json`"),
+        (status = 500, description = "The run could not be queued"),
+    )
+)]
+#[allow(clippy::too_many_arguments)]
+#[rocket::post("/packets/<id>/applied", data = "<body>")]
+pub async fn mark_packet_applied(
+    _host: LocalHost,
+    _site: NotCrossSite,
+    _json: JsonContent,
+    id: i64,
+    pool: &State<PgPool>,
+    bus: &State<EventBus>,
+    wake: &State<Wake>,
+    body: Result<Json<MarkAppliedRequest>, json::Error<'_>>,
+) -> Result<(Status, Json<PacketQueued>), ApiError> {
+    let MarkAppliedRequest {} = parsed(body)?;
+    let what = "mark a packet applied";
+    let mut tx = pool.begin().await.map_err(internal(what))?;
+    let queued = packet_actions::queue_apply(&mut tx, bus, id).await;
+    packet_queued(tx, bus, wake, queued, what).await
 }

@@ -86,6 +86,26 @@ async fn until(pool: &PgPool, id: i64, status: &str) -> (Value, Option<String>) 
     }
 }
 
+/// Waits for the newest `approve_packet` run to exist and returns its id.
+async fn approval_run(pool: &PgPool) -> i64 {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        let found: Option<i64> =
+            sqlx::query_scalar("SELECT max(id) FROM agent_runs WHERE workflow = 'approve_packet'")
+                .fetch_one(pool)
+                .await
+                .expect("read the runs");
+        if let Some(id) = found {
+            return id;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no approval run was queued"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 async fn count(pool: &PgPool, sql: &str) -> i64 {
     sqlx::query_scalar(sql)
         .fetch_one(pool)
@@ -313,11 +333,15 @@ async fn prepares_a_packet_and_records_provenance(pool: PgPool) {
     );
     assert!(call.1 > 0.0);
     assert_eq!(count(&pool, "SELECT count(*) FROM review_items").await, 0);
-    let tool_calls: Vec<(String, String, String)> =
-        sqlx::query_as("SELECT tool, permission, status FROM tool_calls")
-            .fetch_all(&pool)
-            .await
-            .expect("read tool calls");
+    // The run's own calls and actions; the packet's approval run makes its own.
+    let tool_calls: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT t.tool, t.permission, t.status FROM tool_calls t \
+         JOIN run_steps s ON s.id = t.run_step_id WHERE s.run_id = $1",
+    )
+    .bind(run)
+    .fetch_all(&pool)
+    .await
+    .expect("read tool calls");
     assert_eq!(
         tool_calls,
         [(
@@ -326,10 +350,12 @@ async fn prepares_a_packet_and_records_provenance(pool: PgPool) {
             "succeeded".into()
         )]
     );
-    let actions: Vec<(String, Value)> = sqlx::query_as("SELECT tool, undo_data FROM agent_actions")
-        .fetch_all(&pool)
-        .await
-        .expect("read actions");
+    let actions: Vec<(String, Value)> =
+        sqlx::query_as("SELECT tool, undo_data FROM agent_actions WHERE run_id = $1")
+            .bind(run)
+            .fetch_all(&pool)
+            .await
+            .expect("read actions");
     assert_eq!(
         actions,
         [("save_application_packet".into(), json!({"packet_id": id}))]
@@ -653,6 +679,100 @@ async fn undoing_the_save_deletes_the_packet(pool: PgPool) {
     let (status, _) = send(&client, Some(json!({})), &format!("/actions/{action}/undo")).await;
     assert_eq!(status, Status::Conflict);
     assert_eq!(row(&pool, run).await.0, "dismissed");
+
+    // Accepted, a packet waits for approval; undoing its save rejects that approval and
+    // ends its run without a signal.
+    let accepted = |posting: i64| {
+        let (client, pool) = (&client, &pool);
+        async move {
+            seed_applied(pool, posting, 70).await;
+            let run = prepare(client, posting).await;
+            let (output, _) = until(pool, run, "succeeded").await;
+            let item = output["review_item_id"].as_i64().expect("a review item");
+            let (status, body) = send(
+                client,
+                Some(json!({})),
+                &format!("/review-items/{item}/accept"),
+            )
+            .await;
+            assert_eq!(status, Status::Ok, "{body}");
+            let approval = approval_run(pool).await;
+            until(pool, approval, "awaiting_approval").await;
+            let save: i64 = sqlx::query_scalar("SELECT id FROM agent_actions WHERE run_id = $1")
+                .bind(run)
+                .fetch_one(pool)
+                .await
+                .expect("the save action");
+            let pending: i64 =
+                sqlx::query_scalar("SELECT id FROM pending_actions WHERE run_id = $1")
+                    .bind(approval)
+                    .fetch_one(pool)
+                    .await
+                    .expect("the approval action");
+            (run, approval, save, pending)
+        }
+    };
+    let signals = "SELECT count(*) FROM memory_signals";
+    let before = count(&pool, signals).await;
+    let (run, approval, save, pending) = accepted(seed_posting(&pool, "Initech").await).await;
+    let (status, body) = send(&client, Some(json!({})), &format!("/actions/{save}/undo")).await;
+    assert_eq!(status, Status::Ok, "{body}");
+    assert_eq!(
+        count(
+            &pool,
+            &format!("SELECT count(*) FROM application_packets WHERE run_id = {run}")
+        )
+        .await,
+        0
+    );
+    let (_, error) = until(&pool, approval, "rejected").await;
+    assert_eq!(error.as_deref(), Some("the packet was undone"));
+    let decided: (String, bool) =
+        sqlx::query_as("SELECT status, decided_at IS NOT NULL FROM pending_actions WHERE id = $1")
+            .bind(pending)
+            .fetch_one(&pool)
+            .await
+            .expect("read the action");
+    assert_eq!(decided, ("rejected".into(), true));
+    let step: String = sqlx::query_scalar("SELECT status FROM run_steps WHERE run_id = $1")
+        .bind(approval)
+        .fetch_one(&pool)
+        .await
+        .expect("read the step");
+    assert_eq!(step, "failed");
+    assert_eq!(count(&pool, signals).await, before, "no signal");
+
+    // Once the approval is approved (and waits, paused), the save can't be undone.
+    let (run, _, save, pending) = accepted(seed_posting(&pool, "Umbrella").await).await;
+    sqlx::query("UPDATE kill_switch SET paused = true")
+        .execute(&pool)
+        .await
+        .expect("pause");
+    let (status, body) = send(
+        &client,
+        Some(json!({})),
+        &format!("/pending-actions/{pending}/approve"),
+    )
+    .await;
+    assert_eq!(status, Status::Ok, "{body}");
+    let signals_now = count(&pool, signals).await;
+    let (status, _) = send(&client, Some(json!({})), &format!("/actions/{save}/undo")).await;
+    assert_eq!(status, Status::Conflict);
+    assert_eq!(row(&pool, run).await.0, "ready");
+    let still: String = sqlx::query_scalar("SELECT status FROM pending_actions WHERE id = $1")
+        .bind(pending)
+        .fetch_one(&pool)
+        .await
+        .expect("read the action");
+    assert_eq!(still, "approved");
+    assert_eq!(count(&pool, signals).await, signals_now);
+    let undone: Option<String> =
+        sqlx::query_scalar("SELECT undone_at::text FROM agent_actions WHERE id = $1")
+            .bind(save)
+            .fetch_one(&pool)
+            .await
+            .expect("read the save");
+    assert_eq!(undone, None);
 }
 
 #[sqlx::test]
@@ -762,6 +882,14 @@ async fn packet_routes_list_and_show_packets(pool: PgPool) {
 
     let run = prepare(&client, posting).await;
     until(&pool, run, "succeeded").await;
+    // The ready packet's approval request parks with one pending action.
+    let approval = approval_run(&pool).await;
+    until(&pool, approval, "awaiting_approval").await;
+    let action: i64 = sqlx::query_scalar("SELECT id FROM pending_actions WHERE run_id = $1")
+        .bind(approval)
+        .fetch_one(&pool)
+        .await
+        .expect("one pending action");
     let listed = get(&client, &format!("/postings/{posting}/packets")).await;
     assert_eq!(listed["posting_id"], posting);
     assert_eq!(listed["scored"], true);
@@ -778,7 +906,11 @@ async fn packet_routes_list_and_show_packets(pool: PgPool) {
         "run_id": run, "status": "ready", "resume_version_id": 1, "resume_name": "Backend",
         "resume_reasons": stored_reasons(), "answers": stored_answers(),
         "fit_score_id": fit, "fit_score": 75, "fit_band": "partial", "confidence": 0.9,
-        "review_item_id": null,
+        "review_item_id": null, "approved_resume_version_id": null,
+        "approved_resume_name": null, "approved_answers": null, "approved_at": null,
+        "application_id": null, "applied_at": null, "pending_action_id": action,
+        "undo_action_id": null,
+        "latest_run": {"id": approval, "status": "awaiting_approval", "error": null},
     });
     for key in ["cost_usd", "created_at", "updated_at"] {
         assert!(!packet[key].is_null(), "{key}");
