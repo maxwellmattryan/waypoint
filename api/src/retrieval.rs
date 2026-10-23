@@ -7,8 +7,10 @@
 //! model-calling step puts in its prompt.
 //!
 //! Steps retrieve through [`crate::runs::StepContext::memories`], which searches and
-//! records in one call. `tidy_application`'s `draft` step retrieves and records but makes
-//! no model call (the workflow stays model-free), so it never renders [`context`]; the
+//! records in one call. `tidy_application`'s `draft` step retrieves and records, then
+//! appends the confirmed answer and preference memories' content to the message it
+//! drafts, but makes no model call (the workflow stays model-free), so it never renders
+//! [`context`]; the
 //! first model-calling step that retrieves concatenates it into its `ClaudeRequest`
 //! prompt.
 //!
