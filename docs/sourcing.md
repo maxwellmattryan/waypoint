@@ -87,6 +87,8 @@ The section reloads when a `run.updated` event arrives for a `score_fit` run of 
 
 The [`score_fit` eval set](evals.md#the-score_fit-eval-set) measures the scores.
 
+A **Packets** section sits below the Fit section. Once the posting has an applied fit score, **Prepare packet** queues a `prep_packet` run that picks a resume and drafts cited answers to five standard application questions; each packet links to its read-only page at `/packets/<id>`. Until then the button is disabled and the section says "Score this posting's fit before preparing a packet." See [application prep](application-prep.md).
+
 ## The job
 
 A `source_board` job's payload is `{"source": …, "board": …}`. Each attempt:
