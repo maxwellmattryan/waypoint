@@ -101,6 +101,7 @@ pub fn rocket(
                 runs::actions::list,
                 runs::actions::undo_route,
                 runs::review::list,
+                runs::review::dismiss_route,
                 workflows::tidy::start_tidy,
                 google::connect,
                 google::callback,

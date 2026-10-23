@@ -72,6 +72,14 @@ export type KillSwitch = components['schemas']['KillSwitch'];
 export type DataDeletion = components['schemas']['DataDeletion'];
 /** What happened to the Google grant when all data was deleted. */
 export type GoogleRevocation = components['schemas']['GoogleRevocation'];
+/** An `external` tool call waiting for, or past, the user's decision. */
+export type PendingAction = components['schemas']['PendingAction'];
+/** One action-log entry: a `write` tool call that changed Waypoint's data. */
+export type AgentAction = components['schemas']['AgentAction'];
+/** A result a step wasn't confident enough to apply. */
+export type ReviewItem = components['schemas']['ReviewItem'];
+/** The `POST /applications/{id}/tidy` body that starts the sample workflow. */
+export type TidyRequest = components['schemas']['TidyRequest'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 

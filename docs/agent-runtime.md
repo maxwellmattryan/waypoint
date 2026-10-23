@@ -1,6 +1,6 @@
 # Agent runtime
 
-Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps executed by the job queue, with each step's input, output, status, tokens and cost stored as it goes. Steps call the model through Waypoint's `claude -p` runner and call **tools**, typed Rust handlers with JSON schemas and a permission level. This page covers the shared machinery in `api/src/runs`, `api/src/tools` and `api/src/mcp`, the guardrails that enforce each tool's permission level ([approval gate](#approval-gate), [action log and undo](#action-log-and-undo), [review items](#review-items)), and the one workflow the app ships, the [`tidy_application` sample](#sample-workflow-tidy_application) in `api/src/workflows`. Per-step tool allowlists and a review queue UI build on this later.
+Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps executed by the job queue, with each step's input, output, status, tokens and cost stored as it goes. Steps call the model through Waypoint's `claude -p` runner and call **tools**, typed Rust handlers with JSON schemas and a permission level. This page covers the shared machinery in `api/src/runs`, `api/src/tools` and `api/src/mcp`, the guardrails that enforce each tool's permission level ([approval gate](#approval-gate), [action log and undo](#action-log-and-undo), [review items](#review-items)), and the one workflow the app ships, the [`tidy_application` sample](#sample-workflow-tidy_application) in `api/src/workflows`. The app's **Review** page (`/review`) is where the user approves, edits or rejects pending actions, dismisses review items and undoes logged actions. Per-step tool allowlists build on this later.
 
 ## Tables
 
@@ -170,7 +170,7 @@ Every succeeded `write` call inserts one `agent_actions` row with the `undo_data
 
 ## Review items
 
-`ctx.review_if_unsure(kind, confidence, payload)` sends a result the step isn't sure of to the review queue. When `confidence` is below `runs::REVIEW_THRESHOLD` (0.8) or isn't finite, it stores a `pending` `review_items` row and returns `Some(id)`, and the step must not apply the result. Otherwise it returns `None`. The confidence is stored clamped to 0..=1, with NaN stored as 0, and a rerun of the step gets the same item back for the same kind and payload. Resolving items (accept or dismiss) comes later; `GET /review-items` lists the pending ones.
+`ctx.review_if_unsure(kind, confidence, payload)` sends a result the step isn't sure of to the review queue. When `confidence` is below `runs::REVIEW_THRESHOLD` (0.8) or isn't finite, it stores a `pending` `review_items` row and returns `Some(id)`, and the step must not apply the result. Otherwise it returns `None`. The confidence is stored clamped to 0..=1, with NaN stored as 0, and a rerun of the step gets the same item back for the same kind and payload. `GET /review-items` lists the pending ones. `POST /review-items/{id}/dismiss` resolves one without applying it: the item becomes `dismissed` with `resolved_at` set, in one statement that only matches a `pending` item, so a second dismiss is 409 with nothing changed. Accepting an item (applying its result) is per workflow and comes later.
 
 ### Supported schema subset
 
@@ -253,6 +253,7 @@ Every route answers only a local `Host` (403 otherwise) and answers 500 on a dat
 - `GET /actions?run_id=&limit=&before=`: the action log newest first, optionally for one run; `limit` and `before` work as on `GET /runs`.
 - `POST /actions/{id}/undo` (no body): see [Action log and undo](#action-log-and-undo). 200 with the `AgentAction`; 404 for an unknown id.
 - `GET /review-items`: up to 200 `pending` review items, oldest first.
+- `POST /review-items/{id}/dismiss` (no body): see [Review items](#review-items). 200 with the `ReviewItem`; 409 when it isn't `pending`; 404 for an unknown id.
 - `POST /applications/{id}/tidy` with `{"note", "message", "confidence"?}` starts [`tidy_application`](#sample-workflow-tidy_application) and answers 201 with the queued `Run`. `note` and `message` are required, trimmed and at most 20,000 characters; `confidence` defaults to 1 and must be within 0..=1; failures are 422 naming the field. An unknown application is 404, checked before the run starts.
 
 There are no generic routes to start, resume or cancel runs.
