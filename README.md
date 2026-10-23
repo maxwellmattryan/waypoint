@@ -226,6 +226,10 @@ Gmail and Calendar access goes through one Google account that you connect with 
 
 Once it's set up, open <http://127.0.0.1:8000/auth/google/connect> to connect, check `curl -s http://127.0.0.1:8000/auth/google`, and disconnect with `curl -s -X DELETE http://127.0.0.1:8000/auth/google`. Without the settings, everything else works and Google reports "not configured".
 
+## Recruiter email
+
+Waypoint stores email in two tables, `emails` and `email_threads`. Each raw message is parsed, its body is reduced to clean text (quoted replies removed, forwards kept, the signature split off), it's grouped into a thread, and cheap sender rules decide whether it's worth a model call (`candidate`) or not (`skip`). None of this calls Claude or the network. Gmail sync isn't wired up yet: until it is, a synthetic corpus in `api/fixtures/emails/` stands in for the inbox, and in debug builds `curl -s -X POST -H 'X-Waypoint-Dev: 1' http://127.0.0.1:8000/dev/emails/import-fixtures` imports it. [docs/email.md](docs/email.md) covers the schema, the normalizer rules, the thread order, every heuristic rule and the dev route.
+
 ## API contract
 
 The API's OpenAPI 3.1 document is generated from the `#[utoipa::path]` annotations on the Rocket handlers (listed in `api/src/openapi.rs`) and committed at `api/openapi.json`. The web app's types are generated from that document into `web/src/lib/api/schema.d.ts` with openapi-typescript, and `#lib/api` exports a typed client (`createApiClient()`, built on openapi-fetch) plus the `Health`, `Job`, `Event`, `GoogleStatus`, `Application`, `ApplicationStatus`, `NewApplication`, `ApplicationInput`, `ValidationErrors`, `FieldError`, `ResumeVersion`, `ResumeVersionDetail` and `ResumeLink` types. `#lib/applications/api.js` and `#lib/resumes/api.js` wrap the applications and resumes routes in helpers that never throw and return `{ kind: 'ok' | 'invalid' | 'not-found' | 'conflict' | 'failed' }`. The debug-only `/dev` routes are not part of the contract.
