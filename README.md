@@ -25,7 +25,7 @@ docker compose down
 
 ## Dashboard
 
-The web app opens on a dashboard inside the app shell. The top bar links to the Dashboard, [Applications](#applications), [Resumes](#resumes) and [Runs](#agent-runs-and-tools) and shows whether the live event stream is connected (Connecting, Live, Reconnecting). The dashboard has three cards:
+The web app opens on a dashboard inside the app shell. The top bar links to the Dashboard, [Applications](#applications), [Resumes](#resumes), [Memory](#memory), [Review](#agent-runs-and-tools) and [Runs](#agent-runs-and-tools) and shows whether the live event stream is connected (Connecting, Live, Reconnecting). The dashboard has three cards:
 
 - **System**: whether the API and its database are reachable (`GET /health`), re-checked each time the event stream (re)connects.
 - **Google**: the Google connection (`GET /auth/google`). Until the three Google settings are in `.env` it reads "Not configured" and the Connect button is disabled; see [Google account](#google-account).
@@ -107,6 +107,33 @@ curl -s -X POST -H 'Content-Type: application/pdf' --data-binary @resume.pdf \
 curl -s http://127.0.0.1:8000/resumes/1                                    # includes "text"
 curl -s -o resume-copy.pdf http://127.0.0.1:8000/resumes/1/pdf
 curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/resumes/1   # 204, or 409 if linked
+```
+
+## Memory
+
+The Memory page (`/memories`, "What Waypoint knows about me") lists everything Waypoint knows about you, one section per kind: **facts** (positions, skills, education), **preferences** (target role, seniority, location and remote, comp floor, industry, deal-breakers) and **answers** for application forms (work authorization, notice period, salary expectation, why you're leaving). Every kind also allows the topic Other. Each memory shows its content, its tags, where it came from (added by you, a resume version, a LinkedIn export, an agent run or an email) and when it was added and last updated. **Add memory** opens a form for the kind, topic, content and tags; **Edit** changes them, and **Delete** removes the memory after you confirm. A delete is permanent.
+
+A memory is either **confirmed** or **proposed**. Proposed memories are ones Waypoint learned on its own, waiting for you: they carry a Proposed badge and a **Confirm** button. Everything you add yourself is confirmed. The search box, the Status filter and clicking a tag (which filters by that tag until you remove it) narrow the list; **Clear filters** brings everything back.
+
+Content is required (trimmed, at most 5,000 characters) and the topic must belong to the kind. Tags are trimmed, lowercased and single-spaced, with blanks and duplicates dropped; a memory has at most 20 tags of at most 50 characters each.
+
+| Route | Does |
+|---|---|
+| `GET /memories?kind=&status=&tag=&q=` | Lists memories, newest `updated_at` first. Every filter is optional: `kind` (`fact`, `preference`, `answer`), `status` (`proposed`, `confirmed`), `tag` (one tag, normalised like stored tags) and `q`, a full-text search over content, topic and tags that puts the best matches first |
+| `POST /memories` | Adds one (`kind`, `topic`, `content`, optional `tags`): 201, always `confirmed` with source `manual` |
+| `GET /memories/<id>` | Reads one |
+| `PUT /memories/<id>` | Replaces the kind, topic, content and tags; status and source are kept |
+| `POST /memories/<id>/confirm` | Confirms a proposed memory; confirming one already confirmed changes nothing |
+| `DELETE /memories/<id>` | Deletes one permanently: 204 |
+
+The HTTP routes never set the status or the source, so a client can't add a proposed memory or claim one came from somewhere else; only Waypoint's own workflows store those. Errors follow the applications routes: 422 with every failing field, 400 for a body that isn't valid JSON or names an unknown kind or topic, and 403 to an HTML form or a request a browser sends from another site. [Delete all data](docs/google-oauth.md#delete-all-data) (`DELETE /data`) empties the memories along with everything else. With the API running:
+
+```sh
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"kind": "preference", "topic": "location", "content": "Remote only, US time zones", "tags": ["Remote"]}' \
+  http://127.0.0.1:8000/memories                                       # 201, "tags": ["remote"]
+curl -s 'http://127.0.0.1:8000/memories?kind=preference&q=remote'
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/memories/1   # 204
 ```
 
 ## Model calls
