@@ -48,7 +48,7 @@ CHECK constraints refuse an unknown `source`, `body_source`, `verdict` or `ats`,
 3. upserts on `(source, provider_message_id)`: a second ingest updates every derived column, `raw`, `labels` and `updated_at` in place, keeping `id`, `thread_id` and `created_at`,
 4. moves the thread's `last_message_at` to the greatest `sent_at`.
 
-Bytes the parser can't read at all (no header) are `IngestError::Parse`, and nothing is written. `known_companies(pool)` loads the company keys for the `known_company` rule; load it once per import. `list(pool, verdict, limit)` returns the newest emails first, optionally only one verdict.
+Bytes the parser can't read at all (no header) are `IngestError::Parse`, and nothing is written. `ingest` puts no size limit on `raw`, which is fine for the fixtures. A caller feeding it real mail (Gmail sync) must cap the message size before calling it: Gmail allows 25 MB and more, and the HTML parser's cost grows with the square of the nesting depth. The HTML-to-text walk itself uses an explicit stack, so deep nesting can't overflow the thread's stack. `known_companies(pool)` loads the company keys for the `known_company` rule; load it once per import. `list(pool, verdict, limit)` returns the newest emails first, optionally only one verdict.
 
 ## Normalizer
 

@@ -2,6 +2,8 @@
 //! block-aware (paragraphs, list items and table rows keep their own lines), keeps link
 //! targets, and drops quoted replies before converting.
 
+use std::collections::HashSet;
+
 use scraper::{ElementRef, Html, Node, Selector};
 
 /// Elements whose content a reader never sees.
@@ -35,14 +37,28 @@ pub fn to_text(html: &str) -> String {
 
 fn remove_quotes(doc: &mut Html) {
     let quotes = Selector::parse(QUOTES).expect("valid selector");
-    let mut doomed: Vec<_> = doc
-        .select(&quotes)
-        .filter(|el| {
-            let text: String = el.text().collect();
-            !FORWARD_MARKERS.iter().any(|m| text.contains(m))
-        })
-        .map(|el| el.id())
-        .collect();
+    // Quotes in document order. One inside a removed quote goes with it, so it isn't
+    // checked again: nested quotes would otherwise read the same text once per level.
+    // Only the nearest quote ancestor matters, so the upward walk stops there.
+    let mut doomed = Vec::new();
+    let mut gone = HashSet::new();
+    let mut kept = HashSet::new();
+    for el in doc.select(&quotes) {
+        let nearest = el
+            .ancestors()
+            .map(|a| a.id())
+            .find(|id| gone.contains(id) || kept.contains(id));
+        if nearest.is_some_and(|id| gone.contains(&id)) {
+            gone.insert(el.id());
+            continue;
+        }
+        if is_forward(el) {
+            kept.insert(el.id());
+        } else {
+            gone.insert(el.id());
+            doomed.push(el.id());
+        }
+    }
 
     // Outlook's `#appendonsend` precedes the quoted original: drop it and everything after
     // it, up to the body.
@@ -73,64 +89,106 @@ fn remove_quotes(doc: &mut Html) {
     }
 }
 
-fn walk(el: ElementRef<'_>, out: &mut String) {
-    for child in el.children() {
-        match child.value() {
+/// One step of [`walk`]: a node to convert, or what to write once an element's children
+/// are done.
+enum Step<'a> {
+    Text(&'a str),
+    Element(ElementRef<'a>),
+    Breaks(usize),
+    Space,
+    Link(ElementRef<'a>),
+}
+
+/// Converts `root`'s children with an explicit stack rather than recursion, so deeply
+/// nested hostile HTML can't overflow the thread's stack.
+/// Whether a quote container holds a forwarded message. Forward markers open the
+/// container, so only its first few KB of text are read.
+fn is_forward(el: ElementRef<'_>) -> bool {
+    const PREFIX: usize = 4096;
+    let mut text = String::new();
+    for chunk in el.text() {
+        text.push_str(chunk);
+        if text.len() >= PREFIX {
+            break;
+        }
+    }
+    FORWARD_MARKERS.iter().any(|m| text.contains(m))
+}
+
+fn walk(root: ElementRef<'_>, out: &mut String) {
+    let mut stack = Vec::new();
+    push_children(root, &mut stack);
+    while let Some(step) = stack.pop() {
+        match step {
             // Source line breaks are spaces in HTML; `&nbsp;` (U+00A0) is too.
-            Node::Text(text) => out.extend(
+            Step::Text(text) => out.extend(
                 text.chars()
                     .map(|c| if c.is_whitespace() { ' ' } else { c }),
             ),
+            Step::Element(el) => element(el, out, &mut stack),
+            Step::Breaks(n) => breaks(out, n),
+            Step::Space => out.push(' '),
+            Step::Link(el) => link_target(el, out),
+        }
+    }
+}
+
+/// Pushes `el`'s children so the first child is popped first.
+fn push_children<'a>(el: ElementRef<'a>, stack: &mut Vec<Step<'a>>) {
+    for child in el.children().rev() {
+        match child.value() {
+            Node::Text(text) => stack.push(Step::Text(text)),
             Node::Element(_) => {
-                let Some(child) = ElementRef::wrap(child) else {
-                    continue;
-                };
-                element(child, out);
+                if let Some(child) = ElementRef::wrap(child) {
+                    stack.push(Step::Element(child));
+                }
             }
             _ => {}
         }
     }
 }
 
-fn element(el: ElementRef<'_>, out: &mut String) {
+/// Writes what goes before `el`'s children and schedules them and what goes after.
+fn element<'a>(el: ElementRef<'a>, out: &mut String, stack: &mut Vec<Step<'a>>) {
     let name = el.value().name();
     if HIDDEN.contains(&name) {
         return;
     }
-    match name {
-        "br" => out.push('\n'),
+    let after = match name {
+        "br" => {
+            out.push('\n');
+            return;
+        }
         "li" => {
             breaks(out, 1);
             out.push_str("- ");
-            walk(el, out);
-            breaks(out, 1);
+            Some(Step::Breaks(1))
         }
-        "td" | "th" => {
-            walk(el, out);
-            out.push(' ');
-        }
-        "a" => {
-            walk(el, out);
-            let href = el.value().attr("href").map(str::trim).unwrap_or("");
-            let text = collapse(&el.text().collect::<String>().replace('\u{a0}', " "));
-            let web = href.starts_with("http://") || href.starts_with("https://");
-            if web && !text.is_empty() && text != href {
-                out.push_str(" <");
-                out.push_str(href);
-                out.push('>');
-            }
-        }
+        "td" | "th" => Some(Step::Space),
+        "a" => Some(Step::Link(el)),
         _ if PARAGRAPHS.contains(&name) => {
             breaks(out, 2);
-            walk(el, out);
-            breaks(out, 2);
+            Some(Step::Breaks(2))
         }
         _ if LINE_BLOCKS.contains(&name) => {
             breaks(out, 1);
-            walk(el, out);
-            breaks(out, 1);
+            Some(Step::Breaks(1))
         }
-        _ => walk(el, out),
+        _ => None,
+    };
+    stack.extend(after);
+    push_children(el, stack);
+}
+
+/// After a link's text: writes ` <href>` when the href is http(s) and differs from the text.
+fn link_target(el: ElementRef<'_>, out: &mut String) {
+    let href = el.value().attr("href").map(str::trim).unwrap_or("");
+    let text = collapse(&el.text().collect::<String>().replace('\u{a0}', " "));
+    let web = href.starts_with("http://") || href.starts_with("https://");
+    if web && !text.is_empty() && text != href {
+        out.push_str(" <");
+        out.push_str(href);
+        out.push('>');
     }
 }
 
@@ -234,5 +292,31 @@ mod tests {
         for (name, html, want) in cases {
             assert_eq!(super::to_text(html), want, "{name}");
         }
+    }
+
+    #[test]
+    fn deeply_nested_html_does_not_overflow_the_stack() {
+        // html5ever's parse is quadratic in nesting depth, so the depth stays modest and
+        // the stack small instead: a recursive walk needs far more than 256 KiB here.
+        let depth = 5_000;
+        let html = format!("{}deep{}", "<div>".repeat(depth), "</div>".repeat(depth));
+        let text = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || super::to_text(&html))
+            .expect("spawn")
+            .join()
+            .expect("to_text finished");
+        assert_eq!(text, "deep");
+    }
+
+    #[test]
+    fn deeply_nested_quotes_are_removed() {
+        let depth = 5_000;
+        let html = format!(
+            "<div>Thanks!</div>{}old{}",
+            "<blockquote>".repeat(depth),
+            "</blockquote>".repeat(depth)
+        );
+        assert_eq!(super::to_text(&html), "Thanks!");
     }
 }
