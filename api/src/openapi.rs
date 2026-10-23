@@ -43,6 +43,10 @@ use crate::sourcing::postings::{self, JobPosting, JobPostingDetail};
 use crate::sourcing::{self, Source, SourceBoardQueued, SourceBoardRequest};
 use crate::tools::Permission;
 use crate::workflows::memory_writer::{self, MemoryWriterQueued};
+use crate::workflows::score_fit::{
+    CitationSource, FitBand, FitCitation, FitReason, FitRun, FitScore, FitStance, FitStatus,
+    PostingFit, ScoreFitQueued, ScoreFitRequest,
+};
 use crate::workflows::tidy::{self, TidyRequest};
 
 #[derive(OpenApi)]
@@ -92,6 +96,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         sourcing::source_board,
         postings::list,
         postings::show,
+        postings::fit,
+        postings::score,
         runs::list,
         runs::show,
         approvals::list,
@@ -145,6 +151,17 @@ use crate::workflows::tidy::{self, TidyRequest};
         Source,
         JobPosting,
         JobPostingDetail,
+        FitBand,
+        FitStatus,
+        FitStance,
+        CitationSource,
+        FitCitation,
+        FitReason,
+        FitScore,
+        FitRun,
+        PostingFit,
+        ScoreFitRequest,
+        ScoreFitQueued,
         ValidationErrors,
         FieldError,
         ResumeVersion,

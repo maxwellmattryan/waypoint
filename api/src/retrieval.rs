@@ -6,8 +6,12 @@
 //! memories a run used. [`context`] renders retrieved memories as the block a
 //! model-calling step puts in its prompt.
 //!
-//! Steps retrieve through [`crate::runs::StepContext::memories`], which searches and
-//! records in one call. `tidy_application`'s `draft` step retrieves and records, then
+//! [`by_kinds`] lists confirmed memories of some kinds, newest first, without matching
+//! text.
+//!
+//! Steps retrieve through [`crate::runs::StepContext::memories`] (or
+//! [`crate::runs::StepContext::memories_of_kinds`]), which retrieves and records in one
+//! call. `tidy_application`'s `draft` step retrieves and records, then
 //! appends the confirmed answer and preference memories' content to the message it
 //! drafts, but makes no model call (the workflow stays model-free), so it never renders
 //! [`context`]; the
@@ -107,6 +111,30 @@ pub async fn search(executor: impl PgExecutor<'_>, query: &Query) -> sqlx::Resul
     .bind(&tags)
     .bind(&kinds)
     .bind(limit)
+    .fetch_all(executor)
+    .await
+}
+
+/// Up to `limit` confirmed memories whose kind is one of `kinds`, newest `updated_at`
+/// first, then `id` descending, each with score 0. No text is matched, so a step can see
+/// every memory of a kind (a deal-breaker preference, say) whatever words it shares with
+/// the query. `limit` is not clamped to [`MAX_LIMIT`]: the caller passes its own bound.
+pub async fn by_kinds(
+    executor: impl PgExecutor<'_>,
+    kinds: &[MemoryKind],
+    limit: usize,
+) -> sqlx::Result<Vec<Retrieved>> {
+    if kinds.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let kinds: Vec<&str> = kinds.iter().map(|kind| kind.as_str()).collect();
+    sqlx::query_as(&format!(
+        "SELECT {COLUMNS}, 0::float8 AS score FROM memories \
+         WHERE status = 'confirmed' AND kind = ANY($1::text[]) \
+         ORDER BY updated_at DESC, id DESC LIMIT $2"
+    ))
+    .bind(&kinds)
+    .bind(i64::try_from(limit).unwrap_or(i64::MAX))
     .fetch_all(executor)
     .await
 }

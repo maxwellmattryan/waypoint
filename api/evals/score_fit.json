@@ -1,0 +1,198 @@
+{
+  "workflow": "score_fit",
+  "cases": [
+    {
+      "name": "senior Rust backend role matches a Rust backend engineer",
+      "setup": {
+        "posting": {
+          "title": "Senior Backend Engineer (Rust)",
+          "company": "Northwind Labs",
+          "location_raw": "Remote - Europe",
+          "remote": true,
+          "department": "Platform",
+          "employment_type": "Full-time",
+          "description": "Northwind Labs builds logistics software for mid-sized shippers. You will design and run our Rust services on PostgreSQL, own the job queue that plans routes, and mentor two engineers. We look for 5+ years of backend experience, production Rust, and solid SQL. Fully remote within European time zones."
+        },
+        "memories": [
+          {"name": "position", "kind": "fact", "topic": "position", "content": "Senior Backend Engineer at Contoso Freight, 2020 to now: Rust services on PostgreSQL, owns the dispatch queue"},
+          {"name": "skill", "kind": "fact", "topic": "skill", "content": "Rust, PostgreSQL, Tokio, sqlx"},
+          {"name": "role", "kind": "preference", "topic": "target_role", "content": "Senior or staff backend engineering roles"},
+          {"name": "remote", "kind": "preference", "topic": "location", "content": "Remote within Europe; based in Lisbon"}
+        ]
+      },
+      "input": {"posting_id": "${posting_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"band": "strong", "status": "applied"},
+        "review_items": []
+      }
+    },
+    {
+      "name": "product designer role matches a product designer",
+      "setup": {
+        "posting": {
+          "title": "Senior Product Designer",
+          "company": "Fernhill Health",
+          "location_raw": "New York, NY (hybrid)",
+          "remote": false,
+          "department": "Design",
+          "employment_type": "Full-time",
+          "description": "Fernhill Health makes scheduling tools for clinics. As a Senior Product Designer you will own the patient booking flow end to end: research, interaction design, prototypes in Figma, and working with engineers through launch. Hybrid, three days a week in our Manhattan office. 6+ years of product design experience, a portfolio of shipped work, healthcare experience a plus."
+        },
+        "memories": [
+          {"name": "position", "kind": "fact", "topic": "position", "content": "Senior Product Designer at Brightline Clinics, 2019 to now: redesigned the appointment booking flow"},
+          {"name": "skill", "kind": "fact", "topic": "skill", "content": "Figma, user research, prototyping, design systems"},
+          {"name": "role", "kind": "preference", "topic": "target_role", "content": "Senior product design roles in healthcare or wellbeing"},
+          {"name": "place", "kind": "preference", "topic": "location", "content": "New York City, hybrid or on-site"}
+        ]
+      },
+      "input": {"posting_id": "${posting_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"band": "strong", "status": "applied"},
+        "review_items": []
+      }
+    },
+    {
+      "name": "crypto exchange violates a no-crypto deal-breaker",
+      "setup": {
+        "posting": {
+          "title": "Senior Backend Engineer, Trading",
+          "company": "Coinvault",
+          "location_raw": "Remote",
+          "remote": true,
+          "department": "Exchange",
+          "employment_type": "Full-time",
+          "description": "Coinvault is a cryptocurrency exchange. You will build the Rust matching engine and settlement services for our spot and derivatives markets, and integrate new blockchains and tokens. 5+ years of backend experience and production Rust required."
+        },
+        "memories": [
+          {"name": "skill", "kind": "fact", "topic": "skill", "content": "Rust, PostgreSQL, low-latency services"},
+          {"name": "position", "kind": "fact", "topic": "position", "content": "Senior Backend Engineer at Contoso Freight, 2020 to now"},
+          {"name": "no_crypto", "kind": "preference", "topic": "deal_breaker", "content": "No crypto, blockchain or web3 companies"},
+          {"name": "remote", "kind": "preference", "topic": "location", "content": "Remote only"}
+        ]
+      },
+      "input": {"posting_id": "${posting_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"band": "weak", "status": "applied"},
+        "review_items": []
+      },
+      "note": "deal_breaker: the skills fit, but a crypto exchange breaks the no-crypto rule"
+    },
+    {
+      "name": "on-site role in Tokyo misses a remote-only location",
+      "setup": {
+        "posting": {
+          "title": "Backend Engineer",
+          "company": "Sakura Mobility",
+          "location_raw": "Tokyo, Japan (on-site)",
+          "remote": false,
+          "department": "Engineering",
+          "employment_type": "Full-time",
+          "description": "Sakura Mobility runs scooter fleets across Japan. You will build backend services in Go and PostgreSQL. This role is fully on-site at our Shibuya office, five days a week; relocation support is offered. Japanese language skills are required."
+        },
+        "memories": [
+          {"name": "skill", "kind": "fact", "topic": "skill", "content": "Go, PostgreSQL, Kubernetes"},
+          {"name": "position", "kind": "fact", "topic": "position", "content": "Backend Engineer at Contoso Freight, 2021 to now"},
+          {"name": "remote", "kind": "preference", "topic": "location", "content": "Remote only; will not relocate from Toronto"}
+        ]
+      },
+      "input": {"posting_id": "${posting_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"band": "weak", "status": "applied"},
+        "review_items": []
+      },
+      "note": "location: five days on-site in Tokyo against remote only, no relocation"
+    },
+    {
+      "name": "internship misses a staff-level seniority",
+      "setup": {
+        "posting": {
+          "title": "Software Engineering Intern (Summer)",
+          "company": "Brightpath Analytics",
+          "location_raw": "Remote - US",
+          "remote": true,
+          "department": "Engineering",
+          "employment_type": "Internship",
+          "description": "Join Brightpath Analytics for a 12-week summer internship. You will pair with senior engineers on our Python data pipelines. Open to students currently enrolled in a computer science degree who graduate in 2027 or later."
+        },
+        "memories": [
+          {"name": "position", "kind": "fact", "topic": "position", "content": "Staff Software Engineer at Initech, 2018 to now: leads the data platform group"},
+          {"name": "skill", "kind": "fact", "topic": "skill", "content": "Python, Spark, data pipelines"},
+          {"name": "level", "kind": "preference", "topic": "seniority", "content": "Staff or principal level only"}
+        ]
+      },
+      "input": {"posting_id": "${posting_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"band": "weak", "status": "applied"},
+        "review_items": []
+      },
+      "note": "seniority: a student internship against staff or principal only"
+    },
+    {
+      "name": "a vague posting with little to go on goes to review",
+      "setup": {
+        "posting": {
+          "title": "Engineer",
+          "company": "Stealth Startup",
+          "description": "We are hiring. Details shared on the first call."
+        },
+        "memories": [
+          {"name": "skill", "kind": "fact", "topic": "skill", "content": "Rust, PostgreSQL"},
+          {"name": "role", "kind": "preference", "topic": "target_role", "content": "Senior backend engineering roles"}
+        ]
+      },
+      "input": {"posting_id": "${posting_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "in_review"},
+        "review_items": [{"kind": "score_fit.score"}]
+      },
+      "note": "the posting states no stack, level or location, so no confident score is possible"
+    },
+    {
+      "name": "a good fit with an unstated location and pay floor goes to review",
+      "setup": {
+        "posting": {
+          "title": "Data Engineer",
+          "company": "Larkspur Retail",
+          "department": "Data",
+          "description": "Larkspur Retail is growing its data team. You will build batch and streaming pipelines in Python and dbt on Snowflake. Location and compensation are discussed with the recruiter."
+        },
+        "memories": [
+          {"name": "skill", "kind": "fact", "topic": "skill", "content": "Python, dbt, Snowflake, Airflow"},
+          {"name": "position", "kind": "fact", "topic": "position", "content": "Data Engineer at Globex, 2021 to now"},
+          {"name": "remote", "kind": "preference", "topic": "location", "content": "Remote only"},
+          {"name": "pay", "kind": "preference", "topic": "comp_floor", "content": "At least 160k USD base"}
+        ]
+      },
+      "input": {"posting_id": "${posting_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "in_review"},
+        "review_items": [{"kind": "score_fit.score"}]
+      },
+      "note": "the skills match, but the posting is silent on remote work and pay, both hard requirements"
+    },
+    {
+      "name": "no memories fails without a model call",
+      "setup": {
+        "posting": {
+          "title": "Backend Engineer",
+          "company": "Northwind Labs",
+          "remote": true,
+          "description": "Build Rust services on PostgreSQL."
+        },
+        "memories": []
+      },
+      "input": {"posting_id": "${posting_id}"},
+      "expect": {
+        "status": "failed",
+        "error_contains": "knows nothing about you"
+      }
+    }
+  ]
+}

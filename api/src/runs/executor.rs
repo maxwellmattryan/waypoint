@@ -351,10 +351,28 @@ impl StepContext<'_> {
         query: &retrieval::Query,
     ) -> Result<Vec<retrieval::Retrieved>, sqlx::Error> {
         let found = retrieval::search(self.pool, query).await?;
-        if retrieval::record(self.pool, self.step_id, &found).await? > 0 {
+        self.record(&found).await?;
+        Ok(found)
+    }
+
+    /// Up to `limit` confirmed memories of `kinds` ([`retrieval::by_kinds`]), recorded on
+    /// this step as [`StepContext::memories`] records them.
+    pub async fn memories_of_kinds(
+        &self,
+        kinds: &[crate::memories::MemoryKind],
+        limit: usize,
+    ) -> Result<Vec<retrieval::Retrieved>, sqlx::Error> {
+        let found = retrieval::by_kinds(self.pool, kinds, limit).await?;
+        self.record(&found).await?;
+        Ok(found)
+    }
+
+    /// Records `found` on this step, publishing `run.updated` when a row was added.
+    async fn record(&self, found: &[retrieval::Retrieved]) -> Result<(), sqlx::Error> {
+        if retrieval::record(self.pool, self.step_id, found).await? > 0 {
             super::publish(self.pool, self.bus, self.run_id).await;
         }
-        Ok(found)
+        Ok(())
     }
 }
 
