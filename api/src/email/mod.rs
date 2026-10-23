@@ -2,6 +2,12 @@
 //! normalizing their text, grouping them into threads and deciding with cheap sender
 //! heuristics which ones are worth a model call. Nothing here calls a model or the network.
 
+pub mod html;
+pub mod mime;
+pub mod normalize;
+pub mod quote;
+pub mod thread;
+
 use std::fmt;
 
 /// Where a message came from: `emails.source`.
