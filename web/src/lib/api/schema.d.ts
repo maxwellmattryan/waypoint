@@ -565,6 +565,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/postings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /postings`: sourced postings matching every given filter. */
+        get: operations["list_postings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/postings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /postings/{id}`: one posting with its description. */
+        get: operations["get_posting"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/profile/linkedin": {
         parameters: {
             query?: never;
@@ -1104,6 +1138,64 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description One `job_postings` row without its `description`. */
+        JobPosting: {
+            /** @description Where to apply, when the board gives a separate link. */
+            apply_url: string | null;
+            /** @description The board's slug, as in its board URL. */
+            board: string;
+            /** @description The city parsed from the location. */
+            city: string | null;
+            company: string;
+            /** @description The country parsed from the location. */
+            country: string | null;
+            /** Format: date-time */
+            created_at: string;
+            department: string | null;
+            employment_type: string | null;
+            /** @description The posting's id on the board. */
+            external_id: string;
+            /**
+             * Format: date-time
+             * @description When Waypoint first saw the posting.
+             */
+            first_seen_at: string;
+            /** Format: int64 */
+            id: number;
+            /**
+             * Format: date-time
+             * @description The last successful fetch that listed the posting.
+             */
+            last_seen_at: string;
+            /** @description The board's location text, as given. */
+            location_raw: string | null;
+            /**
+             * Format: date-time
+             * @description When the board says the posting was published or last updated.
+             */
+            posted_at: string | null;
+            /** @description The region or state parsed from the location. */
+            region: string | null;
+            /** @description Whether the posting is remote. */
+            remote: boolean;
+            /**
+             * Format: date-time
+             * @description When the board stopped listing the posting; `null` while it's listed.
+             */
+            removed_at: string | null;
+            /** @description The board's provider. */
+            source: components["schemas"]["Source"];
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description The posting's page on the board. */
+            url: string;
+        };
+        /** @description The `GET /postings/{id}` body: the posting with its description. */
+        JobPostingDetail: components["schemas"]["JobPosting"] & {
+            /** @description The posting's description as plain text; can be empty. */
+            description: string;
+        };
         /** @description The kill switch: the `GET /kill-switch` body. */
         KillSwitch: {
             /** @description Whether agents are paused. */
@@ -1527,6 +1619,11 @@ export interface components {
          * @enum {string}
          */
         SignalOp: "add" | "remove" | "replace";
+        /**
+         * @description A public job board this module reads.
+         * @enum {string}
+         */
+        Source: "greenhouse" | "lever" | "ashby";
         /** @description The 202 body. */
         SourceBoardQueued: {
             /** @description The queued or running `source_board` job; its `result` holds the counts. */
@@ -3891,6 +3988,108 @@ export interface operations {
                 content?: never;
             };
             /** @description The decision could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_postings: {
+        parameters: {
+            query?: {
+                /** @description Only postings whose company contains this text, ignoring case; blank means any */
+                company?: string;
+                /** @description Only postings from this board provider; blank means any */
+                source?: components["schemas"]["Source"];
+                /** @description Only postings whose raw location, city, region or country contains this text, ignoring case; blank means any */
+                location?: string;
+                /** @description `true` for only remote postings, `false` for only non-remote ones; blank means any */
+                remote?: boolean;
+                /** @description `true` also returns postings the board stopped listing; absent, blank or `false` hides them */
+                include_removed?: boolean;
+                /** @description Most postings to return; default 50, clamped to 1..=200 */
+                limit?: number;
+                /** @description Only postings with an `id` below this one, for the next page */
+                before?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Postings without their `description`, `id` descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobPosting"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `source` is not a known value, or `remote` or `include_removed` is not `true` or `false` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The postings could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_posting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The posting's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The posting and its plain-text description, removed or not */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobPostingDetail"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No posting has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The posting could not be read */
             500: {
                 headers: {
                     [name: string]: unknown;

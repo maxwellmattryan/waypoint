@@ -102,6 +102,14 @@ export type MemoryTopic = components['schemas']['MemoryTopic'];
 export type MemoryStatus = components['schemas']['MemoryStatus'];
 /** Where a memory came from. */
 export type SourceKind = components['schemas']['SourceKind'];
+/** A public job board Waypoint sources: `greenhouse`, `lever` or `ashby`. */
+export type Source = components['schemas']['Source'];
+/** One sourced job posting without its description, as `GET /postings` lists it. */
+export type JobPosting = components['schemas']['JobPosting'];
+/** The `GET /postings/{id}` body: the posting with its plain-text description. */
+export type JobPostingDetail = components['schemas']['JobPostingDetail'];
+/** The `POST /sourcing/boards` 202 body: the board's fetch job, new or reused. */
+export type SourceBoardQueued = components['schemas']['SourceBoardQueued'];
 /** What a profile import did: the LinkedIn import's body and the resume import job's `result`. */
 export type ProfileImportSummary = components['schemas']['ProfileImportSummary'];
 /** The `POST /resumes/{id}/profile` body: the import job, new or reused. */

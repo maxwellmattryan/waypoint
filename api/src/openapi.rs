@@ -39,7 +39,8 @@ use crate::runs::{
     self, Run, RunDetail, RunMemory, RunStatus, RunStep, RunStepDetail, StepStatus, ToolCall,
     ToolCallStatus,
 };
-use crate::sourcing::{self, SourceBoardQueued, SourceBoardRequest};
+use crate::sourcing::postings::{self, JobPosting, JobPostingDetail};
+use crate::sourcing::{self, Source, SourceBoardQueued, SourceBoardRequest};
 use crate::tools::Permission;
 use crate::workflows::memory_writer::{self, MemoryWriterQueued};
 use crate::workflows::tidy::{self, TidyRequest};
@@ -89,6 +90,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         timeline::add_entry,
         capture::capture,
         sourcing::source_board,
+        postings::list,
+        postings::show,
         runs::list,
         runs::show,
         approvals::list,
@@ -139,6 +142,9 @@ use crate::workflows::tidy::{self, TidyRequest};
         CaptureFailureReason,
         SourceBoardRequest,
         SourceBoardQueued,
+        Source,
+        JobPosting,
+        JobPostingDetail,
         ValidationErrors,
         FieldError,
         ResumeVersion,
