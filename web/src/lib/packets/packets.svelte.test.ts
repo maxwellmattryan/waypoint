@@ -8,8 +8,21 @@ import {
 	type Run
 } from '#lib/api';
 import { toast } from '#lib/components/ui';
-import { makeFitRun, makePacket, makePostingPackets } from './__fixtures__/packets';
-import { answeredCount, packetsView, type Result } from './api';
+import {
+	makeApprovedPacket,
+	makeFitRun,
+	makePacket,
+	makePostingPackets
+} from './__fixtures__/packets';
+import {
+	actionState,
+	answeredCount,
+	approvalInput,
+	packetsView,
+	PACKET_STATUS_LABELS,
+	PACKET_STATUS_TONES,
+	type Result
+} from './api';
 import { PacketStore, PostingPacketsStore } from './packets.svelte';
 
 const client = createApiClient({ baseUrl: 'http://api.test', fetch: vi.fn() });
@@ -218,6 +231,35 @@ describe('PostingPacketsStore', () => {
 		expect(get).toHaveBeenCalledTimes(6);
 	});
 
+	it('reloads on run.updated for approve_packet and apply_packet runs of its posting', async () => {
+		const { store, get } = setup();
+		await store.load();
+		store.handle(
+			runUpdated({
+				workflow: 'approve_packet',
+				input: { posting_id: 10, packet_id: 3 }
+			})
+		);
+		await settle();
+		expect(get).toHaveBeenCalledTimes(1);
+		store.handle(
+			runUpdated({
+				workflow: 'approve_packet',
+				input: { posting_id: 9, packet_id: 3 }
+			})
+		);
+		await settle();
+		expect(get).toHaveBeenCalledTimes(2);
+		store.handle(
+			runUpdated({
+				workflow: 'apply_packet',
+				input: { posting_id: 9, packet_id: 3 }
+			})
+		);
+		await settle();
+		expect(get).toHaveBeenCalledTimes(3);
+	});
+
 	it('drops a response older than the latest load', async () => {
 		const first = deferred<Result<PostingPackets>>();
 		const get = vi.fn<(c: unknown, id: number) => Promise<Result<PostingPackets>>>();
@@ -267,5 +309,236 @@ describe('PacketStore', () => {
 		store.handle({ type: 'data.deleted' });
 		await settle();
 		expect(get).toHaveBeenCalledTimes(4);
+	});
+
+	it('reloads on run.updated for approve_packet and apply_packet runs naming it', async () => {
+		const get = vi.fn(async (): Promise<Result<ApplicationPacket>> => ({
+			kind: 'ok',
+			data: makePacket()
+		}));
+		const store = new PacketStore(3, { client, get });
+		await store.load();
+		store.handle(
+			runUpdated({
+				id: 61,
+				workflow: 'approve_packet',
+				input: { packet_id: 4 }
+			})
+		);
+		store.handle(runUpdated({ id: 61, workflow: 'score_fit', input: { packet_id: 3 } }));
+		await settle();
+		expect(get).toHaveBeenCalledTimes(1);
+		store.handle(
+			runUpdated({
+				id: 61,
+				workflow: 'approve_packet',
+				input: { posting_id: 9, packet_id: 3 }
+			})
+		);
+		await settle();
+		expect(get).toHaveBeenCalledTimes(2);
+		store.handle(
+			runUpdated({
+				id: 62,
+				workflow: 'apply_packet',
+				input: { posting_id: 9, packet_id: 3 }
+			})
+		);
+		await settle();
+		expect(get).toHaveBeenCalledTimes(3);
+	});
+
+	/** A loaded store over `packet` whose action routes answer `result`. */
+	async function acting(packet: ApplicationPacket, result: Result<never> | { kind: 'ok' }) {
+		const get = vi.fn(async (): Promise<Result<ApplicationPacket>> => ({
+			kind: 'ok',
+			data: packet
+		}));
+		const answer = vi.fn(async () => result as Result<never>);
+		const deps = {
+			client,
+			get,
+			approve: vi.fn(answer),
+			reject: vi.fn(answer),
+			request: vi.fn(answer),
+			apply: vi.fn(answer),
+			undo: vi.fn(answer)
+		};
+		const store = new PacketStore(3, deps);
+		await store.load();
+		return { store, ...deps };
+	}
+
+	const pending = makePacket({ pending_action_id: 80 });
+
+	it('approves the draft with {} and edits with the input, then reloads', async () => {
+		const { store, approve, get } = await acting(pending, { kind: 'ok' });
+		const sent = store.approve();
+		expect(store.busy).toBe('approve');
+		await sent;
+		expect(approve).toHaveBeenCalledWith(client, 80, undefined);
+		expect(store.busy).toBeNull();
+		expect(get).toHaveBeenCalledTimes(2);
+		const input = { ...approvalInput(pending), resume_version_id: 2 };
+		await store.approve(input);
+		expect(approve).toHaveBeenLastCalledWith(client, 80, input);
+		expect(toasts()).toEqual([
+			['success', 'Packet approved'],
+			['success', 'Packet approved']
+		]);
+	});
+
+	it.each([
+		['reject', 'reject', 80, 'Packet rejected', pending],
+		['requestApproval', 'request', 3, 'Approval requested', makePacket()],
+		['markApplied', 'apply', 3, 'Marking applied…', makeApprovedPacket()],
+		['undo', 'undo', 70, 'Undone', makeApprovedPacket()]
+	] as const)('%s calls its route, toasts and reloads', async (method, dep, id, done, packet) => {
+		const store = await acting(packet, { kind: 'ok' });
+		await store.store[method]();
+		expect(store[dep]).toHaveBeenCalledWith(client, id);
+		expect(store.get).toHaveBeenCalledTimes(2);
+		expect(toasts()).toEqual([['success', done]]);
+	});
+
+	it('reloads on a conflict and toasts a failure', async () => {
+		const conflicted = await acting(pending, { kind: 'conflict' });
+		await conflicted.store.reject();
+		expect(conflicted.get).toHaveBeenCalledTimes(2);
+		expect(toasts()).toEqual([['danger', 'This packet changed. It has been reloaded.']]);
+		toast.clear();
+		const failed = await acting(makeApprovedPacket(), { kind: 'failed' });
+		await failed.store.markApplied();
+		expect(failed.get).toHaveBeenCalledTimes(1);
+		expect(toasts()).toEqual([['danger', "Couldn't mark it applied. Try again."]]);
+	});
+
+	it('leaves a 422 to the edit form and sends one action at a time', async () => {
+		const invalid: Result<never> = {
+			kind: 'invalid',
+			errors: [
+				{
+					field: 'input',
+					message: '$.resume_version_id: no resume has this id'
+				}
+			]
+		};
+		const { store, approve } = await acting(pending, invalid);
+		expect(await store.approve(approvalInput(pending))).toEqual(invalid);
+		expect(toasts()).toEqual([]);
+		const first = store.approve();
+		expect(await store.reject()).toBeNull();
+		await first;
+		expect(approve).toHaveBeenCalledTimes(2);
+	});
+
+	it('loads the resumes for the edit form', async () => {
+		const resumes = vi.fn();
+		resumes.mockResolvedValueOnce({ kind: 'failed' });
+		resumes.mockResolvedValueOnce({ kind: 'ok', data: [] });
+		const store = new PacketStore(3, { client, resumes });
+		expect(store.resumes).toEqual({ kind: 'idle' });
+		const loading = store.loadResumes();
+		expect(store.resumes).toEqual({ kind: 'loading' });
+		await loading;
+		expect(store.resumes).toEqual({ kind: 'error' });
+		await store.loadResumes();
+		expect(store.resumes).toEqual({ kind: 'loaded', resumes: [] });
+	});
+});
+
+describe('packet helpers', () => {
+	it('labels and tones the new statuses', () => {
+		expect([PACKET_STATUS_LABELS.approved, PACKET_STATUS_TONES.approved]).toEqual([
+			'Approved',
+			'info'
+		]);
+		expect([PACKET_STATUS_LABELS.applied, PACKET_STATUS_TONES.applied]).toEqual([
+			'Applied',
+			'success'
+		]);
+	});
+
+	it('builds the draft approval input', () => {
+		const packet = makePacket({ resume_version_id: null });
+		packet.answers[2] = { ...packet.answers[2], answer: null, citations: [] };
+		expect(approvalInput(packet)).toEqual({
+			packet_id: 3,
+			resume_version_id: null,
+			answers: {
+				work_authorization: 'Yes. I am an EU citizen.',
+				notice_period: 'Four weeks after an offer.',
+				salary_expectation: null,
+				why_leaving: 'I want more scope.',
+				why_company: 'You build Rust services.'
+			}
+		});
+	});
+
+	it.each([
+		['in review', makePacket({ status: 'in_review' }), { kind: 'inReview' }],
+		['dismissed', makePacket({ status: 'dismissed' }), { kind: 'dismissed' }],
+		[
+			'awaiting approval',
+			makePacket({ pending_action_id: 80 }),
+			{ kind: 'awaitingApproval', actionId: 80 }
+		],
+		[
+			'requesting',
+			makePacket({ latest_run: makeFitRun('running', 61) }),
+			{ kind: 'requesting', paused: false }
+		],
+		[
+			'requesting, paused',
+			makePacket({ latest_run: makeFitRun('paused', 61) }),
+			{ kind: 'requesting', paused: true }
+		],
+		['requestable', makePacket(), { kind: 'requestable', failed: null }],
+		[
+			'requestable after a failure',
+			makePacket({ latest_run: makeFitRun('failed', 61, 'boom') }),
+			{ kind: 'requestable', failed: makeFitRun('failed', 61, 'boom') }
+		],
+		[
+			'approved',
+			makeApprovedPacket(),
+			{ kind: 'approved', resumeDeleted: false, applying: null, failed: null }
+		],
+		[
+			'approved, resume deleted',
+			makeApprovedPacket({ approved_resume_version_id: null }),
+			{ kind: 'approved', resumeDeleted: true, applying: null, failed: null }
+		],
+		[
+			'approved, applying',
+			makeApprovedPacket({ latest_run: makeFitRun('queued', 62) }),
+			{
+				kind: 'approved',
+				resumeDeleted: false,
+				applying: { paused: false },
+				failed: null
+			}
+		],
+		[
+			'approved, apply failed',
+			makeApprovedPacket({ latest_run: makeFitRun('failed', 62, 'boom') }),
+			{
+				kind: 'approved',
+				resumeDeleted: false,
+				applying: null,
+				failed: makeFitRun('failed', 62, 'boom')
+			}
+		],
+		[
+			'applied',
+			makeApprovedPacket({
+				status: 'applied',
+				application_id: 12,
+				applied_at: '2026-10-23T09:00:00Z'
+			}),
+			{ kind: 'applied', appliedAt: '2026-10-23T09:00:00Z', applicationId: 12 }
+		]
+	] as [string, ApplicationPacket, ReturnType<typeof actionState>][])('%s', (_, packet, state) => {
+		expect(actionState(packet)).toEqual(state);
 	});
 });

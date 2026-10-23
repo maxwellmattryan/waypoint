@@ -10,7 +10,7 @@
 	import { Badge } from '#lib/components/ui';
 	import { PACKET_STATUS_LABELS, PACKET_STATUS_TONES } from '#lib/packets/api.js';
 
-	/** A packet's status: `Ready for approval`, `Needs review` or `Dismissed`. */
+	/** A packet's status: `Ready for approval`, `Needs review`, `Dismissed`, `Approved` or `Applied`. */
 	let { status }: PacketStatusBadgeProps = $props();
 </script>
 

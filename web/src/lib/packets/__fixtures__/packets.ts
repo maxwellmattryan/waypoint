@@ -99,8 +99,33 @@ export function makePacket(overrides: Partial<ApplicationPacket> = {}): Applicat
 		cost_usd: 0.0123,
 		created_at: '2026-10-22T10:00:00Z',
 		updated_at: '2026-10-22T10:00:00Z',
+		approved_resume_version_id: null,
+		approved_resume_name: null,
+		approved_answers: null,
+		approved_at: null,
+		application_id: null,
+		applied_at: null,
+		pending_action_id: null,
+		undo_action_id: null,
+		latest_run: null,
 		...overrides
 	};
+}
+
+/** Test data: packet 3 approved with resume 2 "Frontend" and notice_period edited. */
+export function makeApprovedPacket(overrides: Partial<ApplicationPacket> = {}): ApplicationPacket {
+	const approved = makeAnswers();
+	approved[1] = { ...approved[1], answer: 'In two weeks.', citations: [] };
+	return makePacket({
+		status: 'approved',
+		approved_resume_version_id: 2,
+		approved_resume_name: 'Frontend',
+		approved_answers: approved,
+		approved_at: '2026-10-22T11:00:00Z',
+		undo_action_id: 70,
+		latest_run: makeFitRun('succeeded', 60),
+		...overrides
+	});
 }
 
 export const makeFitRun = (
