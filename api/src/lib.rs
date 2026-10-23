@@ -10,6 +10,7 @@ mod dev;
 pub mod email;
 pub mod evals;
 pub mod events;
+pub mod gmail;
 pub mod google;
 mod health;
 pub mod host;

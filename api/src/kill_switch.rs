@@ -46,6 +46,7 @@ pub const USER_TABLES: &[&str] = &[
     "run_memories",
     "emails",
     "email_threads",
+    "gmail_sync_state",
     "claude_calls",
     "jobs",
     "google_accounts",

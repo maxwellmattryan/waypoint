@@ -26,6 +26,8 @@ pub struct Config {
     pub revoke_url: String,
     /// `http://127.0.0.1:<port>/auth/google/callback`.
     pub redirect_uri: String,
+    /// Gmail sync settings (code defaults; tests override them).
+    pub gmail: crate::gmail::Config,
 }
 
 /// The settings a configured flow needs, borrowed from a [`Config`].
@@ -56,6 +58,7 @@ impl Default for Config {
             token_url: TOKEN_URL.into(),
             revoke_url: REVOKE_URL.into(),
             redirect_uri: redirect_uri(DEFAULT_PORT),
+            gmail: crate::gmail::Config::default(),
         }
     }
 }
@@ -71,6 +74,7 @@ impl fmt::Debug for Config {
             .field("token_url", &self.token_url)
             .field("revoke_url", &self.revoke_url)
             .field("redirect_uri", &self.redirect_uri)
+            .field("gmail", &self.gmail)
             .finish()
     }
 }

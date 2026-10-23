@@ -42,6 +42,11 @@ fn google_config(server: &MockServer) -> google::Config {
         token_url: format!("{}/token", server.uri()),
         revoke_url: format!("{}/revoke", server.uri()),
         redirect_uri: google::config::redirect_uri(8000),
+        // Startup catch-up may sync against the mock, never the real Gmail.
+        gmail: waypoint_api::gmail::Config {
+            base_url: server.uri(),
+            ..Default::default()
+        },
     }
 }
 
