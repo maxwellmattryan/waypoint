@@ -26,6 +26,9 @@ function posting(overrides: Partial<JobPostingDetail> = {}): JobPostingDetail {
 		created_at: '2026-10-22T00:00:00Z',
 		updated_at: '2026-10-22T00:00:00Z',
 		removed_at: null,
+		fit_score: null,
+		fit_band: null,
+		fit_in_review: false,
 		description: 'About the role',
 		...overrides
 	};

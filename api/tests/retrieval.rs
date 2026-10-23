@@ -262,6 +262,94 @@ async fn search_filters_limits_and_empty_queries(pool: PgPool) {
     }
 }
 
+#[sqlx::test]
+async fn by_kinds_returns_confirmed_memories_of_kinds(pool: PgPool) {
+    let preference = |topic, content, status, age| {
+        add(
+            &pool,
+            MemoryKind::Preference,
+            topic,
+            content,
+            &[],
+            status,
+            age,
+        )
+    };
+    let old = preference(
+        MemoryTopic::DealBreaker,
+        "No crypto",
+        MemoryStatus::Confirmed,
+        30,
+    )
+    .await
+    .id;
+    let new = preference(
+        MemoryTopic::Location,
+        "Remote only",
+        MemoryStatus::Confirmed,
+        10,
+    )
+    .await
+    .id;
+    let new_twin = preference(
+        MemoryTopic::Seniority,
+        "Staff or above",
+        MemoryStatus::Confirmed,
+        10,
+    )
+    .await
+    .id;
+    preference(
+        MemoryTopic::Industry,
+        "Proposed only",
+        MemoryStatus::Proposed,
+        0,
+    )
+    .await;
+    let skill = fact(&pool, "Rust", &[], 20).await;
+    let answer = add(
+        &pool,
+        MemoryKind::Answer,
+        MemoryTopic::NoticePeriod,
+        "Two weeks",
+        &[],
+        MemoryStatus::Confirmed,
+        5,
+    )
+    .await
+    .id;
+
+    let found = |kinds: Vec<MemoryKind>, limit: usize| {
+        let pool = pool.clone();
+        async move {
+            retrieval::by_kinds(&pool, &kinds, limit)
+                .await
+                .expect("by_kinds")
+                .into_iter()
+                .map(|found| (found.memory.id, found.score))
+                .collect::<Vec<_>>()
+        }
+    };
+    // Confirmed preferences only, newest `updated_at` then `id` first, score 0.
+    assert_eq!(
+        found(vec![MemoryKind::Preference], 30).await,
+        [(new_twin, 0.0), (new, 0.0), (old, 0.0)]
+    );
+    // Several kinds; the limit applies, and isn't clamped to the search maximum.
+    assert_eq!(
+        found(vec![MemoryKind::Fact, MemoryKind::Answer], 30).await,
+        [(answer, 0.0), (skill, 0.0)]
+    );
+    assert_eq!(found(vec![MemoryKind::Preference], 2).await.len(), 2);
+    for age in 0..25 {
+        fact(&pool, "many", &[], 100 + age).await;
+    }
+    assert_eq!(found(vec![MemoryKind::Fact], 30).await.len(), 26);
+    // No kinds or a zero limit: nothing.
+    assert!(found(vec![], 30).await.is_empty());
+    assert!(found(vec![MemoryKind::Fact], 0).await.is_empty());
+}
+
 /// One step, `recall`, that retrieves memories for `input.text`. On its first attempt it
 /// then adds a matching memory and asks for a retry, so the second attempt retrieves one
 /// memory the first didn't.

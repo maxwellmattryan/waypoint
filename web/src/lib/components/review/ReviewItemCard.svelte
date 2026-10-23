@@ -6,7 +6,7 @@
 		/** A decision is in flight; the buttons are disabled. */
 		busy?: boolean;
 		ondismiss: () => void;
-		/** Applies the item. Only email review items with a readable payload offer it. */
+		/** Applies the item. Only email and fit-score items with a readable payload offer it. */
 		onaccept?: () => void;
 	}
 </script>
@@ -16,13 +16,17 @@
 	import { Badge, Button, Card, JsonView, type BadgeTone } from '#lib/components/ui';
 	import { easings, motionDuration } from '#lib/motion.js';
 	import { describeEmailReview } from '#lib/review/email.js';
+	import { describeFitReview } from '#lib/review/fit.js';
 	import EmailReviewSummary from './EmailReviewSummary.svelte';
+	import FitReviewSummary from './FitReviewSummary.svelte';
 	import ItemMeta from './ItemMeta.svelte';
 
 	let { item, busy = false, ondismiss, onaccept }: ReviewItemCardProps = $props();
 
 	const confidence = $derived(Math.round(item.confidence * 100));
-	const summary = $derived(describeEmailReview(item));
+	const email = $derived(describeEmailReview(item));
+	const fit = $derived(describeFitReview(item));
+	const summary = $derived(email ?? fit);
 	const badge = $derived<{ label: string; tone: BadgeTone }>(
 		summary?.badge ?? { label: 'Low confidence', tone: 'warning' }
 	);
@@ -39,7 +43,11 @@
 		<ItemMeta name={item.kind} runId={item.run_id} createdAt={item.created_at} />
 	</div>
 	{#if summary}
-		<EmailReviewSummary {summary} />
+		{#if email}
+			<EmailReviewSummary summary={email} />
+		{:else if fit}
+			<FitReviewSummary summary={fit} />
+		{/if}
 		<div class="flex flex-col gap-2">
 			<Button
 				variant="ghost"

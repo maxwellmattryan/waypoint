@@ -599,6 +599,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/postings/{id}/fit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /postings/{id}/fit`: the posting's fit scores and latest scoring run. */
+        get: operations["get_posting_fit"];
+        put?: never;
+        /**
+         * `POST /postings/{id}/fit`: queues a `score_fit` run for the posting, or returns the one
+         *     already waiting or running.
+         */
+        post: operations["score_posting_fit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/profile/linkedin": {
         parameters: {
             query?: never;
@@ -718,7 +739,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** `POST /review-items/{id}/accept`: applies an email review item's result. */
+        /** `POST /review-items/{id}/accept`: applies an email or fit-score review item's result. */
         post: operations["accept_review_item"];
         delete?: never;
         options?: never;
@@ -941,6 +962,11 @@ export interface components {
             url: string;
         };
         /**
+         * @description What a citation points at.
+         * @enum {string}
+         */
+        CitationSource: "memory" | "posting";
+        /**
          * @description Whether a Google account is connected.
          * @enum {string}
          */
@@ -1044,6 +1070,82 @@ export interface components {
             field: string;
             message: string;
         };
+        /**
+         * @description How well a score fits, computed from the score: `strong` from [`STRONG`], `partial`
+         *     from [`PARTIAL`], `weak` below.
+         * @enum {string}
+         */
+        FitBand: "strong" | "partial" | "weak";
+        /** @description One checked citation, as stored. */
+        FitCitation: {
+            /**
+             * Format: int64
+             * @description The cited memory; `null` for a posting excerpt. `GET /postings/{id}/fit` also gives
+             *     `null` once the memory has been deleted (the snapshot stays).
+             */
+            memory_id: number | null;
+            source: components["schemas"]["CitationSource"];
+            /** @description The memory's content when it was cited (at most 300 characters), or the excerpt. */
+            text: string;
+            topic: null | components["schemas"]["MemoryTopic"];
+        };
+        /** @description One checked reason, as stored. */
+        FitReason: {
+            /** @description One to four citations. */
+            citations: components["schemas"]["FitCitation"][];
+            stance: components["schemas"]["FitStance"];
+            text: string;
+        };
+        /** @description The latest `score_fit` run for a posting. */
+        FitRun: {
+            /** @description The run's latest error; `null` once it succeeds. */
+            error: string | null;
+            /** Format: int64 */
+            id: number;
+            status: components["schemas"]["RunStatus"];
+        };
+        /** @description One `posting_fit_scores` row. */
+        FitScore: {
+            band: components["schemas"]["FitBand"];
+            /**
+             * Format: double
+             * @description The model's confidence, 0 to 1.
+             */
+            confidence: number;
+            /**
+             * Format: double
+             * @description The model call's reported cost in US dollars.
+             */
+            cost_usd: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            reasons: components["schemas"]["FitReason"][];
+            /**
+             * Format: int64
+             * @description The `score_fit` run that produced it.
+             */
+            run_id: number;
+            /**
+             * Format: int32
+             * @description 0 to 100.
+             */
+            score: number;
+            status: components["schemas"]["FitStatus"];
+            /** @description One line. */
+            summary: string;
+        };
+        /**
+         * @description Whether a reason speaks for or against the fit.
+         * @enum {string}
+         */
+        FitStance: "for" | "against";
+        /**
+         * @description Where a stored score is.
+         * @enum {string}
+         */
+        FitStatus: "applied" | "in_review" | "dismissed";
         /** @description The `POST /gmail/sync` body. */
         GmailSyncQueued: {
             /** @description The queued or running page job. */
@@ -1160,6 +1262,15 @@ export interface components {
              * @description When Waypoint first saw the posting.
              */
             first_seen_at: string;
+            fit_band: null | components["schemas"]["FitBand"];
+            /** @description Whether a fit score newer than `fit_score` waits in the review queue. */
+            fit_in_review: boolean;
+            /**
+             * Format: int32
+             * @description The posting's current (latest applied) fit score, 0 to 100; `null` when none was
+             *     ever applied.
+             */
+            fit_score: number | null;
             /** Format: int64 */
             id: number;
             /**
@@ -1373,6 +1484,14 @@ export interface components {
          * @enum {string}
          */
         Permission: "read" | "write" | "external";
+        /** @description The `GET /postings/{id}/fit` body. */
+        PostingFit: {
+            current: null | components["schemas"]["FitScore"];
+            in_review: null | components["schemas"]["FitScore"];
+            /** Format: int64 */
+            posting_id: number;
+            run: null | components["schemas"]["FitRun"];
+        };
         /** @description The `POST /resumes/{id}/profile` body. */
         ProfileImportQueued: {
             /**
@@ -1595,6 +1714,15 @@ export interface components {
         RunStepDetail: components["schemas"]["RunStep"] & {
             tool_calls: components["schemas"]["ToolCall"][];
         };
+        /** @description The `POST /postings/{id}/fit` answer. */
+        ScoreFitQueued: {
+            /** @description Whether this run was already waiting or running rather than a new one. */
+            reused: boolean;
+            /** @description The `score_fit` run that will score the posting. */
+            run: components["schemas"]["Run"];
+        };
+        /** @description The `POST /postings/{id}/fit` body: `{}`. */
+        ScoreFitRequest: Record<string, never>;
         /** @description The `PUT /kill-switch` body. */
         SetKillSwitch: {
             paused: boolean;
@@ -4098,6 +4226,114 @@ export interface operations {
             };
         };
     };
+    get_posting_fit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The posting's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The latest applied score, a newer score waiting in review, and the latest `score_fit` run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostingFit"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No posting has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The scores could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    score_posting_fit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The posting's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoreFitRequest"];
+            };
+        };
+        responses: {
+            /** @description The `score_fit` run: the one already waiting (`queued` or `paused`) or `running` with `reused: true`, or a new one (`paused` while the kill switch is on) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreFitQueued"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No posting has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run could not be queued */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     import_linkedin: {
         parameters: {
             query?: {
@@ -4504,7 +4740,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created */
+            /** @description The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created; a `score_fit.score` item's score became its posting's current score */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4536,7 +4772,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, or its payload doesn't parse */
+            /** @description Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, its score is no longer waiting for review, or its payload doesn't parse */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -24,6 +24,7 @@ import {
 	type Result
 } from './api';
 import { describeEmailReview } from './email';
+import { describeFitReview } from './fit';
 
 /** Whether the list has loaded. `loading` shows the skeleton; a silent refresh never does. */
 export type ListState = { kind: 'loading' } | { kind: 'error' } | { kind: 'loaded' };
@@ -102,6 +103,11 @@ const SAVE_FAILED = {
 const APPLY_CONFLICT = {
 	title: "Couldn't apply",
 	description: 'The application changed or is gone since. Nothing was changed.'
+};
+
+const FIT_APPLY_CONFLICT = {
+	title: "Couldn't apply",
+	description: 'This score is no longer waiting for review. Nothing was changed.'
 };
 
 type Notice = { title: string; description: string };
@@ -261,22 +267,27 @@ export class QueueStore {
 
 	/**
 	 * Applies an email review item (`email.match` or `email.new_application`) as the user's own
-	 * change. A conflict (its application changed or is gone) keeps the item and says so.
+	 * change, or makes a `score_fit.score` item's score its posting's current one. A conflict
+	 * (the application changed or is gone, or the score is no longer in review) keeps the item
+	 * and says so.
 	 */
 	accept(id: number): Promise<Result<ReviewItem>> {
 		const key = `review:${id}`;
 		const entry = this.items.find((held) => queueKey(held) === key);
-		const summary = entry?.kind === 'review' ? describeEmailReview(entry.item) : null;
+		const item = entry?.kind === 'review' ? entry.item : null;
+		const summary = item ? describeEmailReview(item) : null;
+		const fit = item ? describeFitReview(item) : null;
 		const { client, accept } = this.#deps;
 		return this.#decide(
 			key,
 			() => accept(client, id),
 			() => {
-				if (!summary) toast.success('Applied');
+				if (fit) toast.success(`Applied fit score for ${fit.company}`);
+				else if (!summary) toast.success('Applied');
 				else if (summary.kind === 'new_application') toast.success(`Added ${summary.company}`);
 				else toast.success(`Applied to ${summary.company}`);
 			},
-			APPLY_CONFLICT
+			fit ? FIT_APPLY_CONFLICT : APPLY_CONFLICT
 		);
 	}
 

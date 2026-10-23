@@ -4,11 +4,14 @@
 	import { fade } from 'svelte/transition';
 	import { createApiClient } from '#lib/api';
 	import PostingDetailView from '#lib/components/postings/PostingDetailView.svelte';
+	import PostingFitPanel from '#lib/components/postings/PostingFitPanel.svelte';
 	import { Button, EmptyState, Link, Skeleton } from '#lib/components/ui';
+	import { getDashboard } from '#lib/dashboard/dashboard.svelte.js';
 	import { motionDuration } from '#lib/motion.js';
-	import { PostingDetailStore } from '#lib/postings/postings.svelte.js';
+	import { PostingDetailStore, PostingFitStore } from '#lib/postings/postings.svelte.js';
 
 	const client = createApiClient();
+	const dashboard = getDashboard();
 	const listHref = resolve('/postings');
 
 	/** The route's id as a positive integer, or `null` for anything else (no request is made). */
@@ -19,15 +22,25 @@
 	});
 
 	let store = $state<PostingDetailStore | null>(null);
+	let fitStore = $state<PostingFitStore | null>(null);
 
 	$effect(() => {
 		if (id === null) {
 			store = null;
+			fitStore = null;
 			return;
 		}
 		const next = new PostingDetailStore(id, { client });
 		store = next;
 		void next.load();
+		const nextFit = new PostingFitStore(id, { client });
+		fitStore = nextFit;
+		void nextFit.load();
+		const unsubscribe = dashboard.subscribe((event) => nextFit.handle(event));
+		return () => {
+			unsubscribe();
+			nextFit.destroy();
+		};
 	});
 
 	const view = $derived(store?.state ?? { kind: 'not-found' as const });
@@ -67,7 +80,18 @@
 		</div>
 	{:else}
 		<div in:fade={{ duration: motionDuration('base') }}>
-			<PostingDetailView posting={view.posting} />
+			<PostingDetailView posting={view.posting}>
+				{#snippet fit()}
+					{#if fitStore}
+						<PostingFitPanel
+							state={fitStore.state}
+							starting={fitStore.starting}
+							onscore={() => fitStore?.score()}
+							onreload={() => fitStore?.load()}
+						/>
+					{/if}
+				{/snippet}
+			</PostingDetailView>
 		</div>
 	{/if}
 </div>

@@ -118,6 +118,8 @@ pub fn rocket(
                 sourcing::source_board,
                 sourcing::postings::list,
                 sourcing::postings::show,
+                sourcing::postings::fit,
+                sourcing::postings::score,
                 jobs::show,
                 runs::list,
                 runs::show,

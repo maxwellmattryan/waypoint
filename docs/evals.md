@@ -19,7 +19,7 @@ cargo run --bin eval -- <workflow> [--case <name>]... [--json] [--keep-db] [--da
 
 | Argument | Meaning |
 |---|---|
-| `<workflow>` | A registered eval suite: `tidy_application`, `memory_writer`, `classify_email`, `match_email` or `propose_interview`. |
+| `<workflow>` | A registered eval suite: `tidy_application`, `memory_writer`, `classify_email`, `match_email`, `propose_interview` or `score_fit`. |
 | `--case <name>` | Runs only the named case. Repeat it for several. A name the dataset doesn't have is a usage error. |
 | `--json` | Prints the report as JSON on stdout instead of the text table. |
 | `--keep-db` | Keeps the scratch database and prints its name on stderr, so you can inspect the runs. |
@@ -311,6 +311,36 @@ cargo run --bin eval -- propose_interview --json | jq .totals.pass_rate
 | 6/6 (100%) | 6/6 (100%) | 0 | 0 | $0.0000 |
 
 The times are the classifier's normalized output written by hand, so these numbers check the slot and request rules, not how well times are extracted from real mail.
+
+## The `score_fit` eval set
+
+`api/evals/score_fit.json` covers [fit scores](sourcing.md#fit-scores): 8 cases, each one `sonnet` call except the last. Setup takes:
+
+```json
+{"posting": {"title", "company", "location_raw"?, "remote"?, "department"?, "employment_type"?, "description"},
+ "memories": [{"name", "kind", "topic", "content", "tags"?, "status"?}]}
+```
+
+with unknown fields refused. It deletes every fit score and posting, inserts the posting (`greenhouse`, board `eval`, `url` `https://example.com/eval`) and stores exactly the case's memories (`confirmed` unless given, as in the `memory_writer` set). Variables: `posting_id` and `memory_<name>`. Each case's input is `{"posting_id": "${posting_id}"}`. The postings are invented text written into the dataset, not scraped.
+
+| Case | Expects |
+|---|---|
+| Rust backend role, Rust backend engineer | `band: strong`, `status: applied`, no review item |
+| Product designer role, product designer | `band: strong`, `status: applied`, no review item |
+| Crypto exchange, "no crypto" deal-breaker | `band: weak`, `status: applied`, no review item |
+| On-site in Tokyo, remote only | `band: weak`, `status: applied`, no review item |
+| Internship, staff level only | `band: weak`, `status: applied`, no review item |
+| A vague posting with no stack, level or location | `status: in_review` with one `score_fit.score` review item |
+| Matching skills, but remote work and pay unstated | `status: in_review` with one `score_fit.score` review item |
+| No memories | `failed`, error containing `knows nothing about you`, no model call |
+
+The `score_fit_dataset_parses` unit test checks that mix; each mismatch case's `note` names the rule it breaks (`deal_breaker`, `location` or `seniority`).
+
+**Results**, recorded on 2026-10-23:
+
+| Pass rate | Model calls | Cost | Cost per run |
+|---|---|---|---|
+| 8/8 (100%) | 7 | $0.1354 | $0.0169 |
 
 ## Labelling emails
 

@@ -2349,6 +2349,111 @@
         }
       }
     },
+    "/postings/{id}/fit": {
+      "get": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "`GET /postings/{id}/fit`: the posting's fit scores and latest scoring run.",
+        "operationId": "get_posting_fit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The posting's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The latest applied score, a newer score waiting in review, and the latest `score_fit` run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostingFit"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No posting has this id"
+          },
+          "500": {
+            "description": "The scores could not be read"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "`POST /postings/{id}/fit`: queues a `score_fit` run for the posting, or returns the one\nalready waiting or running.",
+        "operationId": "score_posting_fit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The posting's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreFitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The `score_fit` run: the one already waiting (`queued` or `paused`) or `running` with `reused: true`, or a new one (`paused` while the kill switch is on)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreFitQueued"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No posting has this id"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "500": {
+            "description": "The run could not be queued"
+          }
+        }
+      }
+    },
     "/profile/linkedin": {
       "post": {
         "tags": [
@@ -2729,7 +2834,7 @@
         "tags": [
           "runs"
         ],
-        "summary": "`POST /review-items/{id}/accept`: applies an email review item's result.",
+        "summary": "`POST /review-items/{id}/accept`: applies an email or fit-score review item's result.",
         "operationId": "accept_review_item",
         "parameters": [
           {
@@ -2755,7 +2860,7 @@
         },
         "responses": {
           "200": {
-            "description": "The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created",
+            "description": "The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created; a `score_fit.score` item's score became its posting's current score",
             "content": {
               "application/json": {
                 "schema": {
@@ -2781,7 +2886,7 @@
             "description": "No review item has this id"
           },
           "409": {
-            "description": "Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, or its payload doesn't parse"
+            "description": "Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, its score is no longer waiting for review, or its payload doesn't parse"
           },
           "415": {
             "description": "The body is not `application/json`"
@@ -3444,6 +3549,14 @@
           }
         }
       },
+      "CitationSource": {
+        "type": "string",
+        "description": "What a citation points at.",
+        "enum": [
+          "memory",
+          "posting"
+        ]
+      },
       "ConnectionState": {
         "type": "string",
         "description": "Whether a Google account is connected.",
@@ -3823,6 +3936,181 @@
           }
         }
       },
+      "FitBand": {
+        "type": "string",
+        "description": "How well a score fits, computed from the score: `strong` from [`STRONG`], `partial`\nfrom [`PARTIAL`], `weak` below.",
+        "enum": [
+          "strong",
+          "partial",
+          "weak"
+        ]
+      },
+      "FitCitation": {
+        "type": "object",
+        "description": "One checked citation, as stored.",
+        "required": [
+          "source",
+          "memory_id",
+          "topic",
+          "text"
+        ],
+        "properties": {
+          "memory_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The cited memory; `null` for a posting excerpt. `GET /postings/{id}/fit` also gives\n`null` once the memory has been deleted (the snapshot stays)."
+          },
+          "source": {
+            "$ref": "#/components/schemas/CitationSource"
+          },
+          "text": {
+            "type": "string",
+            "description": "The memory's content when it was cited (at most 300 characters), or the excerpt."
+          },
+          "topic": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MemoryTopic",
+                "description": "The memory's topic when it was cited; `null` for a posting excerpt."
+              }
+            ]
+          }
+        }
+      },
+      "FitReason": {
+        "type": "object",
+        "description": "One checked reason, as stored.",
+        "required": [
+          "stance",
+          "text",
+          "citations"
+        ],
+        "properties": {
+          "citations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FitCitation"
+            },
+            "description": "One to four citations."
+          },
+          "stance": {
+            "$ref": "#/components/schemas/FitStance"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "FitRun": {
+        "type": "object",
+        "description": "The latest `score_fit` run for a posting.",
+        "required": [
+          "id",
+          "status",
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The run's latest error; `null` once it succeeds."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        }
+      },
+      "FitScore": {
+        "type": "object",
+        "description": "One `posting_fit_scores` row.",
+        "required": [
+          "id",
+          "run_id",
+          "status",
+          "score",
+          "band",
+          "confidence",
+          "summary",
+          "reasons",
+          "cost_usd",
+          "created_at"
+        ],
+        "properties": {
+          "band": {
+            "$ref": "#/components/schemas/FitBand"
+          },
+          "confidence": {
+            "type": "number",
+            "format": "double",
+            "description": "The model's confidence, 0 to 1."
+          },
+          "cost_usd": {
+            "type": "number",
+            "format": "double",
+            "description": "The model call's reported cost in US dollars."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FitReason"
+            }
+          },
+          "run_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The `score_fit` run that produced it."
+          },
+          "score": {
+            "type": "integer",
+            "format": "int32",
+            "description": "0 to 100."
+          },
+          "status": {
+            "$ref": "#/components/schemas/FitStatus"
+          },
+          "summary": {
+            "type": "string",
+            "description": "One line."
+          }
+        }
+      },
+      "FitStance": {
+        "type": "string",
+        "description": "Whether a reason speaks for or against the fit.",
+        "enum": [
+          "for",
+          "against"
+        ]
+      },
+      "FitStatus": {
+        "type": "string",
+        "description": "Where a stored score is.",
+        "enum": [
+          "applied",
+          "in_review",
+          "dismissed"
+        ]
+      },
       "GmailSyncQueued": {
         "type": "object",
         "description": "The `POST /gmail/sync` body.",
@@ -4083,7 +4371,10 @@
           "last_seen_at",
           "created_at",
           "updated_at",
-          "removed_at"
+          "removed_at",
+          "fit_score",
+          "fit_band",
+          "fit_in_review"
         ],
         "properties": {
           "apply_url": {
@@ -4138,6 +4429,29 @@
             "type": "string",
             "format": "date-time",
             "description": "When Waypoint first saw the posting."
+          },
+          "fit_band": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FitBand",
+                "description": "The band of `fit_score`; `null` with it."
+              }
+            ]
+          },
+          "fit_in_review": {
+            "type": "boolean",
+            "description": "Whether a fit score newer than `fit_score` waits in the review queue."
+          },
+          "fit_score": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The posting's current (latest applied) fit score, 0 to 100; `null` when none was\never applied."
           },
           "id": {
             "type": "integer",
@@ -4664,6 +4978,55 @@
           "external"
         ]
       },
+      "PostingFit": {
+        "type": "object",
+        "description": "The `GET /postings/{id}/fit` body.",
+        "required": [
+          "posting_id",
+          "current",
+          "in_review",
+          "run"
+        ],
+        "properties": {
+          "current": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FitScore",
+                "description": "The latest applied score; `null` when none was ever applied."
+              }
+            ]
+          },
+          "in_review": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FitScore",
+                "description": "The latest score newer than `current` whose review item is still pending."
+              }
+            ]
+          },
+          "posting_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FitRun",
+                "description": "The latest `score_fit` run for the posting, whatever its status."
+              }
+            ]
+          }
+        }
+      },
       "ProfileImportQueued": {
         "type": "object",
         "description": "The `POST /resumes/{id}/profile` body.",
@@ -5183,6 +5546,29 @@
           }
         ],
         "description": "A step with its tool calls, oldest first."
+      },
+      "ScoreFitQueued": {
+        "type": "object",
+        "description": "The `POST /postings/{id}/fit` answer.",
+        "required": [
+          "run",
+          "reused"
+        ],
+        "properties": {
+          "reused": {
+            "type": "boolean",
+            "description": "Whether this run was already waiting or running rather than a new one."
+          },
+          "run": {
+            "$ref": "#/components/schemas/Run",
+            "description": "The `score_fit` run that will score the posting."
+          }
+        }
+      },
+      "ScoreFitRequest": {
+        "type": "object",
+        "description": "The `POST /postings/{id}/fit` body: `{}`.",
+        "additionalProperties": false
       },
       "SetKillSwitch": {
         "type": "object",
