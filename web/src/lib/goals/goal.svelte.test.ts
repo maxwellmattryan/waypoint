@@ -1,10 +1,17 @@
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createApiClient, type GoalDetail } from '#lib/api';
+import { createApiClient, type Event, type GoalDetail, type Run } from '#lib/api';
 import GoalView from '#lib/components/goals/GoalView.svelte';
 import { toast } from '#lib/components/ui';
-import { makeDetail, makeGoal, makePlan, makeQuestion, makeStep } from './__fixtures__/goals';
+import {
+	makeDetail,
+	makeGoal,
+	makePlan,
+	makePlanPacket,
+	makeQuestion,
+	makeStep
+} from './__fixtures__/goals';
 import type { Result } from './api';
 import { GoalStore, type GoalState } from './goal.svelte';
 
@@ -107,6 +114,7 @@ describe('GoalView', () => {
 		expect(screen.getByText('Lead with design systems')).toBeInTheDocument();
 		const steps = screen.getByRole('list', { name: 'Steps' });
 		expect(within(steps).getAllByText('Pending')).toHaveLength(5);
+		expect(screen.queryByRole('list', { name: 'Packets' })).not.toBeInTheDocument();
 		const run = screen.getByRole('button', { name: 'Run' });
 		expect(run).toBeEnabled();
 		await userEvent.setup().click(run);
@@ -163,6 +171,41 @@ describe('GoalView', () => {
 		expect(screen.getByRole('button', { name: 'Edit plan' })).toBeEnabled();
 	});
 
+	const withPrep = (prep: ReturnType<typeof makeStep>, overrides = {}) =>
+		makePlan({
+			steps: [0, 1, 2, 3].map((n) => makeStep(n, 'succeeded')).concat(prep),
+			...overrides
+		});
+
+	it('shows a running prep step with its queued packets', () => {
+		view(
+			loaded(
+				makeDetail({
+					...makeGoal({ status: 'running' }),
+					plan: withPrep(makeStep(4, 'running', { output: { packets: [] } }), {
+						packets: [makePlanPacket({ outcome: 'queued', packet_id: null, status: null })]
+					})
+				})
+			)
+		);
+		const steps = within(screen.getByRole('list', { name: 'Steps' }));
+		expect(steps.getByText('Preparing packets…')).toBeInTheDocument();
+		const packets = within(screen.getByRole('list', { name: 'Packets' }));
+		expect(packets.getByText('Preparing…')).toBeInTheDocument();
+	});
+
+	it('sums a finished prep step, leaving out zero parts', () => {
+		const output = { prepared: 1, reused: 1, failed: 1 };
+		view(loaded(makeDetail({ plan: withPrep(makeStep(4, 'succeeded', { output })) })));
+		expect(screen.getByText('1 prepared · 1 already prepared · 1 failed')).toBeInTheDocument();
+	});
+
+	it('shows a legacy skipped prep step with its note', () => {
+		const output = { note: "Application prep isn't available yet" };
+		view(loaded(makeDetail({ plan: withPrep(makeStep(4, 'skipped', { output })) })));
+		expect(screen.getByText("Application prep isn't available yet")).toBeInTheDocument();
+	});
+
 	it('shows a completed plan with its shortlist', () => {
 		view(
 			loaded(
@@ -170,15 +213,16 @@ describe('GoalView', () => {
 					...makeGoal({ status: 'completed' }),
 					plan: makePlan({
 						steps: [0, 1, 2, 3, 4].map((n) =>
-							makeStep(n, n === 4 ? 'skipped' : 'succeeded', {
+							makeStep(n, 'succeeded', {
 								output:
 									n === 3
 										? { shortlisted: 1, in_review: 1 }
 										: n === 4
-											? { note: "Application prep isn't available yet" }
+											? { packets: [], prepared: 1, reused: 0, failed: 0 }
 											: {}
 							})
 						),
+						packets: [makePlanPacket()],
 						shortlist: [
 							{
 								rank: 1,
@@ -200,7 +244,13 @@ describe('GoalView', () => {
 		);
 		expect(shortlist.getByText('82 · Strong fit')).toBeInTheDocument();
 		expect(screen.getByText('1 shortlisted · 1 waiting in review')).toBeInTheDocument();
-		expect(screen.getByText("Application prep isn't available yet")).toBeInTheDocument();
+		expect(screen.getByText('1 prepared')).toBeInTheDocument();
+		const packets = within(screen.getByRole('list', { name: 'Packets' }));
+		expect(packets.getByText('Ready for approval')).toBeInTheDocument();
+		expect(packets.getByRole('link', { name: 'Review and approve' })).toHaveAttribute(
+			'href',
+			'/packets/7'
+		);
 	});
 
 	it('shows a failed goal with its error and Run again when the plan is ready', () => {
@@ -273,6 +323,47 @@ describe('GoalStore', () => {
 		store.handle({ type: 'app.connected' });
 		store.handle({ type: 'app.lagged', skipped: 3 });
 		expect(get).toHaveBeenCalledTimes(3);
+	});
+
+	it('reloads on run.updated for a listed packet only', async () => {
+		const runUpdated = (run: Partial<Run>): Event => ({
+			type: 'run.updated',
+			run: {
+				id: 60,
+				workflow: 'prep_packet',
+				status: 'succeeded',
+				input: {},
+				output: null,
+				error: null,
+				input_tokens: 0,
+				output_tokens: 0,
+				cost_usd: 0,
+				job_id: 1,
+				created_at: '2026-10-22T00:00:00Z',
+				updated_at: '2026-10-22T00:00:00Z',
+				started_at: null,
+				finished_at: null,
+				...run
+			}
+		});
+		const packets = [makePlanPacket({ packet_id: 7, run_id: 30 })];
+		const get = vi.fn<() => Promise<Result<GoalDetail>>>(async () => ({
+			kind: 'ok',
+			data: makeDetail({ plan: makePlan({ packets }) })
+		}));
+		const store = new GoalStore(1, { get });
+		await store.load();
+		expect(get).toHaveBeenCalledTimes(1);
+
+		store.handle(runUpdated({ id: 31, input: { posting_id: 42 } }));
+		store.handle(runUpdated({ id: 61, workflow: 'approve_packet', input: { packet_id: 8 } }));
+		store.handle(runUpdated({ id: 62, workflow: 'score_fit', input: { packet_id: 7 } }));
+		expect(get).toHaveBeenCalledTimes(1);
+
+		store.handle(runUpdated({ id: 30 }));
+		store.handle(runUpdated({ id: 61, workflow: 'approve_packet', input: { packet_id: 7 } }));
+		store.handle(runUpdated({ id: 63, workflow: 'apply_packet', input: { packet_id: 7 } }));
+		expect(get).toHaveBeenCalledTimes(4);
 	});
 
 	it('runs the plan and shows the answer', async () => {

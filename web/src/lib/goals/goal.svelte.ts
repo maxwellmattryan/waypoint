@@ -1,5 +1,6 @@
 import { createApiClient, type ApiClient, type Event, type GoalDetail, type PlanEdit } from '#lib/api';
 import { toast } from '#lib/components/ui';
+import { APPLY_PACKET_WORKFLOW, APPROVE_PACKET_WORKFLOW } from '#lib/packets/api.js';
 import {
 	answerGoal,
 	editPlan,
@@ -31,8 +32,8 @@ export const STALE_PLAN = 'This plan changed since you opened it';
 const NETWORK = 'Check that the API is running, then try again.';
 
 /**
- * One goal's page: `GET /goals/{id}`, reloaded on `goal.updated` for this goal and after a
- * reconnect or lag, plus its actions (answers, edit, run, replan). The skeleton shows only
+ * One goal's page: `GET /goals/{id}`, reloaded on `goal.updated` for this goal, on
+ * `run.updated` for one of its listed packets and after a reconnect or lag, plus its actions (answers, edit, run, replan). The skeleton shows only
  * until the first load; a response older than the latest request is dropped.
  */
 export class GoalStore {
@@ -112,6 +113,11 @@ export class GoalStore {
 			case 'goal.updated':
 				if (event.goal.id === this.id) void this.load();
 				return;
+			case 'run.updated':
+				if (this.#concernsPackets(event.run.id, event.run.workflow, event.run.input)) {
+					void this.load();
+				}
+				return;
 			case 'app.connected':
 			case 'app.lagged':
 			case 'data.deleted':
@@ -123,6 +129,22 @@ export class GoalStore {
 	/** Drops any response in flight. Call when the page goes. */
 	destroy(): void {
 		this.#request++;
+	}
+
+	/**
+	 * Whether a run concerns a listed packet: it is an entry's run (review decisions publish
+	 * it), or an `approve_packet` / `apply_packet` run whose input names an entry's packet.
+	 */
+	#concernsPackets(runId: number, workflow: string, input: unknown): boolean {
+		if (this.state.kind !== 'loaded') return false;
+		const packets = this.state.goal.plan?.packets ?? [];
+		if (packets.some((entry) => entry.run_id === runId)) return true;
+		if (workflow !== APPROVE_PACKET_WORKFLOW && workflow !== APPLY_PACKET_WORKFLOW) return false;
+		const packetId =
+			typeof input === 'object' && input !== null
+				? (input as Record<string, unknown>).packet_id
+				: undefined;
+		return typeof packetId === 'number' && packets.some((entry) => entry.packet_id === packetId);
 	}
 
 	#show(goal: GoalDetail): void {

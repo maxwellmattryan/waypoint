@@ -22,10 +22,11 @@
 	import { confidenceLabel } from '#lib/postings/fit.js';
 	import { formatCost } from '#lib/runs/format.js';
 	import CompanyRow from './CompanyRow.svelte';
+	import PlanPacketList from './PlanPacketList.svelte';
 	import PlanStepList from './PlanStepList.svelte';
 	import ShortlistList from './ShortlistList.svelte';
 
-	/** A goal's current plan: what it targets, its steps and its shortlist, with Run, Edit and Replan. */
+	/** A goal's current plan: what it targets, its steps, its shortlist and its packets, with Run, Edit and Replan. */
 	let { plan, status, busy = false, onrun, onedit, onreplan }: PlanViewProps = $props();
 
 	const reviewHref = resolve('/review');
@@ -120,6 +121,13 @@
 		<Card class="flex flex-col gap-2">
 			<h3 class="text-sm font-semibold text-fg">Shortlist</h3>
 			<ShortlistList entries={plan.shortlist} />
+		</Card>
+	{/if}
+
+	{#if plan.packets.length > 0}
+		<Card class="flex flex-col gap-2">
+			<h3 class="text-sm font-semibold text-fg">Packets</h3>
+			<PlanPacketList packets={plan.packets} />
 		</Card>
 	{/if}
 </section>
