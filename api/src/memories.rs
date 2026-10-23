@@ -1,7 +1,8 @@
 //! Memories: what Waypoint knows about the user. One `memories` row per fact, preference
 //! or answer-bank entry, each with its provenance (where it came from) and whether the
 //! user has confirmed it. The routes let the user list, search, add, edit, confirm and
-//! delete them; later workflows add memories in-process through [`insert`].
+//! delete them; later workflows add memories in-process through [`insert`], and imports
+//! through [`insert_keyed`].
 //!
 //! The HTTP routes never set `status` or provenance: a memory created over HTTP is
 //! `confirmed` and `manual`, and an edit keeps both. Only [`insert`] stores a `proposed`
@@ -377,6 +378,36 @@ pub async fn insert(executor: impl PgExecutor<'_>, memory: &NewMemory) -> sqlx::
     .bind(&memory.source.reference)
     .bind(&memory.source.label)
     .fetch_one(executor)
+    .await
+}
+
+/// Stores a memory under `key` unless a memory with that key exists. `None` means it
+/// existed, and that memory is left unchanged. `key` is the memory's identity in an import
+/// (see `crate::profile`); it is internal and never returned.
+pub async fn insert_keyed(
+    executor: impl PgExecutor<'_>,
+    memory: &NewMemory,
+    key: &str,
+) -> sqlx::Result<Option<Memory>> {
+    let fields = &memory.fields;
+    sqlx::query_as(&format!(
+        "INSERT INTO memories (kind, topic, content, tags, status, confirmed_at, \
+         source_kind, source_ref, source_label, source_key) \
+         VALUES ($1, $2, $3, $4, $5::text, \
+         CASE WHEN $5::text = 'confirmed' THEN now() END, $6, $7, $8, $9) \
+         ON CONFLICT (source_key) WHERE source_key IS NOT NULL DO NOTHING \
+         RETURNING {COLUMNS}"
+    ))
+    .bind(fields.kind.as_str())
+    .bind(fields.topic.as_str())
+    .bind(&fields.content)
+    .bind(&fields.tags)
+    .bind(memory.status.as_str())
+    .bind(memory.source.kind.as_str())
+    .bind(&memory.source.reference)
+    .bind(&memory.source.label)
+    .bind(key)
+    .fetch_optional(executor)
     .await
 }
 

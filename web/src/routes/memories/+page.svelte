@@ -3,6 +3,7 @@
 	import { onMount, tick, untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { createApiClient, type Memory, type MemoryInput } from '#lib/api';
+	import LinkedInImportDialog from '#lib/components/memories/LinkedInImportDialog.svelte';
 	import MemoryFilters from '#lib/components/memories/MemoryFilters.svelte';
 	import MemoryFormDialog from '#lib/components/memories/MemoryFormDialog.svelte';
 	import MemorySection from '#lib/components/memories/MemorySection.svelte';
@@ -10,6 +11,7 @@
 	import { createMemory, updateMemory } from '#lib/memories/api.js';
 	import { parseMemoryParam } from '#lib/memories/link.js';
 	import { MemoryList } from '#lib/memories/memories.svelte.js';
+	import { importLinkedIn } from '#lib/memories/profile.js';
 	import { SECTIONS } from '#lib/memories/topics.js';
 	import { motionDuration } from '#lib/motion.js';
 
@@ -44,6 +46,7 @@
 	}
 
 	let formOpen = $state(false);
+	let importOpen = $state(false);
 	/** The memory the dialog edits; `null` adds one. */
 	let editing = $state<Memory | null>(null);
 	let deleteOpen = $state(false);
@@ -96,7 +99,10 @@
 <div class="flex flex-col gap-8">
 	<div class="flex flex-wrap items-center justify-between gap-4">
 		<h1 class="text-2xl font-semibold text-fg">What Waypoint knows about me</h1>
-		{@render addButton()}
+		<div class="flex flex-wrap gap-2">
+			<Button variant="secondary" onclick={() => (importOpen = true)}>Import LinkedIn</Button>
+			{@render addButton()}
+		</div>
 	</div>
 
 	<MemoryFilters
@@ -169,6 +175,12 @@
 	memory={editing}
 	{save}
 	onsaved={(memory, wasNew) => list.saved(memory, wasNew)}
+/>
+
+<LinkedInImportDialog
+	bind:open={importOpen}
+	save={(file) => importLinkedIn(client, file)}
+	onimported={() => list.load()}
 />
 
 <ConfirmDialog

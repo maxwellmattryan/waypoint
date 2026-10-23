@@ -2,11 +2,13 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import { onDestroy } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { createApiClient, type ResumeVersionDetail } from '#lib/api';
 	import { formatDate } from '#lib/applications/format.js';
 	import { deleteResume, getResume, pdfUrl } from '#lib/resumes/api.js';
 	import { formatBytes, usedBy } from '#lib/resumes/format.js';
+	import { ResumeProfileImport } from '#lib/resumes/profile-import.svelte.js';
 	import { Badge, Button, Card, Dialog, EmptyState, Link, Skeleton, toast } from '#lib/components/ui';
 	import { motionDuration } from '#lib/motion.js';
 
@@ -18,6 +20,8 @@
 
 	const client = createApiClient();
 	const listHref = resolve('/resumes');
+	const importer = new ResumeProfileImport({ client });
+	onDestroy(() => importer.destroy());
 
 	/** The route's id as a positive integer, or `null` for anything else (no request is made). */
 	const id = $derived(/^[1-9]\d*$/.test(page.params.id ?? '') ? Number(page.params.id) : null);
@@ -113,6 +117,14 @@
 					<div class="flex items-center gap-4">
 						<Link href={pdfUrl(version.id)} external class="text-sm">Open PDF</Link>
 						<Button
+							variant="secondary"
+							disabled={!version.has_text || importer.busy}
+							aria-describedby={version.has_text ? undefined : 'no-text-hint'}
+							onclick={() => importer.start(version.id)}
+						>
+							{importer.busy ? 'Reading resume…' : 'Add to profile'}
+						</Button>
+						<Button
 							variant="danger"
 							disabled={linked}
 							aria-describedby={linked ? 'delete-blocked' : undefined}
@@ -121,6 +133,9 @@
 							Delete
 						</Button>
 					</div>
+					{#if !version.has_text}
+						<p id="no-text-hint" class="text-xs text-fg-muted">No text to read in this PDF.</p>
+					{/if}
 					{#if linked}
 						<p id="delete-blocked" class="text-xs text-fg-muted">
 							{usedBy(version.application_count)}; unlink it before deleting.

@@ -29,6 +29,10 @@ pub const CAPTURE_EXTRACT: &str = "capture_extract";
 /// The `agent_run` job kind: payload `{"run_id": integer}`, runs the steps of one
 /// `agent_runs` row that haven't succeeded yet (see `runs::execute`).
 pub const AGENT_RUN: &str = "agent_run";
+/// The `resume_profile` job kind: payload `{"resume_version_id": integer, "sha256": string}`,
+/// one structured `claude -p` call that stores the resume's positions, skills and education
+/// as proposed memories; its `result` is a `ProfileImportSummary` (see `profile::resume`).
+pub const RESUME_PROFILE: &str = "resume_profile";
 
 /// One `jobs` row. This is also the `GET /jobs/<id>` body; the payload is not echoed.
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, utoipa::ToSchema)]

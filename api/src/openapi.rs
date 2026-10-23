@@ -22,6 +22,9 @@ use crate::kill_switch::{self, DataDeletion, DeleteAllData, KillSwitch, SetKillS
 use crate::memories::{
     self, Memory, MemoryInput, MemoryKind, MemoryStatus, MemoryTopic, SourceKind,
 };
+use crate::profile::ProfileImportSummary;
+use crate::profile::linkedin;
+use crate::profile::resume::{self as resume_profile, ProfileImportQueued};
 use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
 use crate::runs::actions::{self, AgentAction};
 use crate::runs::approvals::{self, ApproveAction, PendingAction, PendingActionStatus};
@@ -62,6 +65,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         memories::update,
         memories::confirm,
         memories::delete,
+        linkedin::import,
+        resume_profile::start,
         stages::list,
         stages::add,
         stages::update,
@@ -122,6 +127,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         MemoryTopic,
         MemoryStatus,
         SourceKind,
+        ProfileImportSummary,
+        ProfileImportQueued,
         Run,
         RunStatus,
         RunDetail,

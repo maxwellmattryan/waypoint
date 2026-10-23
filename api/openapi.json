@@ -1995,6 +1995,73 @@
         }
       }
     },
+    "/profile/linkedin": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Imports the positions, skills and education in a LinkedIn data export as confirmed\nfacts. Rows whose key is already stored are counted, not stored again.",
+        "operationId": "import_linkedin",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "query",
+            "description": "The uploaded file's name, at most 255 characters; stored as each memory's `source_label`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The raw LinkedIn data export archive, 1 byte to 20 MiB. `Positions.csv`, `Skills.csv` and `Education.csv` are read (at any depth, any case), each up to 5 MiB inflated; every other entry is ignored",
+          "content": {
+            "application/zip": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "Raw zip bytes."
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row is applied: new rows stored as confirmed `fact` memories with source `linkedin`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileImportSummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "413": {
+            "description": "The body is over 20 MiB"
+          },
+          "415": {
+            "description": "The body is not `application/zip`"
+          },
+          "422": {
+            "description": "`file` is empty, not a zip, has none of the three CSVs, or has a CSV over 5 MiB; or `filename` is too long. Nothing is stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The import could not be stored; nothing is stored"
+          }
+        }
+      }
+    },
     "/resumes": {
       "get": {
         "tags": [
@@ -2217,6 +2284,58 @@
           },
           "500": {
             "description": "The PDF could not be read"
+          }
+        }
+      }
+    },
+    "/resumes/{id}/profile": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Queues Claude to read a resume version's positions, skills and education into proposed\nmemories, or returns the earlier import of the same PDF bytes.",
+        "operationId": "import_resume_profile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The resume version's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The import job, whose `result` is a `ProfileImportSummary`: a new one, or (`reused: true`) an earlier queued, running or succeeded import of the same PDF bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileImportQueued"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No resume version has this id"
+          },
+          "422": {
+            "description": "The version has no text to read (field `text`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The import could not be queued"
           }
         }
       }
@@ -3646,6 +3765,54 @@
           "write",
           "external"
         ]
+      },
+      "ProfileImportQueued": {
+        "type": "object",
+        "description": "The `POST /resumes/{id}/profile` body.",
+        "required": [
+          "job_id",
+          "reused"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The job reading the resume; its `result` is a `ProfileImportSummary`."
+          },
+          "reused": {
+            "type": "boolean",
+            "description": "Whether this is an earlier import of the same PDF bytes rather than a new job."
+          }
+        }
+      },
+      "ProfileImportSummary": {
+        "type": "object",
+        "description": "What an import did: the body of `POST /profile/linkedin` and the `resume_profile` job's\n`result`.",
+        "required": [
+          "added",
+          "already_known",
+          "skipped"
+        ],
+        "properties": {
+          "added": {
+            "type": "integer",
+            "format": "int32",
+            "description": "New memories stored.",
+            "minimum": 0
+          },
+          "already_known": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Entries whose key was already stored, in this import or an earlier one.",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Entries missing a required value.",
+            "minimum": 0
+          }
+        }
       },
       "ResumeLink": {
         "type": "object",
