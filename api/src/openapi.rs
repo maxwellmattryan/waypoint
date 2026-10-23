@@ -68,6 +68,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         actions::list,
         actions::undo_route,
         review::list,
+        review::dismiss_route,
         tidy::start_tidy,
         kill_switch::show,
         kill_switch::update,

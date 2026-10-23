@@ -1925,6 +1925,51 @@
         }
       }
     },
+    "/review-items/{id}/dismiss": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`POST /review-items/{id}/dismiss`: clears an item from the queue without applying it.",
+        "operationId": "dismiss_review_item",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The review item's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The dismissed item, with `resolved_at` set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewItem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No review item has this id"
+          },
+          "409": {
+            "description": "The item is not `pending`"
+          },
+          "500": {
+            "description": "The dismissal could not be stored"
+          }
+        }
+      }
+    },
     "/runs": {
       "get": {
         "tags": [

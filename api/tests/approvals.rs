@@ -437,6 +437,41 @@ async fn low_confidence_result_goes_to_review(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn dismiss_resolves_a_review_item(pool: PgPool) {
+    let (client, mut subscriber) = app(&pool).await;
+    let application = create_application(&client).await;
+    let (run, _) = parked(&client, &mut subscriber, application, 0.3).await;
+    let listed = get(&client, "/review-items").await;
+    let id = listed[0]["id"].as_i64().expect("id");
+    assert_eq!(listed[0]["run_id"], json!(run));
+
+    let (status, item) = post(&client, &format!("/review-items/{id}/dismiss"), None).await;
+    assert_eq!(status, Status::Ok, "{item}");
+    assert_eq!(item["id"], json!(id));
+    assert_eq!(item["status"], "dismissed");
+    assert!(item["resolved_at"].is_string(), "{item}");
+    assert_eq!(get(&client, "/review-items").await, json!([]));
+
+    let stored = || async {
+        sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT status, resolved_at::text FROM review_items WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .expect("read the item")
+    };
+    let before = stored().await;
+    assert_eq!(before.0, "dismissed");
+    let (status, _) = post(&client, &format!("/review-items/{id}/dismiss"), None).await;
+    assert_eq!(status, Status::Conflict);
+    assert_eq!(stored().await, before, "the second dismiss changed nothing");
+
+    let (status, _) = post(&client, &format!("/review-items/{}/dismiss", i64::MAX), None).await;
+    assert_eq!(status, Status::NotFound);
+}
+
+#[sqlx::test]
 async fn undo_refuses_a_changed_record(pool: PgPool) {
     let (client, mut subscriber) = app(&pool).await;
     let application = create_application(&client).await;
@@ -556,9 +591,12 @@ async fn changing_routes_refuse_cross_site_and_forms(pool: PgPool) {
     let tidy = format!("/applications/{application}/tidy");
     let approve = format!("/pending-actions/{action}/approve");
     let reject = format!("/pending-actions/{action}/reject");
+    let (_, _) = parked(&client, &mut subscriber, application, 0.3).await;
+    let review_item = get(&client, "/review-items").await[0]["id"].clone();
+    let dismiss = format!("/review-items/{review_item}/dismiss");
     let json_body = json!({"note": "n", "message": "m"}).to_string();
 
-    for path in [&approve, &reject, &undo, &tidy] {
+    for path in [&approve, &reject, &undo, &tidy, &dismiss] {
         let response = client
             .post(path.clone())
             .header(host())
@@ -600,7 +638,10 @@ async fn changing_routes_refuse_cross_site_and_forms(pool: PgPool) {
     assert_eq!(pending[0]["status"], "pending", "nothing was decided");
     let after = get(&client, &format!("/actions?run_id={run}")).await;
     assert_eq!(after, logged, "nothing was undone");
-    assert_eq!(run_count(&pool).await, 1, "no run was started");
+    assert_eq!(run_count(&pool).await, 2, "no run was started");
+    let items = get(&client, "/review-items").await;
+    assert_eq!(items[0]["id"], review_item);
+    assert_eq!(items[0]["status"], "pending", "nothing was dismissed");
 }
 
 /// An `external` tool that counts its handler runs. With `hold`, the handler waits for
