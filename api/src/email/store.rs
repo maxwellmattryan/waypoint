@@ -1,5 +1,5 @@
-//! Storing emails: [`ingest`] (parse, normalize, score, thread and upsert one message),
-//! [`list`] and [`known_companies`].
+//! Storing emails: [`ingest`] (parse, normalize, score, thread and upsert one message, and
+//! queue its classification), [`list`] and [`known_companies`].
 
 use std::fmt;
 
@@ -12,6 +12,10 @@ use super::mime::{self, ParseError};
 use super::normalize::{self, NORMALIZER_VERSION};
 use super::thread;
 use super::{Ats, Source, VerdictKind};
+use crate::events::{Event, EventBus};
+use crate::jobs::Wake;
+use crate::runs::Run;
+use crate::workflows::classify_email::{self, KeyInput};
 
 /// One raw message to store, with where it came from.
 #[derive(Debug, Clone)]
@@ -34,6 +38,8 @@ pub struct Ingested {
     /// `false` when the `(source, provider_message_id)` row already existed and was updated.
     pub inserted: bool,
     pub verdict: VerdictKind,
+    /// The `classify_email` run this ingest queued, if any.
+    pub classify_run_id: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -75,14 +81,46 @@ pub struct EmailSummary {
 
 /// Parses, normalizes and scores `new` (outside the transaction), then in one transaction:
 /// takes the thread advisory lock, keeps the existing row's thread or assigns one,
-/// upserts the row on `(source, provider_message_id)` and moves the thread's
-/// `last_message_at`. Ingesting the same message again updates the derived columns, `raw`
-/// and `labels` in place; `id`, `thread_id` and `created_at` stay.
+/// upserts the row on `(source, provider_message_id)`, moves the thread's
+/// `last_message_at` and, for a `candidate`, queues a `classify_email` run unless the
+/// email already has a classification row for its current input key (see
+/// [`classify_email::queue`]). Ingesting the same message again updates the derived
+/// columns, `raw` and `labels` in place; `id`, `thread_id` and `created_at` stay. After the
+/// commit a queued run is published and the worker woken.
 pub async fn ingest(
+    pool: &PgPool,
+    bus: &EventBus,
+    wake: &Wake,
+    new: NewEmail,
+    known: &KnownCompanies,
+) -> Result<Ingested, IngestError> {
+    let (ingested, run) = store(pool, new, known, Some(bus)).await?;
+    if let Some(run) = run {
+        bus.publish(Event::RunUpdated { run });
+        wake.0.notify_one();
+    }
+    Ok(ingested)
+}
+
+/// [`ingest`] without queuing a classification run, for eval setup: a seeded case must not
+/// start a second run that would be charged to it.
+pub(crate) async fn ingest_unqueued(
     pool: &PgPool,
     new: NewEmail,
     known: &KnownCompanies,
 ) -> Result<Ingested, IngestError> {
+    store(pool, new, known, None)
+        .await
+        .map(|(ingested, _)| ingested)
+}
+
+/// The work of [`ingest`]; queues a classification run only with `queue`.
+async fn store(
+    pool: &PgPool,
+    new: NewEmail,
+    known: &KnownCompanies,
+    queue: Option<&EventBus>,
+) -> Result<(Ingested, Option<Run>), IngestError> {
     let parsed = mime::parse(&new.raw).map_err(IngestError::Parse)?;
     let normalized = normalize::normalize(&parsed);
     let verdict = heuristics::score(&HeuristicInput::new(&parsed, &normalized), known);
@@ -173,14 +211,32 @@ pub async fn ingest(
     let inserted: bool = row.get("inserted");
 
     thread::touch(&mut tx, thread_id, parsed.sent_at).await?;
+
+    let mut run = None;
+    if let Some(bus) = queue
+        && verdict.verdict == VerdictKind::Candidate
+    {
+        let key = classify_email::input_key(&KeyInput {
+            subject: &parsed.subject,
+            from_address: parsed.from.as_ref().map(|a| a.address.as_str()),
+            from_name: parsed.from.as_ref().and_then(|a| a.name.as_deref()),
+            sent_at: parsed.sent_at,
+            body_text: &normalized.body_text,
+            signature: normalized.signature.as_deref(),
+            ats: verdict.ats.map(Ats::as_str),
+        });
+        run = classify_email::queue(&mut tx, bus, id, &key).await?;
+    }
     tx.commit().await?;
 
-    Ok(Ingested {
+    let ingested = Ingested {
         id,
         thread_id,
         inserted,
         verdict: verdict.verdict,
-    })
+        classify_run_id: run.as_ref().map(|run| run.id),
+    };
+    Ok((ingested, run))
 }
 
 /// Stored emails, newest first (by `sent_at`, then id), optionally only one verdict.

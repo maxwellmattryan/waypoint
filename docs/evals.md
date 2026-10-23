@@ -19,7 +19,7 @@ cargo run --bin eval -- <workflow> [--case <name>]... [--json] [--keep-db] [--da
 
 | Argument | Meaning |
 |---|---|
-| `<workflow>` | A registered eval suite: `tidy_application` or `memory_writer`. |
+| `<workflow>` | A registered eval suite: `tidy_application`, `memory_writer` or `classify_email`. |
 | `--case <name>` | Runs only the named case. Repeat it for several. A name the dataset doesn't have is a usage error. |
 | `--json` | Prints the report as JSON on stdout instead of the text table. |
 | `--keep-db` | Keeps the scratch database and prints its name on stderr, so you can inspect the runs. |
@@ -145,6 +145,43 @@ The `draft:` cases check that the `draft` step appends confirmed `answer` and `p
 `api/evals/memory_writer.json` covers the [memory writer](memory-writer.md). Every case but the last calls the real model once, so it costs a few cents per run. Setup takes `{"memories": [...], "signals": [...]}`, both optional. It first deletes every signal, evidence row and memory, then inserts the memories as the `tidy_application` set does (returning `memory_<name>`) and then each signal, `{"name", "kind", "subject", "drafted", "approved"?, "reason"?}`, returning its id as `signal_<name>`. Signals get run id 0 and their 1-based position as their pending action or review item id. An approval's `changes` is the diff from `drafted` to `approved`, and an approval without `approved` is an unedited one (`changes: []`). `approved` on anything but an approval, or `reason` on anything but a dismissal, is a setup error.
 
 The cases check that an edit from "happy to relocate to NYC" to "remote only" becomes one `preference`/`location` proposal citing that signal, that a dismissal reason ("I won't work in crypto") becomes one preference, that an unedited approval teaches nothing, that correcting "two weeks' notice" to "one month's notice" proposes a revision of the confirmed `notice_period` answer instead of a new memory, and that a run with no signals makes no call. A case whose proposal falls below the 0.8 confidence threshold goes to the review queue and so fails its `created` label; the pass rate isn't expected to be 100%.
+
+## The `classify_email` eval set
+
+`api/evals/classify_email.json` covers [classify and extract](email.md#classify-and-extract): 17 cases, one model call each. Setup takes `{"emails": ["<path relative to api/fixtures/>", ...]}`. It deletes every classification, email and thread, then ingests the files in order (`source = fixture`, the file stem as the provider id, no known companies) **without queuing a run**, and returns `email_id`, the last file's id. Each case's input is `{"email_id": "${email_id}"}`, so the case's own run is the only one, and it expects `status: succeeded`. An empty list, a path containing `..` or starting with `/`, or a file that is missing or doesn't parse is a setup error.
+
+There is one case per candidate fixture in `api/fixtures/emails/` (15). A reply is seeded after the message it answers, so the prompt's thread block has it: `recruiter-outreach.eml` comes before `recruiter-outlook-reply.eml` and before `recruiter-reply-subject-only.eml`. Two synthetic eval-only files in `api/fixtures/classify/` cover the classes the corpus lacks: `offer.eml`, and `availability-pt.eml`, a recruiter proposing "Tue Oct 27 at 2pm PT or Tue Nov 3 at 2pm PT", which crosses the US DST change. They sit outside `api/fixtures/emails/`, so the dev import and its manifest don't change.
+
+Every case labels `output.class`:
+
+| Fixture | Class |
+|---|---|
+| `ashby-rejection` | rejection |
+| `greenhouse-application-received`, `greenhouse-company-domain`, `greenhouse-second-company`, `workday-application-update`, `workday-candidate-home`, `recruiter-bulk-tool`, `forwarded-thread`, `recruiter-reply-subject-only` | other |
+| `interview-invite-ics`, `lever-interview-invite`, `gmail-reply-quoted` | interview_invite |
+| `recruiter-outreach`, `recruiter-outlook-reply`, `rfc2047-latin1`, `availability-pt` | availability_request |
+| `offer` | offer |
+
+`forwarded-thread` is a friend passing along a recruiter's note to someone else, which is outreach, not a request for the user's availability. `recruiter-reply-subject-only` is the user's own reply, which asks nothing and confirms no slot. `recruiter-outlook-reply` asks for a phone screen "next Tuesday or Wednesday".
+
+`output.company` is labelled only where the email names the company in exactly one form (not `gmail-reply-quoted` or `rfc2047-latin1`). `output.proposed_times` (its length and each `start_utc`) is labelled for `interview-invite-ics` (`2026-09-22T15:00:00Z`), `availability-pt` (`2026-10-27T21:00:00Z` and `2026-11-03T22:00:00Z`) and `gmail-reply-quoted` (one time with `start_utc: null`, since no zone is stated). Role, stage and interviewer are free-form and unlabelled.
+
+**Classification accuracy** is the share of cases with no failure starting `output.class`:
+
+```sh
+cargo run --bin eval -- classify_email --json \
+  | jq '([.cases[] | select(all(.failures[]; startswith("output.class") | not))] | length) / .totals.cases'
+```
+
+A case whose run fails has a `status` failure but no `output.class` one, so check the pass rate too. Tokens per email are the totals' `input_tokens_per_run` and `output_tokens_per_run`, since each run reads one email.
+
+**Fixture results (synthetic corpus, not your inbox)**, recorded on 2026-10-23 with `haiku`:
+
+| Pass rate | Classification accuracy | Input tokens per email | Output tokens per email | Cost per email |
+|---|---|---|---|---|
+| 17/17 (100%) | 17/17 (100%) | 5,172 | 447 | $0.0010 |
+
+These files were written to exercise each class, so the numbers say how the prompt does on them, not how often it is right on real mail. Real-inbox numbers need your own labelled emails.
 
 ## Adding a suite
 

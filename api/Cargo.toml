@@ -9,6 +9,8 @@ default-run = "waypoint-api"
 base64 = "0.22"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+# Resolves the IANA time zone names a classified recruiter email proposes times in.
+chrono-tz = "0.10"
 csv = "1"
 dotenvy = "0.15"
 getrandom = "0.3"
