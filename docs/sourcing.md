@@ -87,6 +87,8 @@ The section reloads when a `run.updated` event arrives for a `score_fit` run of 
 
 The [`score_fit` eval set](evals.md#the-score_fit-eval-set) measures the scores.
 
+[Goals](goals.md#execution) reuse both halves of this page: a plan's `source` step queues `source_board` jobs through `sourcing::request` (so it shares a fetch already queued or running), and its `score` step queues `score_fit` runs through `score_fit::request`, which `POST /postings/{id}/fit` also uses, reusing a posting's applied score instead of rescoring it.
+
 ## The job
 
 A `source_board` job's payload is `{"source": …, "board": …}`. Each attempt:

@@ -1707,6 +1707,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             dropped: components["schemas"]["PlanDropped"];
+            failed_step: null | components["schemas"]["PlanStepKind"];
             /** Format: int64 */
             goal_id: number;
             /** Format: int64 */

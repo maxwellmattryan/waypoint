@@ -25,6 +25,7 @@ import {
 } from './api';
 import { describeEmailReview } from './email';
 import { describeFitReview } from './fit';
+import { describePlanReview } from './plan';
 
 /** Whether the list has loaded. `loading` shows the skeleton; a silent refresh never does. */
 export type ListState = { kind: 'loading' } | { kind: 'error' } | { kind: 'loaded' };
@@ -108,6 +109,11 @@ const APPLY_CONFLICT = {
 const FIT_APPLY_CONFLICT = {
 	title: "Couldn't apply",
 	description: 'This score is no longer waiting for review. Nothing was changed.'
+};
+
+const PLAN_APPLY_CONFLICT = {
+	title: "Couldn't apply",
+	description: 'This plan is no longer the one waiting for review. Nothing was changed.'
 };
 
 type Notice = { title: string; description: string };
@@ -267,9 +273,9 @@ export class QueueStore {
 
 	/**
 	 * Applies an email review item (`email.match` or `email.new_application`) as the user's own
-	 * change, or makes a `score_fit.score` item's score its posting's current one. A conflict
-	 * (the application changed or is gone, or the score is no longer in review) keeps the item
-	 * and says so.
+	 * change, makes a `score_fit.score` item's score its posting's current one, or makes a
+	 * `plan_goal.plan` item's plan ready to run. A conflict (the application changed or is gone,
+	 * or the score or plan is no longer in review) keeps the item and says so.
 	 */
 	accept(id: number): Promise<Result<ReviewItem>> {
 		const key = `review:${id}`;
@@ -277,17 +283,19 @@ export class QueueStore {
 		const item = entry?.kind === 'review' ? entry.item : null;
 		const summary = item ? describeEmailReview(item) : null;
 		const fit = item ? describeFitReview(item) : null;
+		const plan = item ? describePlanReview(item) : null;
 		const { client, accept } = this.#deps;
 		return this.#decide(
 			key,
 			() => accept(client, id),
 			() => {
 				if (fit) toast.success(`Applied fit score for ${fit.company}`);
+				else if (plan) toast.success('Plan ready: open the goal to run it');
 				else if (!summary) toast.success('Applied');
 				else if (summary.kind === 'new_application') toast.success(`Added ${summary.company}`);
 				else toast.success(`Applied to ${summary.company}`);
 			},
-			fit ? FIT_APPLY_CONFLICT : APPLY_CONFLICT
+			fit ? FIT_APPLY_CONFLICT : plan ? PLAN_APPLY_CONFLICT : APPLY_CONFLICT
 		);
 	}
 

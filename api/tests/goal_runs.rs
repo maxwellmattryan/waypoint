@@ -285,6 +285,7 @@ async fn failed_step_replans_and_keeps_finished_steps(pool: PgPool) {
     let plan = &done["plan"];
     assert_eq!(plan["version"], 2);
     assert_eq!(plan["trigger"], "step_failed");
+    assert_eq!(plan["failed_step"], "shortlist");
     assert_eq!(plan["min_score"], 40);
     let planner: Vec<Value> =
         sqlx::query_scalar("SELECT input FROM agent_runs WHERE workflow = 'plan_goal'")

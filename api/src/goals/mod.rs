@@ -396,6 +396,9 @@ pub struct Plan {
     pub claude_call_id: Option<i64>,
     /// The planner call's reported cost in US dollars; 0 for user edits.
     pub cost_usd: f64,
+    /// For a `step_failed` version, the step whose failure asked for it.
+    #[schema(required = true)]
+    pub failed_step: Option<PlanStepKind>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// The five steps in order.

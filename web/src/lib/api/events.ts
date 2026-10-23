@@ -21,6 +21,7 @@ export const EVENT_TYPES = [
 	'application.deleted',
 	'run.updated',
 	'kill_switch.updated',
+	'goal.updated',
 	'data.deleted'
 ] as const satisfies readonly Event['type'][];
 

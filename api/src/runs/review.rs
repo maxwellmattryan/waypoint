@@ -4,8 +4,9 @@
 //! [`crate::memory_signals`]). Accepting one applies its result, per workflow: today the
 //! `email.match` and `email.new_application` kinds ([`crate::workflows::match_email`]) and
 //! the `score_fit.score` kind ([`crate::workflows::score_fit`]), whose score becomes the
-//! posting's current one. Dismissing a `score_fit.score` item also marks its score
-//! `dismissed`.
+//! posting's current one, and the `plan_goal.plan` kind ([`crate::workflows::plan_goal`]),
+//! whose plan becomes `ready`. Dismissing a `score_fit.score` item also marks its score
+//! `dismissed`, and a `plan_goal.plan` item its plan.
 
 use chrono::{DateTime, Utc};
 use rocket::State;

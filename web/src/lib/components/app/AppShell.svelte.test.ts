@@ -14,6 +14,7 @@ function renderAt(pathname: string) {
 	return {
 		dashboard: screen.getByRole('link', { name: 'Dashboard' }),
 		applications: screen.getByRole('link', { name: 'Applications' }),
+		goals: screen.getByRole('link', { name: 'Goals' }),
 		postings: screen.getByRole('link', { name: 'Postings' }),
 		resumes: screen.getByRole('link', { name: 'Resumes' }),
 		memory: screen.getByRole('link', { name: 'Memory' }),
@@ -27,6 +28,8 @@ describe('AppShell', () => {
 		['/', 'dashboard'],
 		['/applications', 'applications'],
 		['/applications/42', 'applications'],
+		['/goals', 'goals'],
+		['/goals/3', 'goals'],
 		['/postings', 'postings'],
 		['/postings/9', 'postings'],
 		['/resumes', 'resumes'],
@@ -42,6 +45,10 @@ describe('AppShell', () => {
 		expect(links.dashboard).toHaveAttribute('href', '/');
 		expect(links.applications).toHaveAttribute('href', '/applications');
 		expect(links.resumes).toHaveAttribute('href', '/resumes');
+		expect(links.nav).toContainElement(links.goals);
+		expect(links.goals).toHaveAttribute('href', '/goals');
+		// Goals comes right before Postings.
+		expect(links.goals.nextElementSibling).toBe(links.postings);
 		expect(links.nav).toContainElement(links.postings);
 		expect(links.postings).toHaveAttribute('href', '/postings');
 		expect(links.nav).toContainElement(links.review);
@@ -52,6 +59,7 @@ describe('AppShell', () => {
 		for (const name of [
 			'dashboard',
 			'applications',
+			'goals',
 			'postings',
 			'resumes',
 			'memory',
@@ -65,6 +73,11 @@ describe('AppShell', () => {
 	it('does not treat a path that only starts with the same letters as Applications', () => {
 		const links = renderAt('/applicationsx');
 		expect(links.applications).not.toHaveAttribute('aria-current');
+	});
+
+	it('does not treat a path that only starts with the same letters as Goals', () => {
+		const links = renderAt('/goalsx');
+		expect(links.goals).not.toHaveAttribute('aria-current');
 	});
 
 	it('does not treat a path that only starts with the same letters as Postings', () => {

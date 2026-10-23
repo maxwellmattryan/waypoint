@@ -27,6 +27,7 @@
 
 	const dashboardHref = resolve('/');
 	const applicationsHref = resolve('/applications');
+	const goalsHref = resolve('/goals');
 	const postingsHref = resolve('/postings');
 	const resumesHref = resolve('/resumes');
 	const memoriesHref = resolve('/memories');
@@ -49,6 +50,7 @@
 			>
 				<NavLink href={dashboardHref} current={path === dashboardHref}>Dashboard</NavLink>
 				<NavLink href={applicationsHref} current={inSection(applicationsHref)}>Applications</NavLink>
+				<NavLink href={goalsHref} current={inSection(goalsHref)}>Goals</NavLink>
 				<NavLink href={postingsHref} current={inSection(postingsHref)}>Postings</NavLink>
 				<NavLink href={resumesHref} current={inSection(resumesHref)}>Resumes</NavLink>
 				<NavLink href={memoriesHref} current={inSection(memoriesHref)}>Memory</NavLink>

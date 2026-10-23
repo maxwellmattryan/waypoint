@@ -5763,6 +5763,7 @@
           "review_item_id",
           "claude_call_id",
           "cost_usd",
+          "failed_step",
           "created_at",
           "updated_at",
           "steps",
@@ -5804,6 +5805,17 @@
           },
           "dropped": {
             "$ref": "#/components/schemas/PlanDropped"
+          },
+          "failed_step": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlanStepKind",
+                "description": "For a `step_failed` version, the step whose failure asked for it."
+              }
+            ]
           },
           "goal_id": {
             "type": "integer",

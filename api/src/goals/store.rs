@@ -345,6 +345,16 @@ pub async fn plan(pool: &PgPool, id: i64) -> sqlx::Result<Option<Plan>> {
     .await?;
     let config = row.config.0;
     let known = known_boards(pool, &pairs(&config.companies)).await?;
+    let failed_step: Option<String> = match (row.trigger, row.run_id) {
+        (PlanTrigger::StepFailed, Some(run_id)) => {
+            sqlx::query_scalar("SELECT input ->> 'step' FROM agent_runs WHERE id = $1")
+                .bind(run_id)
+                .fetch_optional(pool)
+                .await?
+                .flatten()
+        }
+        _ => None,
+    };
     Ok(Some(Plan {
         id: row.id,
         goal_id: row.goal_id,
@@ -367,6 +377,7 @@ pub async fn plan(pool: &PgPool, id: i64) -> sqlx::Result<Option<Plan>> {
         review_item_id: row.review_item_id,
         claude_call_id: row.claude_call_id,
         cost_usd: row.cost_usd,
+        failed_step: failed_step.and_then(|step| PlanStepKind::try_from(step).ok()),
         created_at: row.created_at,
         updated_at: row.updated_at,
         steps,

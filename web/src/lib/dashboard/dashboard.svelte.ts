@@ -230,6 +230,7 @@ export class Dashboard {
 			case 'application.updated':
 			case 'application.deleted':
 			case 'run.updated':
+			case 'goal.updated':
 				return;
 			default:
 				if (event.job.kind === GMAIL_SYNC) void this.#loadGmailSync();

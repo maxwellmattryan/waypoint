@@ -467,8 +467,11 @@ pub fn prompt(input: &PromptInput<'_>) -> String {
          {ask}\
          - kind `plan`: set `questions` to null and fill every field of `plan`:\n\
          \x20 - summary: one line, at most {MAX_SUMMARY} characters.\n\
-         \x20 - confidence: how sure you are the plan matches the goal, from 0 to 1. Lower \
-         it when you had to guess companies, boards or what the job seeker wants.\n\
+         \x20 - confidence: how sure you are the plan carries out the goal as stated, from 0 \
+         to 1. A plan on known boards that follows the goal, the answers, the memories and \
+         any requested change is 0.8 or more. Go below 0.8 only when you had to guess what \
+         the job seeker wants or used boards you aren't sure exist. Below 0.8 the plan waits \
+         for the job seeker's review.\n\
          \x20 - companies: 1 to {MAX_COMPANIES}, each with its name, its board's source \
          (`greenhouse`, `lever` or `ashby`), the board slug as in its URL \
          (boards.greenhouse.io/<board>, jobs.lever.co/<board>, jobs.ashbyhq.com/<board>; \

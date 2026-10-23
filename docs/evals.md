@@ -19,7 +19,7 @@ cargo run --bin eval -- <workflow> [--case <name>]... [--json] [--keep-db] [--da
 
 | Argument | Meaning |
 |---|---|
-| `<workflow>` | A registered eval suite: `tidy_application`, `memory_writer`, `classify_email`, `match_email`, `propose_interview` or `score_fit`. |
+| `<workflow>` | A registered eval suite: `tidy_application`, `memory_writer`, `classify_email`, `match_email`, `propose_interview`, `score_fit` or `plan_goal`. |
 | `--case <name>` | Runs only the named case. Repeat it for several. A name the dataset doesn't have is a usage error. |
 | `--json` | Prints the report as JSON on stdout instead of the text table. |
 | `--keep-db` | Keeps the scratch database and prints its name on stderr, so you can inspect the runs. |
@@ -341,6 +341,40 @@ The `score_fit_dataset_parses` unit test checks that mix; each mismatch case's `
 | Pass rate | Model calls | Cost | Cost per run |
 |---|---|---|---|
 | 8/8 (100%) | 7 | $0.1354 | $0.0169 |
+
+## The `plan_goal` eval set
+
+`api/evals/plan_goal.json` covers the [goal planner](goals.md#the-planner): 6 cases, each one `sonnet` call. Setup takes:
+
+```json
+{"goal": "…",
+ "boards": [{"source", "board", "company", "title"?}],
+ "memories": [{"name", "kind", "topic", "content", "tags"?, "status"?}],
+ "questions"?: [{"question", "answer"}],
+ "replan"?: {"plan": {"summary", "companies", "title_keywords", "locations"?, "remote_only"?, "max_to_score", "shortlist_size", "min_score", "prep_notes"?},
+             "step"?: "<kind>", "error"?: "…", "instruction"?: "…"}}
+```
+
+with unknown fields refused. It deletes every goal, fit score and posting, inserts one live posting per board (so each board is known and verified), the goal (`planning`), its answered questions, and for a replan a `ready` current plan (validated like `PUT /goals/{id}/plan`) whose `step` is `failed` with `error` and whose earlier steps `succeeded`. It stores exactly the case's memories. Variables: `goal_id`, `plan_id` (replans only) and `memory_<name>`. The input is `{"goal_id", "trigger": "goal"}`, or for a replan `{"goal_id", "trigger": "step_failed", "plan_id", "step"}` or `{"goal_id", "trigger": "user_replan", "plan_id", "instruction"}`.
+
+| Case | Expects |
+|---|---|
+| "find me a new job", nothing known | `kind: questions` |
+| A specific goal with three known boards | `kind: plan`, `status: ready`, `unverified: 0`, no review item |
+| The vague goal with its questions already answered | `kind: plan` (questions aren't allowed a second time) |
+| A remote-only preference | `kind: plan`; its `note` says `remote_only` should be true, which the output doesn't carry, so check it with `--keep-db` |
+| A `step_failed` replan after the unseeded board `greenhouse/ghost` failed | `kind: plan`, `unverified: 0`: every other board is seeded, so this proves `ghost` was removed |
+| A `user_replan` with an instruction | `kind: plan`, `status: ready` |
+
+The `plan_goal_dataset_parses` unit test checks the 6 cases and their kinds.
+
+**Results**, recorded on 2026-10-23:
+
+| Pass rate | Model calls | Cost | Cost per run |
+|---|---|---|---|
+| 6/6 (100%) | 6 | $0.1130 | $0.0188 |
+
+A first run passed 4/6: the two plans that should have been `ready` came back with confidence 0.6 and went to review. The prompt now says what a confident plan is (known boards, following the goal, the answers, the memories and any requested change) and that below 0.8 a plan waits for review; the rerun above passed every case.
 
 ## Labelling emails
 

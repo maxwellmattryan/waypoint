@@ -182,6 +182,24 @@ function fitScore(id: number): ReviewItem {
 	});
 }
 
+/** A `plan_goal.plan` review item for goal 3. */
+function goalPlan(id: number): ReviewItem {
+	return review(id, {
+		kind: 'plan_goal.plan',
+		payload: {
+			goal_id: 3,
+			plan_id: 12,
+			version: 1,
+			goal: 'Frontend roles',
+			summary: 'One company',
+			companies: [
+				{ name: 'Acme', source: 'lever', board: 'acme', reason: null, verified: false }
+			],
+			dropped: { companies: [], keywords: [], locations: [] }
+		}
+	});
+}
+
 const keys = (store: QueueStore) => store.items.map(queueKey);
 
 describe('QueueStore', () => {
@@ -315,6 +333,16 @@ describe('QueueStore', () => {
 		expect(accept).toHaveBeenCalledWith(client, 5);
 		expect(store.items).toEqual([]);
 		expect(toasts()).toEqual([['success', 'Applied fit score for Acme', undefined]]);
+	});
+
+	it('applies a plan review item and toasts', async () => {
+		const { store, accept } = setupQueue([ok([])], [ok([goalPlan(6)])]);
+		await store.load();
+		accept.mockResolvedValueOnce(ok({ ...goalPlan(6), status: 'accepted' }));
+		await store.accept(6);
+		expect(accept).toHaveBeenCalledWith(client, 6);
+		expect(store.items).toEqual([]);
+		expect(toasts()).toEqual([['success', 'Plan ready: open the goal to run it', undefined]]);
 	});
 
 	it('keeps the item when apply conflicts', async () => {
