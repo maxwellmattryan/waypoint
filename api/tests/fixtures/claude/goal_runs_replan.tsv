@@ -1,0 +1,4 @@
+# The `route_goal_runs_replan` mode of fake-claude.sh (api/tests/goal_runs.rs): the planner
+# lowers min_score to 40, and every fit score is 55.
+You plan a job search	plan_goal_min40.jsonl
+<posting>	score_fit_55.jsonl

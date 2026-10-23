@@ -348,6 +348,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/goals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /goals`: goals newest first. */
+        get: operations["list_goals"];
+        put?: never;
+        /** `POST /goals`: stores a goal and queues its planner. */
+        post: operations["create_goal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /goals/{id}`: a goal with its questions, current plan, versions and latest run. */
+        get: operations["get_goal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{id}/answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /goals/{id}/answers`: answers the open clarifying questions and plans again. */
+        post: operations["answer_goal_questions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** `PUT /goals/{id}/plan`: replaces the plan with the user's own, as a new version. */
+        put: operations["edit_goal_plan"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{id}/replan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /goals/{id}/replan`: asks the planner for a new version. */
+        post: operations["replan_goal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /goals/{id}/run`: runs the current plan from its first unfinished step. */
+        post: operations["run_goal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -988,6 +1091,14 @@ export interface components {
              */
             reason?: string | null;
         };
+        /** @description A company the planner gave that validation dropped. */
+        DroppedCompany: {
+            board: string;
+            name: string;
+            source: string;
+            /** @description The rule it broke. */
+            why: string;
+        };
         /**
          * @description The kinds of entry the user writes directly.
          * @enum {string}
@@ -1055,6 +1166,10 @@ export interface components {
             kill_switch: components["schemas"]["KillSwitch"];
             /** @enum {string} */
             type: "kill_switch.updated";
+        } | {
+            goal: components["schemas"]["Goal"];
+            /** @enum {string} */
+            type: "goal.updated";
         } | {
             /** @enum {string} */
             type: "data.deleted";
@@ -1181,6 +1296,90 @@ export interface components {
             /** Format: date-time */
             run_started_at: string | null;
         };
+        /** @description One `goals` row. */
+        Goal: {
+            /**
+             * Format: int32
+             * @description Automatic replans since the last Run click.
+             */
+            auto_replans: number;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description The newest plan version.
+             */
+            current_plan_id: number | null;
+            /** @description Why the goal failed; `null` unless `failed`. */
+            error: string | null;
+            /** Format: int64 */
+            id: number;
+            status: components["schemas"]["GoalStatus"];
+            /** @description The goal in the user's words. */
+            text: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description One answer in `POST /goals/{id}/answers`. */
+        GoalAnswer: {
+            /** @description Trimmed, at most 1000 characters; blank or omitted means skipped. */
+            answer?: string | null;
+            /**
+             * Format: int64
+             * @description One of the goal's open questions.
+             */
+            question_id: number;
+        };
+        /** @description The `POST /goals/{id}/answers` body. */
+        GoalAnswers: {
+            answers?: components["schemas"]["GoalAnswer"][];
+        };
+        /** @description The 409 body of a goal route. */
+        GoalConflict: {
+            /** @description Why nothing changed. */
+            message: string;
+        };
+        /** @description The `GET /goals/{id}` body. */
+        GoalDetail: components["schemas"]["Goal"] & {
+            plan: null | components["schemas"]["Plan"];
+            /** @description Every clarifying question, by ordinal. */
+            questions: components["schemas"]["GoalQuestion"][];
+            run: null | components["schemas"]["GoalRun"];
+            /** @description Every version, newest first. */
+            versions: components["schemas"]["PlanVersion"][];
+        };
+        /** @description One clarifying question. */
+        GoalQuestion: {
+            /** @description The user's answer; `null` when skipped or not answered yet. */
+            answer: string | null;
+            /**
+             * Format: date-time
+             * @description When the answers were submitted; `null` while the question is open.
+             */
+            answered_at: string | null;
+            /** Format: int64 */
+            id: number;
+            /**
+             * Format: int32
+             * @description Its position, from 1.
+             */
+            ordinal: number;
+            question: string;
+        };
+        /** @description A goal's latest `plan_goal` run. */
+        GoalRun: {
+            /** Format: date-time */
+            created_at: string;
+            error: string | null;
+            /** Format: int64 */
+            id: number;
+            status: components["schemas"]["RunStatus"];
+        };
+        /**
+         * @description Where a goal is.
+         * @enum {string}
+         */
+        GoalStatus: "planning" | "needs_answers" | "planned" | "running" | "completed" | "failed";
         /** @description The `DELETE /auth/google` body. */
         GoogleDisconnect: {
             /**
@@ -1433,6 +1632,11 @@ export interface components {
             body: string;
             kind: components["schemas"]["EntryKind"];
         };
+        /** @description The `POST /goals` body. */
+        NewGoal: {
+            /** @description 1–1000 characters after trimming. Required. */
+            text: string | null;
+        };
         /** @description The `POST /applications/{id}/stages` body. */
         NewStage: {
             /** @description Required; trimmed, at most 200 characters. */
@@ -1484,6 +1688,188 @@ export interface components {
          * @enum {string}
          */
         Permission: "read" | "write" | "external";
+        /** @description One plan version. */
+        Plan: {
+            author: components["schemas"]["PlanAuthor"];
+            /** Format: int64 */
+            claude_call_id: number | null;
+            companies: components["schemas"]["PlanCompany"][];
+            /**
+             * Format: double
+             * @description The planner's confidence; `null` for user edits.
+             */
+            confidence: number | null;
+            /**
+             * Format: double
+             * @description The planner call's reported cost in US dollars; 0 for user edits.
+             */
+            cost_usd: number;
+            /** Format: date-time */
+            created_at: string;
+            dropped: components["schemas"]["PlanDropped"];
+            /** Format: int64 */
+            goal_id: number;
+            /** Format: int64 */
+            id: number;
+            locations: string[];
+            /** Format: int32 */
+            max_to_score: number;
+            /** Format: int32 */
+            min_score: number;
+            prep_notes: string;
+            remote_only: boolean;
+            /** Format: int64 */
+            review_item_id: number | null;
+            /**
+             * Format: int64
+             * @description The `plan_goal` run that wrote it; `null` for user edits.
+             */
+            run_id: number | null;
+            /** @description The shortlist step's postings, by rank. */
+            shortlist: components["schemas"]["ShortlistEntry"][];
+            /** Format: int32 */
+            shortlist_size: number;
+            status: components["schemas"]["PlanStatus"];
+            /** @description The five steps in order. */
+            steps: components["schemas"]["PlanStep"][];
+            summary: string;
+            title_keywords: string[];
+            trigger: components["schemas"]["PlanTrigger"];
+            /** Format: date-time */
+            updated_at: string;
+            /**
+             * Format: int32
+             * @description 1, 2, …
+             */
+            version: number;
+        };
+        /**
+         * @description Who wrote a plan version.
+         * @enum {string}
+         */
+        PlanAuthor: "planner" | "user";
+        /** @description A target company as `GET /goals/{id}` shows it. */
+        PlanCompany: {
+            board: string;
+            name: string;
+            reason: string | null;
+            source: components["schemas"]["Source"];
+            /** @description Whether Waypoint has sourced any posting from this board, computed when read. */
+            verified: boolean;
+        };
+        /** @description One company in `PUT /goals/{id}/plan`. */
+        PlanCompanyInput: {
+            /** @description 1–100 letters, digits, hyphens or underscores, trimmed. Required. */
+            board: string | null;
+            /** @description 1–100 characters. Required. */
+            name: string | null;
+            /** @description At most 300 characters are kept. */
+            reason?: string | null;
+            /** @description `greenhouse`, `lever` or `ashby`. Required. */
+            source: string | null;
+        };
+        /** @description What validation dropped from the planner's answer; empty for user edits. */
+        PlanDropped: {
+            companies?: components["schemas"]["DroppedCompany"][];
+            keywords?: string[];
+            locations?: string[];
+        };
+        /** @description The `PUT /goals/{id}/plan` body: the whole plan, replacing the current one. */
+        PlanEdit: {
+            /**
+             * Format: int64
+             * @description The current plan's id, as the editor loaded it. Required.
+             */
+            base_plan_id: number | null;
+            companies?: components["schemas"]["PlanCompanyInput"][];
+            locations?: string[];
+            /**
+             * Format: int64
+             * @description 1–50. Required.
+             */
+            max_to_score: number | null;
+            /**
+             * Format: int64
+             * @description 0–100. Required.
+             */
+            min_score: number | null;
+            /** @description At most 1000 characters. */
+            prep_notes?: string | null;
+            remote_only?: boolean;
+            /**
+             * Format: int64
+             * @description 1–20. Required.
+             */
+            shortlist_size: number | null;
+            title_keywords?: string[];
+        };
+        /**
+         * @description Whether a plan version may run.
+         * @enum {string}
+         */
+        PlanStatus: "ready" | "in_review" | "dismissed";
+        /** @description One `plan_steps` row. */
+        PlanStep: {
+            /** @description The step's inputs: cumulative, so a change to an earlier step's inputs changes it. */
+            config: unknown;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** Format: int64 */
+            id: number;
+            /**
+             * Format: int64
+             * @description The step of an earlier version this one was copied from.
+             */
+            kept_from: number | null;
+            /**
+             * Format: int32
+             * @description The version of `kept_from`'s plan.
+             */
+            kept_from_version: number | null;
+            kind: components["schemas"]["PlanStepKind"];
+            /** @description Why it failed; `null` unless `failed`. */
+            last_error: string | null;
+            /**
+             * Format: int32
+             * @description Its position, from 0.
+             */
+            ordinal: number;
+            /** @description What the step found; `null` until it finishes. */
+            output: unknown;
+            /** Format: date-time */
+            started_at: string | null;
+            status: components["schemas"]["PlanStepStatus"];
+        };
+        /**
+         * @description What a plan step does. Every plan has all five, in this order.
+         * @enum {string}
+         */
+        PlanStepKind: "target_companies" | "source" | "score" | "shortlist" | "prep";
+        /**
+         * @description Where a plan step is.
+         * @enum {string}
+         */
+        PlanStepStatus: "pending" | "running" | "succeeded" | "failed" | "skipped";
+        /**
+         * @description Why a plan version was written.
+         * @enum {string}
+         */
+        PlanTrigger: "goal" | "step_failed" | "user_replan" | "user_edit";
+        /** @description One version in a goal's history. */
+        PlanVersion: {
+            author: components["schemas"]["PlanAuthor"];
+            /** Format: double */
+            cost_usd: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            status: components["schemas"]["PlanStatus"];
+            summary: string;
+            trigger: components["schemas"]["PlanTrigger"];
+            /** Format: int32 */
+            version: number;
+        };
         /** @description The `GET /postings/{id}/fit` body. */
         PostingFit: {
             current: null | components["schemas"]["FitScore"];
@@ -1522,6 +1908,11 @@ export interface components {
              * @description Entries missing a required value.
              */
             skipped: number;
+        };
+        /** @description The `POST /goals/{id}/replan` body: `{}`, or `{"instruction": "…"}`. */
+        ReplanGoal: {
+            /** @description What to change; trimmed, at most 1000 characters, blank means none. */
+            instruction?: string | null;
         };
         /** @description The `PUT /applications/{id}/resume` body. `null` clears the link. */
         ResumeLink: {
@@ -1628,6 +2019,8 @@ export interface components {
             memories: components["schemas"]["RunMemory"][];
             steps: components["schemas"]["RunStepDetail"][];
         };
+        /** @description The `POST /goals/{id}/run` body: `{}`. */
+        RunGoal: Record<string, never>;
         /**
          * @description One `run_memories` row: a memory a step retrieved, with a snapshot of it at retrieval
          *     time.
@@ -1726,6 +2119,24 @@ export interface components {
         /** @description The `PUT /kill-switch` body. */
         SetKillSwitch: {
             paused: boolean;
+        };
+        /** @description One shortlisted posting. */
+        ShortlistEntry: {
+            band: components["schemas"]["FitBand"];
+            company: string;
+            /** Format: int64 */
+            posting_id: number;
+            /**
+             * Format: int32
+             * @description 1-based.
+             */
+            rank: number;
+            /**
+             * Format: int32
+             * @description The fit score it was shortlisted with.
+             */
+            score: number;
+            title: string;
         };
         /** @description One entry of an approval's diff. */
         SignalChange: {
@@ -3344,6 +3755,466 @@ export interface operations {
                 };
             };
             /** @description The sync could not be queued */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_goals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to 200 goals, `id` descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Goal"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The goals could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_goal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewGoal"];
+            };
+        };
+        responses: {
+            /** @description The goal, `planning`, with its queued `plan_goal` run */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalDetail"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `text` is blank or longer than 1000 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The goal could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_goal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The goal's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The goal, its questions by ordinal, its current plan with steps and shortlist, its versions newest first and its latest `plan_goal` run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalDetail"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No goal has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The goal could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    answer_goal_questions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The goal's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoalAnswers"];
+            };
+        };
+        responses: {
+            /** @description The answers are stored, every open question is answered (blank ones skipped) and a `plan_goal` run is queued; the goal is `planning` */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalDetail"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No goal has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The goal isn't waiting for answers; nothing changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalConflict"];
+                };
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An answer is longer than 1000 characters, or names a question that isn't one of the goal's open ones */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The answers could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    edit_goal_plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The goal's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanEdit"];
+            };
+        };
+        responses: {
+            /** @description The goal with its new plan version (`author: user`, `trigger: user_edit`, `ready`), finished steps kept where their inputs are unchanged; or unchanged when the body equals the current plan. A `running` goal goes on from the first changed step; a `completed` or `failed` one becomes `planned` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalDetail"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No goal has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The goal is `planning` or `needs_answers`, has no plan, or `base_plan_id` isn't its current plan; nothing changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalConflict"];
+                };
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A field breaks the plan limits; every failing field is named, e.g. `companies[1].board` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The plan could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    replan_goal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The goal's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplanGoal"];
+            };
+        };
+        responses: {
+            /** @description A `plan_goal` run is queued (`user_replan` with the current plan, or `goal` when there is none) and the goal is `planning` */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalDetail"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No goal has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The goal isn't `planned`, `completed` or `failed`; nothing changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalConflict"];
+                };
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `instruction` is longer than 1000 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The replan could not be queued */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    run_goal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The goal's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunGoal"];
+            };
+        };
+        responses: {
+            /** @description The goal is `running`: failed steps are `pending` again, the automatic replan count is 0 and a `plan_step` tick is queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalDetail"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No goal has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The goal isn't `planned` or `failed`, or its current plan isn't `ready`; nothing changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoalConflict"];
+                };
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run could not be started */
             500: {
                 headers: {
                     [name: string]: unknown;

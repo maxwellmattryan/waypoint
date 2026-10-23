@@ -22,6 +22,7 @@
 //! read a posting's scores live in [`crate::sourcing::postings`].
 
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -31,11 +32,13 @@ use sqlx::{PgPool, Postgres, Transaction};
 use super::{EvalMemory, seed_memories};
 use crate::claude::ClaudeRequest;
 use crate::evals::Suite;
+use crate::events::{Event, EventBus};
+use crate::jobs::Wake;
 use crate::memories::{Memory, MemoryKind, MemoryTopic};
 use crate::retrieval::{self, Query, Retrieved};
 use crate::runs::approvals::DecisionError;
 use crate::runs::review::ReviewItem;
-use crate::runs::{RUN_COLUMNS, Run, RunStatus, StepContext, StepError, Workflow};
+use crate::runs::{self, RUN_COLUMNS, Run, RunStatus, StepContext, StepError, Workflow};
 use crate::sourcing::postings::{self, JobPostingDetail};
 
 /// The workflow's name.
@@ -826,6 +829,43 @@ pub(crate) async fn active_run(
     .bind(posting_id)
     .fetch_optional(&mut **tx)
     .await
+}
+
+/// Queues a `score_fit` run for posting `posting_id` under the posting's row lock, or
+/// returns the one already waiting or running (`true`). `None` when the posting is gone.
+/// A new run is published and the worker woken after the commit.
+pub async fn request(
+    pool: &PgPool,
+    bus: &EventBus,
+    wake: &Wake,
+    posting_id: i64,
+) -> sqlx::Result<Option<(Run, bool)>> {
+    let mut tx = pool.begin().await?;
+    let locked: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM job_postings WHERE id = $1 FOR UPDATE")
+            .bind(posting_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if locked.is_none() {
+        return Ok(None);
+    }
+    if let Some(run) = active_run(&mut tx, posting_id).await? {
+        tx.commit().await?;
+        return Ok(Some((run, true)));
+    }
+    let run = runs::insert_run(
+        &mut tx,
+        bus,
+        WORKFLOW,
+        &[STEP],
+        json!({"posting_id": posting_id}),
+        Duration::ZERO,
+    )
+    .await?;
+    tx.commit().await?;
+    bus.publish(Event::RunUpdated { run: run.clone() });
+    wake.0.notify_one();
+    Ok(Some((run, false)))
 }
 
 /// Posting `posting_id`'s scores and latest run (see [`PostingFit`]). The caller checks

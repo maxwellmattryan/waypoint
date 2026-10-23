@@ -1,0 +1,5 @@
+# The `route_goals_invalid` mode of fake-claude.sh (api/tests/goals.rs): a planner prompt with
+# answered questions gets questions again, which the run refuses; any other gets a plan
+# with no valid company.
+Q: Which	plan_goal_questions.jsonl
+*	plan_goal_invalid.jsonl

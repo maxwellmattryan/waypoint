@@ -12,14 +12,15 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
 use super::{
-    AGENT_RUN, CAPTURE_EXTRACT, Config, GMAIL_SYNC, Job, RESUME_PROFILE, SOURCE_BOARD, TEST_PROMPT,
+    AGENT_RUN, CAPTURE_EXTRACT, Config, GMAIL_SYNC, Job, PLAN_STEP, RESUME_PROFILE, SOURCE_BOARD,
+    TEST_PROMPT,
 };
 use crate::capture::{self, llm::LlmError};
 use crate::claude::{ClaudeError, ClaudeRequest, ClaudeRunner};
 use crate::events::{Event, EventBus};
 use crate::gmail::sync::PageOutcome;
 use crate::profile::resume::ImportError;
-use crate::{gmail, google, profile, runs, sourcing};
+use crate::{gmail, goals, google, profile, runs, sourcing};
 
 /// The delay before retry number `attempt` (1-based): `base * 2^(attempt-1)`, capped at
 /// `cap`. It saturates instead of overflowing.
@@ -98,6 +99,8 @@ impl Worker {
             Ok(_) => {}
             Err(err) => rocket::warn!("gmail: cannot queue the catch-up sync: {err}"),
         }
+        goals::exec::resume_running(&self.pool, &self.bus, &crate::jobs::Wake(self.wake.clone()))
+            .await;
 
         let (pause_tx, mut pause_rx) = mpsc::unbounded_channel();
         let ctx = Context {
@@ -246,7 +249,14 @@ async fn run_job(ctx: Context, job: Job, _permit: OwnedSemaphorePermit) {
         };
         match written {
             Ok(event) => {
+                let settled = match &event {
+                    Event::JobSucceeded { job } | Event::JobFailed { job } => Some(job.clone()),
+                    _ => None,
+                };
                 ctx.bus.publish(event);
+                if let Some(settled) = settled {
+                    goals::exec::job_settled(&ctx.pool, &ctx.bus, &ctx.wake, &settled).await;
+                }
                 break;
             }
             Err(sqlx::Error::RowNotFound) => {
@@ -281,7 +291,20 @@ async fn dispatch(ctx: &Context, job: &Job) -> JobOutcome {
             .await
             .into(),
         SOURCE_BOARD => sourcing::run(&ctx.pool, &ctx.capture, job).await.into(),
+        PLAN_STEP => goals::exec::run(&ctx.pool, &ctx.bus, &ctx.wake, job)
+            .await
+            .into(),
         other => JobOutcome::Fail(format!("unknown job kind {other:?}")),
+    }
+}
+
+impl From<goals::exec::Outcome> for JobOutcome {
+    fn from(outcome: goals::exec::Outcome) -> Self {
+        match outcome {
+            goals::exec::Outcome::Done(result) => Self::Done(result),
+            goals::exec::Outcome::Retry(error) => Self::Retry(error),
+            goals::exec::Outcome::Fail(error) => Self::Fail(error),
+        }
     }
 }
 

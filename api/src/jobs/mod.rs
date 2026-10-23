@@ -44,6 +44,10 @@ pub const GMAIL_SYNC_MAX_ATTEMPTS: i32 = 5;
 /// "board": string}`, reads one public job board and keeps its rows in `job_postings` in
 /// step with it (see `sourcing`).
 pub const SOURCE_BOARD: &str = "source_board";
+/// The `plan_step` job kind: payload `{"goal_id": integer}`, one tick of a goal's plan: it
+/// runs the current plan's steps from the first unfinished one until a step waits, fails
+/// or the plan completes (see `goals::exec`).
+pub const PLAN_STEP: &str = "plan_step";
 
 /// One `jobs` row. This is also the `GET /jobs/<id>` body; the payload is not echoed.
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, utoipa::ToSchema)]

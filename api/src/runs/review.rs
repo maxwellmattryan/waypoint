@@ -18,8 +18,8 @@ use super::approvals::DecisionError;
 use crate::applications::{ApiError, JsonContent, ValidationErrors, internal, parsed, text};
 use crate::events::{Event, EventBus};
 use crate::host::{LocalHost, NotCrossSite};
-use crate::memory_signals;
-use crate::workflows::{match_email, score_fit};
+use crate::workflows::{match_email, plan_goal, score_fit};
+use crate::{goals, memory_signals};
 
 /// Most review items one `GET /review-items` returns.
 pub const MAX_ITEMS: i64 = 200;
@@ -145,14 +145,20 @@ pub async fn dismiss(
     .fetch_optional(&mut *tx)
     .await?;
     if let Some(item) = dismissed {
+        let mut goal = None;
         if item.kind == score_fit::REVIEW_KIND {
             score_fit::dismissed(&mut tx, &item).await?;
+        } else if item.kind == plan_goal::REVIEW_KIND {
+            goal = plan_goal::dismissed(&mut tx, &item).await?;
         }
         let writer =
             memory_signals::record_dismissal(&mut tx, bus, &item, reason.as_deref()).await?;
         tx.commit().await?;
         if let Some(run) = writer {
             bus.publish(Event::RunUpdated { run });
+        }
+        if let Some(goal) = goal {
+            goals::publish(pool, bus, goal).await;
         }
         return Ok(item);
     }
@@ -195,6 +201,13 @@ pub async fn accept(pool: &PgPool, bus: &EventBus, id: i64) -> Result<ReviewItem
         let item = mark_accepted(&mut tx, id).await?;
         tx.commit().await?;
         super::publish(pool, bus, item.run_id).await;
+        return Ok(item);
+    }
+    if item.kind == plan_goal::REVIEW_KIND {
+        let goal = plan_goal::accept(&mut tx, &item).await?;
+        let item = mark_accepted(&mut tx, id).await?;
+        tx.commit().await?;
+        goals::publish(pool, bus, goal).await;
         return Ok(item);
     }
     if ![

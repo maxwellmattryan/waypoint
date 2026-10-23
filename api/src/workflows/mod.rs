@@ -3,6 +3,7 @@
 pub mod classify_email;
 pub mod match_email;
 pub mod memory_writer;
+pub mod plan_goal;
 pub mod propose_interview;
 pub mod score_fit;
 pub mod tidy;
@@ -30,7 +31,7 @@ pub fn runtime() -> Runtime {
 /// The production runtime: the `tidy_application` sample workflow and its tools, the
 /// `memory_writer` and `classify_email` workflows (no tools), `match_email` with its two
 /// `write` tools, `propose_interview` with its `external` tool, which writes to Google
-/// Calendar through `google`, and `score_fit` (no tools).
+/// Calendar through `google`, and `score_fit` and `plan_goal` (no tools).
 pub fn runtime_with(google: google::Google) -> Runtime {
     let mut tools = Registry::default();
     tools
@@ -57,6 +58,7 @@ pub fn runtime_with(google: google::Google) -> Runtime {
             Arc::new(match_email::MatchEmail),
             Arc::new(propose_interview::ProposeInterview),
             Arc::new(score_fit::ScoreFit),
+            Arc::new(plan_goal::PlanGoal),
         ],
         tools,
     )
@@ -72,6 +74,7 @@ pub fn eval_suites() -> Vec<Arc<dyn Suite>> {
         Arc::new(match_email::MatchEmailEval),
         Arc::new(propose_interview::ProposeInterviewEval),
         Arc::new(score_fit::ScoreFitEval),
+        Arc::new(plan_goal::PlanGoalEval),
     ]
 }
 
@@ -171,6 +174,10 @@ mod tests {
             .workflow("score_fit")
             .expect("score_fit is registered");
         assert_eq!(scorer.steps(), ["score"]);
+        let planner = runtime
+            .workflow("plan_goal")
+            .expect("plan_goal is registered");
+        assert_eq!(planner.steps(), ["plan"]);
         let suites: Vec<&str> = eval_suites().iter().map(|suite| suite.workflow()).collect();
         assert_eq!(
             suites,
@@ -180,7 +187,8 @@ mod tests {
                 "classify_email",
                 "match_email",
                 "propose_interview",
-                "score_fit"
+                "score_fit",
+                "plan_goal"
             ]
         );
 

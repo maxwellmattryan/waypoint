@@ -23,6 +23,8 @@
 #                 are comments) whose needle `grep -F` finds in this call's stdin, after
 #                 sleeping <seconds> when given, else classify_email_other.jsonl.
 #                 Concurrent calls each read their own stdin.
+#   route_<name>  like classify_by_email, but reads <name>.tsv, where a needle of `*`
+#                 matches any stdin; with no line matching it fails like exit1.
 set -eu
 
 mode=$1
@@ -63,11 +65,33 @@ fi
 own_stdin="$record/stdin.$$"
 cat >"$own_stdin"
 cp "$own_stdin" "$record/stdin"
-if [ "$mode" != classify_by_email ]; then
-	rm -f "$own_stdin"
-fi
+case $mode in
+classify_by_email | route_*) ;;
+*) rm -f "$own_stdin" ;;
+esac
 
 case $mode in
+route_*)
+	answer=""
+	delay=""
+	while IFS="	" read -r needle file wait; do
+		case $needle in '' | '#'*) continue ;; esac
+		if [ "$needle" = "*" ] || grep -qF -- "$needle" "$own_stdin"; then
+			answer=$file
+			delay=$wait
+			break
+		fi
+	done <"$fixtures/${mode#route_}.tsv"
+	rm -f "$own_stdin"
+	if [ -z "$answer" ]; then
+		echo "fake claude: no line of ${mode#route_}.tsv matches" >&2
+		exit 1
+	fi
+	if [ -n "$delay" ]; then
+		sleep "$delay"
+	fi
+	cat "$fixtures/$answer"
+	;;
 classify_by_email)
 	answer=classify_email_other.jsonl
 	delay=""
