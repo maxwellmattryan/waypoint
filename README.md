@@ -158,7 +158,11 @@ Permission levels are enforced. An `external` call (one that would leave Waypoin
 
 ### Try the sample workflow
 
-The app ships one workflow, `tidy_application`, which needs no model call: it reads an application (`read`), adds a note to its timeline (`write`, undoable), then drafts a follow-up message (`external`), which waits for your approval. The draft is only shown, never sent. With the API running (`./scripts/dev.sh`):
+The app ships one workflow, `tidy_application`, which needs no model call: it reads an application (`read`), adds a note to its timeline (`write`, undoable), then drafts a follow-up message (`external`), which waits for your approval. The draft is only shown, never sent.
+
+In the app, open an application and click **Run sample workflow**. The draft waits on the **Review** page: approve it there (or edit or reject it), undo the note in its **Action log** tab, and follow the run link to **Runs** to inspect the run.
+
+The same flow with curl, with the API running (`./scripts/dev.sh`):
 
 ```sh
 curl -s -X POST -H 'Content-Type: application/json' \
