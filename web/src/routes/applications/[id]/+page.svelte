@@ -23,6 +23,7 @@
 		reorderStages,
 		setApplicationStatus,
 		setStageCompleted,
+		startTidy,
 		updateApplication,
 		type Result
 	} from '#lib/applications/api.js';
@@ -36,6 +37,7 @@
 	import StageList from '#lib/components/applications/StageList.svelte';
 	import StatusBadge from '#lib/components/applications/StatusBadge.svelte';
 	import StatusSelect from '#lib/components/applications/StatusSelect.svelte';
+	import TidyDialog from '#lib/components/applications/TidyDialog.svelte';
 	import Timeline from '#lib/components/applications/Timeline.svelte';
 	import { Button, Card, Dialog, EmptyState, Link, Skeleton, toast } from '#lib/components/ui';
 	import { motionDuration } from '#lib/motion.js';
@@ -59,6 +61,7 @@
 	let status = $state<ApplicationStatus>('sourced');
 	let savingStatus = $state(false);
 	let editing = $state(false);
+	let tidying = $state(false);
 	let confirmingDelete = $state(false);
 	let deleting = $state(false);
 	let stages = $state<List<Stage>>({ kind: 'loading' });
@@ -290,7 +293,8 @@
 						<StatusBadge status={application.status} />
 					</div>
 				</div>
-				<div class="flex gap-2">
+				<div class="flex flex-wrap gap-2">
+					<Button variant="secondary" onclick={() => (tidying = true)}>Run sample workflow</Button>
 					<Button variant="secondary" onclick={() => (editing = true)}>Edit</Button>
 					<Button variant="danger" onclick={() => (confirmingDelete = true)}>Delete</Button>
 				</div>
@@ -468,6 +472,11 @@
 			description="{application.company} · {application.title}"
 			submit={(feedback) => reject(application, feedback)}
 			oncancel={() => (status = application.status)}
+		/>
+
+		<TidyDialog
+			bind:open={tidying}
+			onstart={(body) => startTidy(client, application.id, body)}
 		/>
 
 		<ApplicationFormDialog

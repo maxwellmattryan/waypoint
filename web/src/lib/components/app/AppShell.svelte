@@ -28,6 +28,7 @@
 	const dashboardHref = resolve('/');
 	const applicationsHref = resolve('/applications');
 	const resumesHref = resolve('/resumes');
+	const reviewHref = resolve('/review');
 	const runsHref = resolve('/runs');
 	const path = $derived(page.url.pathname);
 	// A section's detail pages (`/applications/<id>`, `/runs/<id>`, …) belong to it too.
@@ -44,6 +45,7 @@
 				<NavLink href={dashboardHref} current={path === dashboardHref}>Dashboard</NavLink>
 				<NavLink href={applicationsHref} current={inSection(applicationsHref)}>Applications</NavLink>
 				<NavLink href={resumesHref} current={inSection(resumesHref)}>Resumes</NavLink>
+				<NavLink href={reviewHref} current={inSection(reviewHref)}>Review</NavLink>
 				<NavLink href={runsHref} current={inSection(runsHref)}>Runs</NavLink>
 			</nav>
 			<Badge

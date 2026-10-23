@@ -1,5 +1,6 @@
 export { createApiClient } from './client';
 export type {
+	AgentAction,
 	ApiClient,
 	ApiClientOptions,
 	Application,
@@ -24,16 +25,19 @@ export type {
 	Job,
 	KillSwitch,
 	NewApplication,
+	PendingAction,
 	Permission,
 	ResumeLink,
 	ResumeVersion,
 	ResumeVersionDetail,
+	ReviewItem,
 	Run,
 	RunDetail,
 	RunStatus,
 	RunStepDetail,
 	Stage,
 	StepStatus,
+	TidyRequest,
 	ToolCall,
 	ToolCallStatus,
 	ValidationErrors
