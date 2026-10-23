@@ -4,6 +4,7 @@ import {
 	type AgentAction,
 	type ApiClient,
 	type Event,
+	type MemorySignal,
 	type PendingAction,
 	type ReviewItem
 } from '#lib/api';
@@ -16,6 +17,7 @@ import {
 	listActions,
 	listPendingActions,
 	listReviewItems,
+	listSignals,
 	rejectAction,
 	undoAction,
 	type Result
@@ -193,7 +195,7 @@ export class QueueStore {
 				toast.error(SAVE_FAILED.title, { description: SAVE_FAILED.description });
 				break;
 			case 'invalid':
-				// The Edit dialog shows these under its field.
+				// The Edit and Dismiss dialogs show these under their field.
 				break;
 		}
 		return result;
@@ -233,12 +235,12 @@ export class QueueStore {
 		);
 	}
 
-	/** Dismisses a review item; nothing is applied. */
-	dismiss(id: number): Promise<Result<ReviewItem>> {
+	/** Dismisses a review item, with the user's reason when given; nothing is applied. */
+	dismiss(id: number, reason?: string): Promise<Result<ReviewItem>> {
 		const { client, dismiss } = this.#deps;
 		return this.#decide(
 			`review:${id}`,
-			() => dismiss(client, id),
+			() => dismiss(client, id, reason),
 			() => toast.success('Dismissed')
 		);
 	}
@@ -259,45 +261,42 @@ export class QueueStore {
 	}
 }
 
-export interface ActionLogDeps {
-	client: ApiClient;
-	list: typeof listActions;
-	undo: typeof undoAction;
-}
-
-const byIdDescending = (a: AgentAction, b: AgentAction) => b.id - a.id;
+/** Fetches one page of a log, newest first. */
+export type ListPage<T> = (
+	client: ApiClient,
+	options: { limit: number; before?: number }
+) => Promise<Result<T[]>>;
 
 /**
- * The action log: `GET /actions` newest first a page at a time, with undo, refetched
- * silently on `run.updated` and after a reconnect or lag.
+ * A read-mostly log loaded newest first a page at a time: the first page with a skeleton,
+ * more pages on demand, and silent refreshes of the first page merged by id on `run.updated`
+ * and after a reconnect or lag. `data.deleted` clears it, then refreshes.
  */
-export class ActionLogStore {
+class PagedLog<T extends { id: number }> {
 	state = $state<ListState>({ kind: 'loading' });
-	/** Actions held, `id` descending. */
-	actions = $state.raw<AgentAction[]>([]);
+	/** Entries held, `id` descending. */
+	items = $state.raw<T[]>([]);
 	/** Whether the last page was full, so another may follow. */
 	hasMore = $state(false);
 	loadingMore = $state(false);
-	/** Ids of the actions with an undo in flight. */
-	busy = new SvelteSet<number>();
 
-	#deps: ActionLogDeps;
+	#client: ApiClient;
+	#list: ListPage<T>;
+	#loadMoreError: string;
 	#refresher = new Coalescer(() => this.#fetchFirstPage());
 
-	constructor(deps: Partial<ActionLogDeps> = {}) {
-		this.#deps = {
-			client: deps.client ?? createApiClient(),
-			list: deps.list ?? listActions,
-			undo: deps.undo ?? undoAction
-		};
+	constructor(client: ApiClient, list: ListPage<T>, loadMoreError: string) {
+		this.#client = client;
+		this.#list = list;
+		this.#loadMoreError = loadMoreError;
 	}
 
 	/** Loads the first page, showing the skeleton meanwhile. */
 	async load(): Promise<void> {
 		this.state = { kind: 'loading' };
-		const result = await this.#deps.list(this.#deps.client, { limit: PAGE_SIZE });
+		const result = await this.#list(this.#client, { limit: PAGE_SIZE });
 		if (result.kind === 'ok') {
-			this.actions = result.data;
+			this.items = result.data;
 			this.hasMore = result.data.length === PAGE_SIZE;
 			this.state = { kind: 'loaded' };
 		} else {
@@ -305,25 +304,20 @@ export class ActionLogStore {
 		}
 	}
 
-	/** Appends the next page: the actions below the smallest id held. */
+	/** Appends the next page: the entries below the smallest id held. */
 	async loadMore(): Promise<void> {
 		if (this.state.kind !== 'loaded' || this.loadingMore || !this.hasMore) return;
-		const oldest = this.actions.at(-1);
+		const oldest = this.items.at(-1);
 		if (!oldest) return;
 		this.loadingMore = true;
 		try {
-			const result = await this.#deps.list(this.#deps.client, {
-				limit: PAGE_SIZE,
-				before: oldest.id
-			});
+			const result = await this.#list(this.#client, { limit: PAGE_SIZE, before: oldest.id });
 			if (result.kind !== 'ok') {
-				toast.error("Couldn't load more actions");
+				toast.error(this.#loadMoreError);
 				return;
 			}
-			// A local lookup, not reactive state.
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity
-			const held = new Set(this.actions.map((action) => action.id));
-			this.actions = [...this.actions, ...result.data.filter((action) => !held.has(action.id))];
+			const held = new Set(this.items.map((entry) => entry.id));
+			this.items = [...this.items, ...result.data.filter((entry) => !held.has(entry.id))];
 			this.hasMore = result.data.length === PAGE_SIZE;
 		} finally {
 			this.loadingMore = false;
@@ -331,13 +325,13 @@ export class ActionLogStore {
 	}
 
 	async #fetchFirstPage(): Promise<void> {
-		const result = await this.#deps.list(this.#deps.client, { limit: PAGE_SIZE });
+		const result = await this.#list(this.#client, { limit: PAGE_SIZE });
 		if (result.kind !== 'ok') return;
 		// A local lookup, not reactive state.
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const merged = new Map(this.actions.map((action) => [action.id, action]));
-		for (const action of result.data) merged.set(action.id, action);
-		this.actions = [...merged.values()].toSorted(byIdDescending);
+		const merged = new Map(this.items.map((entry) => [entry.id, entry]));
+		for (const entry of result.data) merged.set(entry.id, entry);
+		this.items = [...merged.values()].toSorted((a, b) => b.id - a.id);
 	}
 
 	/**
@@ -349,20 +343,66 @@ export class ActionLogStore {
 		return this.#refresher.run();
 	}
 
+	/** Applies one event from `/events`. */
+	handle(event: Event): void {
+		switch (event.type) {
+			case 'data.deleted':
+				// Every entry is gone, so the older pages a refresh keeps must go too.
+				if (this.state.kind === 'loaded') {
+					this.items = [];
+					this.hasMore = false;
+				}
+				void this.refresh();
+				return;
+			case 'run.updated':
+			case 'app.connected':
+			case 'app.lagged':
+				void this.refresh();
+				return;
+		}
+	}
+}
+
+export interface ActionLogDeps {
+	client: ApiClient;
+	list: typeof listActions;
+	undo: typeof undoAction;
+}
+
+/** The action log: `GET /actions` as a {@link PagedLog}, with undo. */
+export class ActionLogStore extends PagedLog<AgentAction> {
+	/** Ids of the actions with an undo in flight. */
+	busy = new SvelteSet<number>();
+
+	#client: ApiClient;
+	#undo: typeof undoAction;
+
+	constructor(deps: Partial<ActionLogDeps> = {}) {
+		const client = deps.client ?? createApiClient();
+		super(client, deps.list ?? listActions, "Couldn't load more actions");
+		this.#client = client;
+		this.#undo = deps.undo ?? undoAction;
+	}
+
+	/** Actions held, `id` descending. */
+	get actions(): AgentAction[] {
+		return this.items;
+	}
+
 	/** Undoes one action; on success its entry is replaced in place by the undone one. */
 	async undo(id: number): Promise<Result<AgentAction>> {
 		if (this.busy.has(id)) return { kind: 'failed' };
 		this.busy.add(id);
 		let result: Result<AgentAction>;
 		try {
-			result = await this.#deps.undo(this.#deps.client, id);
+			result = await this.#undo(this.#client, id);
 		} finally {
 			this.busy.delete(id);
 		}
 		switch (result.kind) {
 			case 'ok': {
 				const undone = result.data;
-				this.actions = this.actions.map((action) => (action.id === id ? undone : action));
+				this.items = this.items.map((action) => (action.id === id ? undone : action));
 				toast.success('Undone');
 				break;
 			}
@@ -380,23 +420,21 @@ export class ActionLogStore {
 		}
 		return result;
 	}
+}
 
-	/** Applies one event from `/events`. */
-	handle(event: Event): void {
-		switch (event.type) {
-			case 'data.deleted':
-				// Every action is gone, so the older pages a refresh keeps must go too.
-				if (this.state.kind === 'loaded') {
-					this.actions = [];
-					this.hasMore = false;
-				}
-				void this.refresh();
-				return;
-			case 'run.updated':
-			case 'app.connected':
-			case 'app.lagged':
-				void this.refresh();
-				return;
-		}
+export interface SignalLogDeps {
+	client: ApiClient;
+	list: typeof listSignals;
+}
+
+/** The learning signals: `GET /memory-signals` as a read-only {@link PagedLog}. */
+export class SignalLogStore extends PagedLog<MemorySignal> {
+	constructor(deps: Partial<SignalLogDeps> = {}) {
+		super(deps.client ?? createApiClient(), deps.list ?? listSignals, "Couldn't load more signals");
+	}
+
+	/** Signals held, `id` descending. */
+	get signals(): MemorySignal[] {
+		return this.items;
 	}
 }

@@ -12,9 +12,10 @@ Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps ex
 | `pending_actions` | distinct `external` request in a step | `run_id`, `run_step_id`, `tool_call_id` (the call that asked), `tool`, `input` (as requested), `approved_input`, `status` (`pending`, `approved`, `rejected`, `executing`, `executed`, `failed`), `output`, `executed_tool_call_id` (the call that claimed it), `created_at`, `decided_at`, `executed_at`. Unique on (`run_step_id`, `tool`, `md5(input::text)`) |
 | `agent_actions` | succeeded `write` tool call | `run_id`, `run_step_id`, `tool_call_id` (unique), `tool`, `undo_data`, `created_at`, `undone_at` |
 | `review_items` | result a step wasn't sure enough to apply | `run_id`, `run_step_id`, `kind`, `confidence` (0..=1), `payload`, `status` (`pending`, `accepted`, `dismissed`), `created_at`, `resolved_at`. Unique on (`run_step_id`, `kind`, `md5(payload::text)`) |
+| `memory_signals` | user decision on something an agent drafted ([learning signals](#learning-signals)) | `kind` (`approval`, `rejection`, `dismissal`), `run_id`, `pending_action_id` (unique; approvals and rejections), `review_item_id` (unique; dismissals), `subject` (the tool or the item's kind), `drafted`, `approved` and `changes` (approvals only), `reason` (dismissals only, 1..=1000 characters or `NULL`), `created_at`. No foreign keys |
 | `run_memories` | memory a step [retrieved](#retrieval) | `run_id`, `run_step_id`, `memory_id` (cleared when the memory is deleted), a snapshot of the memory's `kind`, `topic` and `content` at retrieval time, `score`, `created_at`. Unique on (`run_step_id`, `memory_id`) |
 
-Deleting a run deletes its steps, their tool calls, and its pending actions, actions, review items and run memories. The `claude_call_id` columns point at `claude_calls`; runs reach their model calls through their steps.
+Deleting a run deletes its steps, their tool calls, and its pending actions, actions, review items and run memories, but not its learning signals. The `claude_call_id` columns point at `claude_calls`; runs reach their model calls through their steps.
 
 ## Starting and running
 
@@ -155,6 +156,8 @@ When a step made at least one call that is awaiting approval, it parks whatever 
 
 Both answer 409 with nothing changed unless the action is `pending` and its run `awaiting_approval`; that includes a run that is still `running` because its step hasn't parked yet. Approve is also 409 when the tool is no longer registered. Both lock the pending action, then its run, so they serialize with each other and with parking. `runs::approvals::{approve, reject}` are the same operations as library functions.
 
+Each decision records a [learning signal](#learning-signals) in its transaction: approve one `approval` (with the diff from the requested to the approved input), reject one `rejection` for the action the user rejected only, not the run's other pending actions it also rejects. A refused decision (404, 409, 422) records nothing.
+
 ## Action log and undo
 
 A `write` tool's handler calls `ctx.set_undo(data)` with what its undo needs, and implements `Tool::undo`:
@@ -171,7 +174,15 @@ Every succeeded `write` call inserts one `agent_actions` row with the `undo_data
 
 ## Review items
 
-`ctx.review_if_unsure(kind, confidence, payload)` sends a result the step isn't sure of to the review queue. When `confidence` is below `runs::REVIEW_THRESHOLD` (0.8) or isn't finite, it stores a `pending` `review_items` row and returns `Some(id)`, and the step must not apply the result. Otherwise it returns `None`. The confidence is stored clamped to 0..=1, with NaN stored as 0, and a rerun of the step gets the same item back for the same kind and payload. `GET /review-items` lists the pending ones. `POST /review-items/{id}/dismiss` resolves one without applying it: the item becomes `dismissed` with `resolved_at` set, in one statement that only matches a `pending` item, so a second dismiss is 409 with nothing changed. Accepting an item (applying its result) is per workflow and comes later.
+`ctx.review_if_unsure(kind, confidence, payload)` sends a result the step isn't sure of to the review queue. When `confidence` is below `runs::REVIEW_THRESHOLD` (0.8) or isn't finite, it stores a `pending` `review_items` row and returns `Some(id)`, and the step must not apply the result. Otherwise it returns `None`. The confidence is stored clamped to 0..=1, with NaN stored as 0, and a rerun of the step gets the same item back for the same kind and payload. `GET /review-items` lists the pending ones. `POST /review-items/{id}/dismiss` with `{}` or `{"reason": "…"}` resolves one without applying it: in one transaction the item becomes `dismissed` with `resolved_at` set, by a statement that only matches a `pending` item, and a `dismissal` [learning signal](#learning-signals) is recorded with the payload and the reason. A second dismiss is 409 with nothing changed. `reason` is trimmed, a blank or absent one is stored as `NULL`, and one over 1000 characters is 422 `{"errors":[{"field":"reason","message":"At most 1000 characters"}]}`. The reason is never logged. Accepting an item (applying its result) is per workflow and comes later.
+
+## Learning signals
+
+`memory_signals` (`api/src/memory_signals.rs`) is the raw evidence a later memory writer learns from: one row per approval, rejection or dismissal, written in the same transaction as the decision, so a stored decision always has its signal and a refused one has none. The unique `pending_action_id` and `review_item_id` make one signal per decision a database fact, and a CHECK keeps each kind's columns consistent. There are no foreign keys: a signal outlives the run, action or item it came from, and only `DELETE /data` empties the table.
+
+An approval's `changes` is the diff from `drafted` (the requested input) to `approved` (`approved_input`), `[]` when the user didn't edit it. Each entry is `{op, path, before, after}`: `path` is an RFC 6901 JSON Pointer (`/message`, `/a~1b`, `""` for the root), and `op` is `add` (`before` is `null`), `remove` (`after` is `null`) or `replace`. Objects are compared key by key, recursively, in lexicographic key order, and the entries come out in that order; every other value (arrays, scalars, a change of type) is compared and replaced whole. An explicit `null` counts as present.
+
+`GET /memory-signals` lists them read-only; nothing over HTTP writes, edits or deletes one, and no model is called.
 
 ## Retrieval
 
@@ -271,7 +282,8 @@ Every route answers only a local `Host` (403 otherwise) and answers 500 on a dat
 - `GET /actions?run_id=&limit=&before=`: the action log newest first, optionally for one run; `limit` and `before` work as on `GET /runs`.
 - `POST /actions/{id}/undo` (no body): see [Action log and undo](#action-log-and-undo). 200 with the `AgentAction`; 404 for an unknown id.
 - `GET /review-items`: up to 200 `pending` review items, oldest first.
-- `POST /review-items/{id}/dismiss` (no body): see [Review items](#review-items). 200 with the `ReviewItem`; 409 when it isn't `pending`; 404 for an unknown id.
+- `POST /review-items/{id}/dismiss` (`{}` or `{"reason": "…"}`): see [Review items](#review-items). 200 with the `ReviewItem`; 409 when it isn't `pending`; 404 for an unknown id; 422 for a reason over 1000 characters.
+- `GET /memory-signals?kind=&limit=&before=`: [learning signals](#learning-signals) newest first; `limit` and `before` work as on `GET /runs`. `kind` is `approval`, `rejection` or `dismissal`; blank means any, and an unknown one is 422 `{"errors":[{"field":"kind","message":"Unknown kind"}]}`.
 - `POST /applications/{id}/tidy` with `{"note", "message", "confidence"?}` starts [`tidy_application`](#sample-workflow-tidy_application) and answers 201 with the queued `Run`. `note` and `message` are required, trimmed and at most 20,000 characters; `confidence` defaults to 1 and must be within 0..=1; failures are 422 naming the field. An unknown application is 404, checked before the run starts.
 
 There are no generic routes to start, resume or cancel runs.

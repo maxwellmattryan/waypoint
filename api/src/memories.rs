@@ -18,9 +18,7 @@ use rocket::State;
 use rocket::http::Status;
 use rocket::serde::json::{self, Json};
 use serde::{Deserialize, Serialize};
-use sqlx::error::BoxDynError;
-use sqlx::postgres::{PgTypeInfo, PgValueRef};
-use sqlx::{Decode, PgExecutor, PgPool, Postgres, Type};
+use sqlx::{PgExecutor, PgPool};
 
 use crate::applications::{
     ApiError, FieldError, JsonContent, REQUIRED, ValidationErrors, internal, parsed, text,
@@ -38,7 +36,7 @@ const WRONG_TOPIC: &str = "Not a topic for this kind";
 
 /// A closed set of values stored as TEXT: the wire and database names, `ALL`, parsing
 /// from text and decoding straight from a TEXT column, in the shape of
-/// [`crate::applications::ApplicationStatus`].
+/// [`crate::applications::ApplicationStatus`]. Shared with [`crate::memory_signals`].
 macro_rules! text_enum {
     ($name:ident, $what:literal, [$($variant:ident => $text:literal),+ $(,)?]) => {
         impl $name {
@@ -65,24 +63,27 @@ macro_rules! text_enum {
             }
         }
 
-        impl Type<Postgres> for $name {
-            fn type_info() -> PgTypeInfo {
-                <String as Type<Postgres>>::type_info()
+        impl ::sqlx::Type<::sqlx::Postgres> for $name {
+            fn type_info() -> ::sqlx::postgres::PgTypeInfo {
+                <String as ::sqlx::Type<::sqlx::Postgres>>::type_info()
             }
 
-            fn compatible(ty: &PgTypeInfo) -> bool {
-                <String as Type<Postgres>>::compatible(ty)
+            fn compatible(ty: &::sqlx::postgres::PgTypeInfo) -> bool {
+                <String as ::sqlx::Type<::sqlx::Postgres>>::compatible(ty)
             }
         }
 
-        impl<'r> Decode<'r, Postgres> for $name {
-            fn decode(value: PgValueRef<'r>) -> Result<Self, BoxDynError> {
-                let text = <String as Decode<Postgres>>::decode(value)?;
+        impl<'r> ::sqlx::Decode<'r, ::sqlx::Postgres> for $name {
+            fn decode(
+                value: ::sqlx::postgres::PgValueRef<'r>,
+            ) -> Result<Self, ::sqlx::error::BoxDynError> {
+                let text = <String as ::sqlx::Decode<::sqlx::Postgres>>::decode(value)?;
                 Ok(Self::try_from(text)?)
             }
         }
     };
 }
+pub(crate) use text_enum;
 
 /// What sort of thing a memory is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -412,12 +413,12 @@ pub async fn insert_keyed(
 }
 
 /// A query parameter, trimmed, with a blank one treated as absent.
-fn present(value: Option<&str>) -> Option<&str> {
+pub(crate) fn present(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|v| !v.is_empty())
 }
 
 /// Parses an optional filter value, recording an `Unknown <field>` error for a bad one.
-fn filter<T: TryFrom<String>>(
+pub(crate) fn filter<T: TryFrom<String>>(
     errors: &mut Vec<FieldError>,
     field: &str,
     value: Option<&str>,

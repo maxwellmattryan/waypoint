@@ -22,13 +22,14 @@ use crate::kill_switch::{self, DataDeletion, DeleteAllData, KillSwitch, SetKillS
 use crate::memories::{
     self, Memory, MemoryInput, MemoryKind, MemoryStatus, MemoryTopic, SourceKind,
 };
+use crate::memory_signals::{self, MemorySignal, SignalChange, SignalKind, SignalOp};
 use crate::profile::ProfileImportSummary;
 use crate::profile::linkedin;
 use crate::profile::resume::{self as resume_profile, ProfileImportQueued};
 use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
 use crate::runs::actions::{self, AgentAction};
 use crate::runs::approvals::{self, ApproveAction, PendingAction, PendingActionStatus};
-use crate::runs::review::{self, ReviewItem, ReviewItemStatus};
+use crate::runs::review::{self, DismissReviewItem, ReviewItem, ReviewItemStatus};
 use crate::runs::{
     self, Run, RunDetail, RunMemory, RunStatus, RunStep, RunStepDetail, StepStatus, ToolCall,
     ToolCallStatus,
@@ -65,6 +66,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         memories::update,
         memories::confirm,
         memories::delete,
+        memory_signals::list,
         linkedin::import,
         resume_profile::start,
         stages::list,
@@ -127,6 +129,10 @@ use crate::workflows::tidy::{self, TidyRequest};
         MemoryTopic,
         MemoryStatus,
         SourceKind,
+        MemorySignal,
+        SignalKind,
+        SignalOp,
+        SignalChange,
         ProfileImportSummary,
         ProfileImportQueued,
         Run,
@@ -145,6 +151,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         AgentAction,
         ReviewItem,
         ReviewItemStatus,
+        DismissReviewItem,
         TidyRequest,
         KillSwitch,
         SetKillSwitch,

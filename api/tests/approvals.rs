@@ -66,6 +66,22 @@ async fn get(client: &Client, path: &str) -> Value {
     response.into_json().await.expect("a JSON body")
 }
 
+/// Every learning signal, newest first.
+async fn signals(client: &Client) -> Vec<Value> {
+    get(client, "/memory-signals")
+        .await
+        .as_array()
+        .expect("an array")
+        .clone()
+}
+
+async fn signal_count(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM memory_signals")
+        .fetch_one(pool)
+        .await
+        .expect("count signals")
+}
+
 async fn create_application(client: &Client) -> i64 {
     let (status, body) = post(
         client,
@@ -209,6 +225,31 @@ async fn sample_workflow_parks_approves_resumes_and_undoes(pool: PgPool) {
     assert_eq!(status, Status::Ok, "{approved}");
     assert_eq!(approved["status"], "approved");
     assert_eq!(approved["approved_input"], approved["input"]);
+    let input = json!({"application_id": application, "message": "Thanks"});
+    let recorded = signals(&client).await;
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    let signal = &recorded[0];
+    assert_eq!(
+        (
+            &signal["kind"],
+            &signal["run_id"],
+            &signal["pending_action_id"],
+            &signal["review_item_id"],
+            &signal["subject"],
+            &signal["reason"],
+        ),
+        (
+            &json!("approval"),
+            &json!(run),
+            &json!(action),
+            &Value::Null,
+            &json!("draft_follow_up"),
+            &Value::Null,
+        )
+    );
+    assert_eq!(signal["drafted"], input);
+    assert_eq!(signal["approved"], input);
+    assert_eq!(signal["changes"], json!([]));
     until(&mut subscriber, run, RunStatus::Succeeded).await;
 
     let detail = get(&client, &format!("/runs/{run}")).await;
@@ -244,6 +285,7 @@ async fn sample_workflow_parks_approves_resumes_and_undoes(pool: PgPool) {
     )
     .await;
     assert_eq!(status, Status::Conflict, "a second approve");
+    assert_eq!(signal_count(&pool).await, 1, "no second signal");
 
     // `add_note` is in the action log, and undo deletes the note once.
     let note = notes(&client, application).await;
@@ -291,11 +333,28 @@ async fn edit_then_approve_uses_the_edited_input(pool: PgPool) {
     let pending = get(&client, "/pending-actions").await;
     assert_eq!(pending[0]["id"], json!(action));
     assert_eq!(pending[0]["status"], "pending");
+    assert_eq!(
+        signal_count(&pool).await,
+        0,
+        "a refused edit stores no signal"
+    );
 
     let edited = json!({"application_id": application, "message": "edited"});
     let (status, approved) = post(&client, &path, Some(json!({"input": edited}))).await;
     assert_eq!(status, Status::Ok, "{approved}");
     assert_eq!(approved["approved_input"], edited);
+    let recorded = signals(&client).await;
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    assert_eq!(recorded[0]["kind"], "approval");
+    assert_eq!(
+        recorded[0]["drafted"],
+        json!({"application_id": application, "message": "Thanks"})
+    );
+    assert_eq!(recorded[0]["approved"], edited);
+    assert_eq!(
+        recorded[0]["changes"],
+        json!([{"op": "replace", "path": "/message", "before": "Thanks", "after": "edited"}])
+    );
     until(&mut subscriber, run, RunStatus::Succeeded).await;
     let detail = get(&client, &format!("/runs/{run}")).await;
     assert_eq!(detail["output"], json!({"draft": "edited (to Acme)"}));
@@ -452,6 +511,31 @@ async fn reject_ends_the_run(pool: PgPool) {
         "the handler never ran"
     );
 
+    let recorded = signals(&client).await;
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    let signal = &recorded[0];
+    assert_eq!(
+        (
+            &signal["kind"],
+            &signal["run_id"],
+            &signal["pending_action_id"],
+            &signal["subject"],
+        ),
+        (
+            &json!("rejection"),
+            &json!(run),
+            &json!(action),
+            &json!("draft_follow_up"),
+        )
+    );
+    assert_eq!(
+        signal["drafted"],
+        json!({"application_id": application, "message": "Thanks"})
+    );
+    for field in ["approved", "changes", "reason", "review_item_id"] {
+        assert_eq!(signal[field], Value::Null, "{field}");
+    }
+
     for decision in ["approve", "reject"] {
         let body = (decision == "approve").then(|| json!({}));
         let (status, _) = post(
@@ -462,6 +546,7 @@ async fn reject_ends_the_run(pool: PgPool) {
         .await;
         assert_eq!(status, Status::Conflict, "{decision} after reject");
     }
+    assert_eq!(signal_count(&pool).await, 1, "no second signal");
 }
 
 #[sqlx::test]
@@ -508,13 +593,63 @@ async fn dismiss_resolves_a_review_item(pool: PgPool) {
     let listed = get(&client, "/review-items").await;
     let id = listed[0]["id"].as_i64().expect("id");
     assert_eq!(listed[0]["run_id"], json!(run));
+    let payload = json!({"application_id": application, "note": "Ask about the team"});
 
-    let (status, item) = post(&client, &format!("/review-items/{id}/dismiss"), None).await;
+    let (status, item) = post(
+        &client,
+        &format!("/review-items/{id}/dismiss"),
+        Some(json!({"reason": "  Not relevant  "})),
+    )
+    .await;
     assert_eq!(status, Status::Ok, "{item}");
     assert_eq!(item["id"], json!(id));
     assert_eq!(item["status"], "dismissed");
     assert!(item["resolved_at"].is_string(), "{item}");
     assert_eq!(get(&client, "/review-items").await, json!([]));
+    let recorded = signals(&client).await;
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    let signal = &recorded[0];
+    assert_eq!(
+        (
+            &signal["kind"],
+            &signal["run_id"],
+            &signal["review_item_id"],
+            &signal["pending_action_id"],
+            &signal["subject"],
+            &signal["reason"],
+        ),
+        (
+            &json!("dismissal"),
+            &json!(run),
+            &json!(id),
+            &Value::Null,
+            &json!("tidy.note"),
+            &json!("Not relevant"),
+        )
+    );
+    assert_eq!(signal["drafted"], payload);
+    assert_eq!(
+        (&signal["approved"], &signal["changes"]),
+        (&Value::Null, &Value::Null)
+    );
+
+    // No reason, and a blank one, are both stored as `null`.
+    for body in [json!({}), json!({"reason": "   "})] {
+        parked(&client, &mut subscriber, application, 0.3).await;
+        let other = get(&client, "/review-items").await[0]["id"].clone();
+        let (status, _) = post(
+            &client,
+            &format!("/review-items/{other}/dismiss"),
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, Status::Ok, "{body}");
+        let newest = &signals(&client).await[0];
+        assert_eq!(newest["review_item_id"], other, "{body}");
+        assert_eq!(newest["reason"], Value::Null, "{body}");
+    }
+    let count = signal_count(&pool).await;
+    assert_eq!(count, 3);
 
     let stored = || async {
         sqlx::query_as::<_, (String, Option<String>)>(
@@ -527,17 +662,84 @@ async fn dismiss_resolves_a_review_item(pool: PgPool) {
     };
     let before = stored().await;
     assert_eq!(before.0, "dismissed");
-    let (status, _) = post(&client, &format!("/review-items/{id}/dismiss"), None).await;
+    let (status, _) = post(
+        &client,
+        &format!("/review-items/{id}/dismiss"),
+        Some(json!({"reason": "again"})),
+    )
+    .await;
     assert_eq!(status, Status::Conflict);
     assert_eq!(stored().await, before, "the second dismiss changed nothing");
+    assert_eq!(signal_count(&pool).await, count, "no new signal");
 
     let (status, _) = post(
         &client,
         &format!("/review-items/{}/dismiss", i64::MAX),
-        None,
+        Some(json!({})),
     )
     .await;
     assert_eq!(status, Status::NotFound);
+    assert_eq!(
+        signal_count(&pool).await,
+        count,
+        "no signal for a missing item"
+    );
+}
+
+#[sqlx::test]
+async fn dismiss_validates_its_body(pool: PgPool) {
+    let (client, mut subscriber) = app(&pool).await;
+    let application = create_application(&client).await;
+    parked(&client, &mut subscriber, application, 0.3).await;
+    let id = get(&client, "/review-items").await[0]["id"].clone();
+    let path = format!("/review-items/{id}/dismiss");
+
+    let (status, body) = post(&client, &path, Some(json!({"reason": "x".repeat(1001)}))).await;
+    assert_eq!(status, Status::UnprocessableEntity);
+    assert_eq!(
+        body,
+        json!({"errors": [{"field": "reason", "message": "At most 1000 characters"}]})
+    );
+    for body in [
+        json!({"extra": 1}),
+        json!({"reason": 5}),
+        json!({"reason": ["why"]}),
+    ] {
+        let (status, _) = post(&client, &path, Some(body.clone())).await;
+        assert_eq!(status, Status::BadRequest, "{body}");
+    }
+    let response = client
+        .post(path.clone())
+        .header(host())
+        .header(ContentType::JSON)
+        .body("{")
+        .dispatch()
+        .await;
+    assert_eq!(response.status(), Status::BadRequest, "malformed JSON");
+    let (status, _) = post(&client, &path, None).await;
+    assert_eq!(status, Status::UnsupportedMediaType, "no content type");
+    let response = client
+        .post(path.clone())
+        .header(host())
+        .header(ContentType::Plain)
+        .body("{}")
+        .dispatch()
+        .await;
+    assert_eq!(
+        response.status(),
+        Status::UnsupportedMediaType,
+        "text/plain"
+    );
+
+    let items = get(&client, "/review-items").await;
+    assert_eq!(items[0]["id"], id);
+    assert_eq!(items[0]["status"], "pending", "nothing was dismissed");
+    assert_eq!(signal_count(&pool).await, 0, "no signal was written");
+
+    // 1000 characters is the limit, not past it.
+    let (status, _) = post(&client, &path, Some(json!({"reason": "x".repeat(1000)}))).await;
+    assert_eq!(status, Status::Ok);
+    assert_eq!(signals(&client).await[0]["reason"], json!("x".repeat(1000)));
 }
 
 #[sqlx::test]
@@ -711,6 +913,7 @@ async fn changing_routes_refuse_cross_site_and_forms(pool: PgPool) {
     let items = get(&client, "/review-items").await;
     assert_eq!(items[0]["id"], review_item);
     assert_eq!(items[0]["status"], "pending", "nothing was dismissed");
+    assert_eq!(signal_count(&pool).await, 0, "no signal was written");
 }
 
 /// An `external` tool that counts its handler runs. With `hold`, the handler waits for

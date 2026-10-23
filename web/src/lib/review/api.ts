@@ -1,4 +1,11 @@
-import type { AgentAction, ApiClient, PendingAction, ReviewItem } from '#lib/api';
+import type {
+	AgentAction,
+	ApiClient,
+	MemorySignal,
+	PendingAction,
+	ReviewItem,
+	SignalKind
+} from '#lib/api';
 import { run, type Result } from '#lib/applications/api.js';
 import { PAGE_SIZE } from '#lib/runs/api.js';
 
@@ -34,9 +41,17 @@ export function rejectAction(client: ApiClient, id: number): Promise<Result<Pend
 	return run(200, () => client.POST('/pending-actions/{id}/reject', path(id)));
 }
 
-/** Clears a review item from the queue without applying it. */
-export function dismissReviewItem(client: ApiClient, id: number): Promise<Result<ReviewItem>> {
-	return run(200, () => client.POST('/review-items/{id}/dismiss', path(id)));
+/**
+ * Clears a review item from the queue without applying it, with the user's reason when given.
+ * A 422 (the reason is too long) is `invalid`.
+ */
+export function dismissReviewItem(
+	client: ApiClient,
+	id: number,
+	reason?: string
+): Promise<Result<ReviewItem>> {
+	const body = reason === undefined ? {} : { reason };
+	return run(200, () => client.POST('/review-items/{id}/dismiss', { ...path(id), body }));
 }
 
 export interface ListActionsOptions {
@@ -52,6 +67,27 @@ export function listActions(
 ): Promise<Result<AgentAction[]>> {
 	const query = before === undefined ? { limit } : { limit, before };
 	return run(200, () => client.GET('/actions', { params: { query } }));
+}
+
+export interface ListSignalsOptions {
+	limit?: number;
+	/** Only signals with an id below this one: the next page. */
+	before?: number;
+	/** Only signals of this kind. */
+	kind?: SignalKind;
+}
+
+/** The learning signals, newest first, a page at a time. */
+export function listSignals(
+	client: ApiClient,
+	{ limit = PAGE_SIZE, before, kind }: ListSignalsOptions = {}
+): Promise<Result<MemorySignal[]>> {
+	const query = {
+		limit,
+		...(before === undefined ? {} : { before }),
+		...(kind === undefined ? {} : { kind })
+	};
+	return run(200, () => client.GET('/memory-signals', { params: { query } }));
 }
 
 /** Reverts one logged action; resolves to it with `undone_at` set. */
