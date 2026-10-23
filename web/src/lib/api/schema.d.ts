@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /actions`: the action log, newest first, a page at a time. */
+        get: operations["list_actions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/actions/{id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /actions/{id}/undo`: reverts one action. */
+        post: operations["undo_action"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/applications": {
         parameters: {
             query?: never;
@@ -161,6 +195,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/applications/{id}/tidy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Starts the `tidy_application` sample workflow for an application. */
+        post: operations["start_tidy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/google": {
         parameters: {
             query?: never;
@@ -290,6 +341,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pending-actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /pending-actions`: the actions waiting for the user's decision. */
+        get: operations["list_pending_actions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pending-actions/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * `POST /pending-actions/{id}/approve`: approves an action, optionally with an edited
+         *     input. Approving the run's last pending action queues the run again.
+         */
+        post: operations["approve_pending_action"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pending-actions/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /pending-actions/{id}/reject`: rejects an action, which ends its run `rejected`. */
+        post: operations["reject_pending_action"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/resumes": {
         parameters: {
             query?: never;
@@ -343,6 +448,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/review-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /review-items`: results waiting for the user's review. */
+        get: operations["list_review_items"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs": {
         parameters: {
             query?: never;
@@ -381,6 +503,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One `agent_actions` row: a `write` tool call that changed Waypoint's data. */
+        AgentAction: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            run_id: number;
+            /** Format: int64 */
+            run_step_id: number;
+            tool: string;
+            /** Format: int64 */
+            tool_call_id: number;
+            /** @description What the tool's undo needs; `null` when the handler set none, so it can't be undone. */
+            undo_data: unknown;
+            /**
+             * Format: date-time
+             * @description When the action was undone; `null` while it stands.
+             */
+            undone_at: string | null;
+        };
         /** @description One `applications` row: the body of every route that returns an application. */
         Application: {
             /** @description Compensation as free text, e.g. "$180k–$210k + equity". */
@@ -448,6 +591,14 @@ export interface components {
          * @enum {string}
          */
         ApplicationStatus: "sourced" | "applied" | "interviewing" | "offer" | "rejected";
+        /**
+         * @description The `POST /pending-actions/{id}/approve` body: `{}` approves the requested input,
+         *     `{"input": {…}}` approves an edited one.
+         */
+        ApproveAction: {
+            /** @description Replaces the requested input; checked against the tool's input schema. */
+            input?: unknown;
+        };
         /** @description A capture: the 200 body, and a succeeded `capture_extract` job's `result`. */
         Capture: {
             fields: components["schemas"]["CapturedFields"];
@@ -653,6 +804,47 @@ export interface components {
             name: string;
         };
         /**
+         * @description One `pending_actions` row: an `external` tool call waiting for, or past, the user's
+         *     decision.
+         */
+        PendingAction: {
+            /** @description The input the user approved: the edited input, or a copy of `input`. */
+            approved_input: unknown;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            decided_at: string | null;
+            /** Format: date-time */
+            executed_at: string | null;
+            /**
+             * Format: int64
+             * @description The tool call that ran the handler, once executed.
+             */
+            executed_tool_call_id: number | null;
+            /** Format: int64 */
+            id: number;
+            /** @description The input the caller asked for. */
+            input: unknown;
+            /** @description The handler's output, once executed. */
+            output: unknown;
+            /** Format: int64 */
+            run_id: number;
+            /** Format: int64 */
+            run_step_id: number;
+            status: components["schemas"]["PendingActionStatus"];
+            tool: string;
+            /**
+             * Format: int64
+             * @description The tool call that asked for the action.
+             */
+            tool_call_id: number;
+        };
+        /**
+         * @description Where a pending action is.
+         * @enum {string}
+         */
+        PendingActionStatus: "pending" | "approved" | "rejected" | "executed";
+        /**
          * @description What a tool may do.
          * @enum {string}
          */
@@ -689,6 +881,34 @@ export interface components {
             /** @description The extracted text, or `null` when none could be extracted. */
             text: string | null;
         };
+        /** @description One `review_items` row. */
+        ReviewItem: {
+            /**
+             * Format: double
+             * @description The step's confidence, 0 to 1.
+             */
+            confidence: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            /** @description What the step was deciding, e.g. `tidy.note`. */
+            kind: string;
+            /** @description The result the step didn't apply. */
+            payload: unknown;
+            /** Format: date-time */
+            resolved_at: string | null;
+            /** Format: int64 */
+            run_id: number;
+            /** Format: int64 */
+            run_step_id: number;
+            status: components["schemas"]["ReviewItemStatus"];
+        };
+        /**
+         * @description Where a review item is.
+         * @enum {string}
+         */
+        ReviewItemStatus: "pending" | "accepted" | "dismissed";
         /** @description One `agent_runs` row. */
         Run: {
             /**
@@ -736,7 +956,7 @@ export interface components {
          * @description Where a run is.
          * @enum {string}
          */
-        RunStatus: "queued" | "running" | "succeeded" | "failed";
+        RunStatus: "queued" | "running" | "succeeded" | "failed" | "awaiting_approval" | "rejected";
         /** @description One `run_steps` row. */
         RunStep: {
             /**
@@ -829,7 +1049,20 @@ export interface components {
          * @description Where a step is.
          * @enum {string}
          */
-        StepStatus: "pending" | "running" | "succeeded" | "failed";
+        StepStatus: "pending" | "running" | "succeeded" | "failed" | "awaiting_approval";
+        /** @description The `POST /applications/{id}/tidy` body. */
+        TidyRequest: {
+            /**
+             * Format: double
+             * @description How sure the caller is of the note, 0 to 1 (default 1). Below 0.8 the note goes to
+             *     the review queue instead of the timeline.
+             */
+            confidence?: number | null;
+            /** @description The follow-up message to draft. Required; trimmed, at most 20,000 characters. */
+            message: string;
+            /** @description The note to add to the timeline. Required; trimmed, at most 20,000 characters. */
+            note: string;
+        };
         /** @description One `tool_calls` row. */
         ToolCall: {
             /**
@@ -868,7 +1101,7 @@ export interface components {
          * @description How a tool call ended.
          * @enum {string}
          */
-        ToolCallStatus: "running" | "succeeded" | "failed" | "invalid_input" | "invalid_output" | "unknown_tool";
+        ToolCallStatus: "running" | "succeeded" | "failed" | "invalid_input" | "invalid_output" | "unknown_tool" | "awaiting_approval";
         /** @description The 400 and 422 body: every failing field at once. */
         ValidationErrors: {
             errors: components["schemas"]["FieldError"][];
@@ -882,6 +1115,98 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_actions: {
+        parameters: {
+            query?: {
+                /** @description Only this run's actions */
+                run_id?: number;
+                /** @description Most actions to return; default 50, clamped to 1..=200 */
+                limit?: number;
+                /** @description Only actions with an `id` below this one, for the next page */
+                before?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Actions, `id` descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAction"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The actions could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    undo_action: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The action's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The undone action, with `undone_at` set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAction"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No action has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The action is already undone, has no undo data, its tool isn't registered, or the record changed or is gone */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The undo could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_applications: {
         parameters: {
             query?: never;
@@ -1703,6 +2028,79 @@ export interface operations {
             };
         };
     };
+    start_tidy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TidyRequest"];
+            };
+        };
+        responses: {
+            /** @description The queued `tidy_application` run */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No application has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `note` or `message` is blank or too long, or `confidence` is outside 0..=1 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The run could not be started */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     status: {
         parameters: {
             query?: never;
@@ -2079,6 +2477,171 @@ export interface operations {
             };
         };
     };
+    list_pending_actions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to 200 `pending` actions, `id` ascending (oldest first) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingAction"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The pending actions could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    approve_pending_action: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The pending action's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveAction"];
+            };
+        };
+        responses: {
+            /** @description The approved action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingAction"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No pending action has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The action is not `pending`, its run is not `awaiting_approval`, or its tool is no longer registered */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The edited `input` breaks the tool's input schema */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The decision could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reject_pending_action: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The pending action's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rejected action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingAction"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No pending action has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The action is not `pending` or its run is not `awaiting_approval` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The decision could not be stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_resumes: {
         parameters: {
             query?: never;
@@ -2309,6 +2872,40 @@ export interface operations {
                 content?: never;
             };
             /** @description The PDF could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_review_items: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to 200 `pending` items, `id` ascending (oldest first) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewItem"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The review items could not be read */
             500: {
                 headers: {
                     [name: string]: unknown;

@@ -4,7 +4,9 @@
 //! The protocol is served inside the API process over a Unix socket that exists for one
 //! `claude -p` call. The CLI starts the `waypoint-mcp` relay bin from the generated config,
 //! and the relay copies its stdio to and from the socket. Every `tools/call` goes through
-//! [`Registry::invoke_metered`], so it is recorded in `tool_calls` on the calling step.
+//! [`Registry::invoke_metered`], so it is recorded in `tool_calls` on the calling step and
+//! passes the same approval gate as step code: an `external` call waits for the user's
+//! approval and parks the step.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -20,7 +22,8 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::claude::{ClaudeError, ClaudeRunner, MCP_SERVER_NAME};
-use crate::tools::{Permission, Registry, Spend, ToolCallError};
+use crate::events::EventBus;
+use crate::tools::{Registry, Spend, ToolCallError};
 
 /// The longest request line read; a longer one closes the connection.
 pub const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
@@ -28,9 +31,9 @@ pub const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
 const LATEST_PROTOCOL: &str = "2025-06-18";
 const SUPPORTED_PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
-/// The `isError` text for a `tools/call` of an `external` tool.
-const EXTERNAL_REFUSED: &str =
-    "this tool needs the user's approval and isn't available to agents yet";
+/// The `isError` text for an `external` call waiting for the user's approval.
+const AWAITING_APPROVAL: &str =
+    "this action is waiting for the user's approval; end your turn without retrying it";
 /// The `isError` text when the `tool_calls` row can't be written.
 const DATABASE_FAILED: &str = "the tool call could not be recorded";
 
@@ -44,15 +47,20 @@ const INVALID_PARAMS: i64 = -32602;
 struct SessionState {
     tool_call_ids: Vec<i64>,
     spend: Spend,
+    /// A call waits for the user's approval, so the step parks.
+    parked: bool,
 }
 
-/// Serves MCP for one run step: every tool call is recorded against `step_id`. Clones
-/// share the session's record of tool call ids and spend.
+/// Serves MCP for one run step: every tool call is recorded against `step_id` and
+/// publishes `run.updated` for `run_id`. Clones share the session's record of tool call
+/// ids, spend and parking.
 #[derive(Clone)]
 pub struct Server {
     pool: PgPool,
     runner: ClaudeRunner,
     tools: Arc<Registry>,
+    bus: EventBus,
+    run_id: i64,
     step_id: i64,
     state: Arc<Mutex<SessionState>>,
 }
@@ -61,11 +69,20 @@ pub struct Server {
 type RpcError = (i64, &'static str);
 
 impl Server {
-    pub fn new(pool: PgPool, runner: ClaudeRunner, tools: Arc<Registry>, step_id: i64) -> Self {
+    pub fn new(
+        pool: PgPool,
+        runner: ClaudeRunner,
+        tools: Arc<Registry>,
+        bus: EventBus,
+        run_id: i64,
+        step_id: i64,
+    ) -> Self {
         Self {
             pool,
             runner,
             tools,
+            bus,
+            run_id,
             step_id,
             state: Arc::default(),
         }
@@ -138,14 +155,13 @@ impl Server {
         })
     }
 
-    /// Every registered tool except `external` ones, which need the user's approval and
-    /// aren't offered to agents until the approval gate exists.
+    /// Every registered tool, by name. `external` ones are listed too: calling one waits
+    /// for the user's approval.
     fn list(&self) -> Value {
         let tools: Vec<Value> = self
             .tools
             .describe()
             .into_iter()
-            .filter(|tool| tool.permission != Permission::External)
             .map(|tool| {
                 json!({
                     "name": tool.name,
@@ -169,10 +185,6 @@ impl Server {
             .filter(|arguments| !arguments.is_null())
             .cloned()
             .unwrap_or_else(|| json!({}));
-        if self.tools.permission(name) == Some(Permission::External) {
-            // The handler never runs and no row is written.
-            return Ok(text_result(EXTERNAL_REFUSED.to_owned(), true));
-        }
         let (spend, id, result) = self
             .tools
             .invoke_metered(
@@ -188,9 +200,16 @@ impl Server {
             let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
             state.spend.add(spend);
             state.tool_call_ids.extend(id);
+            if matches!(result, Err(ToolCallError::AwaitingApproval { .. })) {
+                state.parked = true;
+            }
         }
+        crate::runs::publish(&self.pool, &self.bus, self.run_id).await;
         match result {
             Ok(output) => Ok(text_result(output.to_string(), false)),
+            Err(ToolCallError::AwaitingApproval { .. }) => {
+                Ok(text_result(AWAITING_APPROVAL.to_owned(), true))
+            }
             Err(ToolCallError::UnknownTool) => Err((INVALID_PARAMS, "no tool has this name")),
             // The sqlx error can name tables and constraints; it stays in the log.
             Err(ToolCallError::Database(err)) => {
@@ -312,8 +331,9 @@ impl Session {
     }
 
     /// Stops accepting, waits for open connections to finish, removes the dir and returns
-    /// the `tool_calls` ids this session created and what their model calls spent.
-    pub(crate) async fn finish(mut self) -> (Vec<i64>, Spend) {
+    /// the `tool_calls` ids this session created, what their model calls spent and whether
+    /// one of them waits for the user's approval.
+    pub(crate) async fn finish(mut self) -> (Vec<i64>, Spend, bool) {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
@@ -328,7 +348,7 @@ impl Session {
             rocket::warn!("mcp: cannot remove the session's temp dir: {err}");
         }
         let state = self.server.take_state();
-        (state.tool_call_ids, state.spend)
+        (state.tool_call_ids, state.spend, state.parked)
     }
 }
 

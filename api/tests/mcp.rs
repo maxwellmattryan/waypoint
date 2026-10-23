@@ -6,6 +6,7 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -16,7 +17,7 @@ use waypoint_api::claude::{ClaudeRequest, ClaudeRunner};
 use waypoint_api::events::{Event, EventBus, Subscriber};
 use waypoint_api::jobs::{Wake, Worker};
 use waypoint_api::mcp::{MAX_LINE_BYTES, Server};
-use waypoint_api::runs::{self, Run, Runtime, StepContext, StepError, Workflow};
+use waypoint_api::runs::{self, Run, RunStatus, Runtime, StepContext, StepError, Workflow};
 use waypoint_api::tools::{Permission, Registry, Tool, ToolContext, ToolError};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -122,8 +123,9 @@ impl Tool for Broken {
     }
 }
 
-/// An `external` tool, which agents can neither see nor call yet.
-struct Sender;
+/// An `external` tool that counts how often its handler ran and sends nothing. Agents see
+/// it, and a call waits for the user's approval without running the handler.
+struct Sender(Arc<AtomicUsize>);
 
 #[rocket::async_trait]
 impl Tool for Sender {
@@ -142,7 +144,8 @@ impl Tool for Sender {
     }
 
     async fn call(&self, _ctx: &mut ToolContext<'_>, _input: Value) -> Result<Value, ToolError> {
-        panic!("an external tool's handler must not run for an agent");
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(json!({"sent": false}))
     }
 }
 
@@ -200,6 +203,11 @@ impl Workflow for Agent {
 }
 
 fn registry(tools: &[&str]) -> Registry {
+    registry_counting(tools, &Arc::default())
+}
+
+/// [`registry`], with `send`'s handler runs counted in `sent`.
+fn registry_counting(tools: &[&str], sent: &Arc<AtomicUsize>) -> Registry {
     let mut registry = Registry::default();
     for name in tools {
         match *name {
@@ -207,7 +215,7 @@ fn registry(tools: &[&str]) -> Registry {
             "summarize" => registry.register(Summarize),
             "broken" => registry.register(Broken),
             "liar" => registry.register(Liar),
-            "send" => registry.register(Sender),
+            "send" => registry.register(Sender(sent.clone())),
             other => panic!("no test tool {other}"),
         }
         .expect("register");
@@ -251,6 +259,11 @@ impl Harness {
 
     /// Starts an `agent` run and waits for its job to finish.
     async fn run(&self, subscriber: &mut Subscriber) -> Run {
+        self.run_with_events(subscriber).await.0
+    }
+
+    /// [`Harness::run`], also returning the events seen until the job finished.
+    async fn run_with_events(&self, subscriber: &mut Subscriber) -> (Run, Vec<Event>) {
         let started = runs::start(
             &self.pool,
             &self.bus,
@@ -262,16 +275,17 @@ impl Harness {
         .await
         .expect("start the run");
         let job_id = started.job_id.expect("job_id");
-        common::events(subscriber, TIMEOUT, |event| {
+        let events = common::events(subscriber, TIMEOUT, |event| {
             matches!(event, Event::JobSucceeded { job } | Event::JobFailed { job } if job.id == job_id)
         })
         .await;
-        runs::list_runs(&self.pool, 200, None)
+        let run = runs::list_runs(&self.pool, 200, None)
             .await
             .expect("list runs")
             .into_iter()
             .find(|run| run.id == started.id)
-            .expect("the run exists")
+            .expect("the run exists");
+        (run, events)
     }
 }
 
@@ -367,8 +381,19 @@ async fn protocol_round_trips(pool: PgPool) {
         .await
         .expect("the step");
     let fake = common::fake("success", TIMEOUT);
-    let tools = Arc::new(registry(&["lookup", "broken", "liar", "send"]));
-    let server = Server::new(pool.clone(), fake.runner.clone(), tools, step_id);
+    let sent = Arc::new(AtomicUsize::new(0));
+    let tools = Arc::new(registry_counting(
+        &["lookup", "broken", "liar", "send"],
+        &sent,
+    ));
+    let server = Server::new(
+        pool.clone(),
+        fake.runner.clone(),
+        tools,
+        EventBus::new(),
+        run.id,
+        step_id,
+    );
 
     let call = |id: i64, params: Value| {
         json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": params}).to_string()
@@ -401,6 +426,7 @@ async fn protocol_round_trips(pool: PgPool) {
                     {"name": "broken", "description": "Always fails", "inputSchema": object},
                     {"name": "liar", "description": "Returns the wrong shape", "inputSchema": object},
                     {"name": "lookup", "description": "Upper-cases a query", "inputSchema": lookup_schema},
+                    {"name": "send", "description": "Sends a message", "inputSchema": object},
                 ]}),
             )),
         ),
@@ -441,13 +467,13 @@ async fn protocol_round_trips(pool: PgPool) {
             call(11, json!({"name": 5})),
             Some(err(json!(11), -32602, "invalid params")),
         ),
-        // An `external` tool is refused without running its handler or writing a row.
+        // An `external` tool waits for the user's approval without running its handler.
         (
             call(15, json!({"name": "send", "arguments": {}})),
             Some(ok(
                 15,
                 text_result(
-                    "this tool needs the user's approval and isn't available to agents yet",
+                    "this action is waiting for the user's approval; end your turn without retrying it",
                     true,
                 ),
             )),
@@ -511,10 +537,19 @@ async fn protocol_round_trips(pool: PgPool) {
             ("broken", "failed"),
             ("liar", "invalid_output"),
             ("nope", "unknown_tool"),
+            ("send", "awaiting_approval"),
             ("lookup", "succeeded"),
         ],
         "a call without a name writes no row"
     );
+    assert_eq!(sent.load(Ordering::SeqCst), 0, "send's handler never ran");
+    let pending: Vec<(String, String, Value)> =
+        sqlx::query_as("SELECT tool, status, input FROM pending_actions WHERE run_step_id = $1")
+            .bind(step_id)
+            .fetch_all(&pool)
+            .await
+            .expect("read pending actions");
+    assert_eq!(pending, [("send".into(), "pending".into(), json!({}))]);
 }
 
 #[sqlx::test]
@@ -522,8 +557,25 @@ async fn agent_tool_calls_are_recorded_on_the_step(pool: PgPool) {
     let fake = common::fake("mcp", TIMEOUT);
     let runtime = agent_runtime("use the tools", &["lookup", "summarize"]);
     let (harness, mut subscriber) = Harness::start(&pool, fake.runner.clone(), runtime);
-    let run = harness.run(&mut subscriber).await;
+    let (run, events) = harness.run_with_events(&mut subscriber).await;
     assert_eq!(run.output, Some(json!({"text": "pong"})), "{run:?}");
+
+    // One `run.updated` per registry call, each before the step finishes.
+    let statuses: Vec<RunStatus> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::RunUpdated { run: updated } if updated.id == run.id => Some(updated.status),
+            _ => None,
+        })
+        .collect();
+    use RunStatus::{Queued, Running, Succeeded};
+    assert_eq!(
+        statuses,
+        [
+            Queued, Running, Running, Running, Running, Running, Running, Running, Succeeded
+        ],
+        "start, run running, step running, four tool calls, step succeeded, run succeeded"
+    );
 
     // The CLI got the isolated argv with the MCP flags last.
     let argv: Vec<String> = recorded(&fake.record, "argv")
@@ -642,6 +694,62 @@ async fn agent_tool_calls_are_recorded_on_the_step(pool: PgPool) {
     assert!((step.2 - (outer_cost + tool_cost)).abs() < 1e-12);
     assert_eq!((run.input_tokens, run.output_tokens), (step.0, step.1));
     assert!((run.cost_usd - step.2).abs() < 1e-12);
+}
+
+#[sqlx::test]
+async fn agent_external_call_parks_the_run(pool: PgPool) {
+    let fake = common::fake("mcp_external", TIMEOUT);
+    let sent = Arc::new(AtomicUsize::new(0));
+    let runtime = Runtime::new(
+        vec![Arc::new(Agent("send a message"))],
+        registry_counting(&["send"], &sent),
+    )
+    .expect("valid runtime");
+    let (harness, mut subscriber) = Harness::start(&pool, fake.runner.clone(), runtime);
+    let run = harness.run(&mut subscriber).await;
+
+    // The step's code returned `Ok`, but the call waits for approval, so the run parks.
+    assert_eq!(run.status, RunStatus::AwaitingApproval, "{run:?}");
+    assert_eq!((run.output, run.error), (None, None));
+    let step: (String, Option<Value>) =
+        sqlx::query_as("SELECT status, output FROM run_steps WHERE run_id = $1")
+            .bind(run.id)
+            .fetch_one(&pool)
+            .await
+            .expect("read the step");
+    assert_eq!(step, ("awaiting_approval".into(), None));
+
+    let responses: Vec<Value> = recorded(&fake.record, "mcp")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("each response is JSON"))
+        .collect();
+    assert_eq!(
+        responses[2],
+        ok(
+            3,
+            text_result(
+                "this action is waiting for the user's approval; end your turn without retrying it",
+                true
+            )
+        )
+    );
+    let rows = tool_calls(&pool, run.id).await;
+    let (outer, ..) = call_spend(&pool, "test.agent").await;
+    assert_eq!(
+        rows,
+        [("send".into(), "awaiting_approval".into(), None, Some(outer))]
+    );
+    let pending: Vec<(String, String, Value)> =
+        sqlx::query_as("SELECT tool, status, input FROM pending_actions WHERE run_id = $1")
+            .bind(run.id)
+            .fetch_all(&pool)
+            .await
+            .expect("read pending actions");
+    assert_eq!(
+        pending,
+        [("send".into(), "pending".into(), json!({"to": "a"}))]
+    );
+    assert_eq!(sent.load(Ordering::SeqCst), 0, "send's handler never ran");
 }
 
 #[sqlx::test]

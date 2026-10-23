@@ -1,9 +1,13 @@
 //! Agent runs: one `agent_runs` row per run of a workflow, one `run_steps` row per step and
 //! one `tool_calls` row per tool invocation. A run is executed by one `agent_run` queue job
 //! and resumes from its first unfinished step (see [`executor`] and docs/agent-runtime.md).
-//! The routes here are read-only.
+//! The routes here are read-only; [`approvals`], [`actions`] and [`review`] hold the
+//! guardrails: the approval gate's decisions, the action log with undo, and review items.
 
+pub mod actions;
+pub mod approvals;
 pub mod executor;
+pub mod review;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -26,6 +30,9 @@ use crate::tools::Permission;
 pub const DEFAULT_LIMIT: i64 = 50;
 /// Most runs one `GET /runs` returns.
 pub const MAX_LIMIT: i64 = 200;
+/// Results with a confidence below this go to the review queue instead of being applied
+/// (see [`StepContext::review_if_unsure`]).
+pub const REVIEW_THRESHOLD: f64 = 0.8;
 
 /// Where a run is.
 #[derive(
@@ -40,6 +47,11 @@ pub enum RunStatus {
     Succeeded,
     /// Stopped for good; `runs::resume` can queue it again.
     Failed,
+    /// A step is parked until the user decides its pending actions; approving the last one
+    /// queues the run again.
+    AwaitingApproval,
+    /// The user rejected a pending action; final.
+    Rejected,
 }
 
 /// Where a step is.
@@ -55,6 +67,9 @@ pub enum StepStatus {
     Succeeded,
     /// The last attempt failed; the next run of the job retries it.
     Failed,
+    /// Parked: it made an `external` tool call that waits for the user's approval. It runs
+    /// again once the run is approved.
+    AwaitingApproval,
 }
 
 /// How a tool call ended.
@@ -74,6 +89,8 @@ pub enum ToolCallStatus {
     InvalidOutput,
     /// No tool has the name; the handler didn't run.
     UnknownTool,
+    /// An `external` call waiting for the user's approval; the handler didn't run.
+    AwaitingApproval,
 }
 
 // The `Option` fields below are always serialized (as `null` when empty), so they are
@@ -306,7 +323,7 @@ pub async fn publish(pool: &PgPool, bus: &EventBus, run_id: i64) {
 }
 
 /// Inserts the run's `agent_run` job and points the run at it.
-async fn enqueue(
+pub(crate) async fn enqueue(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     bus: &EventBus,
     run_id: i64,

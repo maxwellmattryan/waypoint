@@ -15,6 +15,7 @@
 #                 to <record_dir>/mcp), then play success.jsonl. Without it (a tool's own
 #                 model call during that relay), record into <record_dir>/inner and play
 #                 success.jsonl.
+#   mcp_<name>    like mcp, relaying mcp_<name>_requests.jsonl instead
 set -eu
 
 mode=$1
@@ -30,7 +31,11 @@ for arg in "$@"; do
 	fi
 	prev=$arg
 done
-if [ "$mode" = mcp ] && [ -z "$mcp_config" ]; then
+case $mode in
+mcp | mcp_*) requests=${mode}_requests.jsonl ;;
+*) requests="" ;;
+esac
+if [ -n "$requests" ] && [ -z "$mcp_config" ]; then
 	record="$record/inner"
 	mkdir -p "$record"
 fi
@@ -66,7 +71,7 @@ exit1)
 	;;
 garbage) echo "not json" ;;
 flood) exec head -c 17825792 /dev/zero ;;
-mcp)
+mcp | mcp_*)
 	if [ -n "$mcp_config" ]; then
 		cp "$mcp_config" "$record/mcp_config"
 		cmd=$(sed -n 's/.*"command":"\([^"]*\)".*/\1/p' "$mcp_config")
@@ -74,7 +79,7 @@ mcp)
 		sock_dir=$(dirname "$sock")
 		stat -c %a "$sock_dir" >"$record/mcp_dir_mode" 2>/dev/null ||
 			stat -f %Lp "$sock_dir" >"$record/mcp_dir_mode"
-		"$cmd" --socket "$sock" <"$fixtures/mcp_requests.jsonl" >"$record/mcp"
+		"$cmd" --socket "$sock" <"$fixtures/$requests" >"$record/mcp"
 	fi
 	cat "$fixtures/success.jsonl"
 	;;

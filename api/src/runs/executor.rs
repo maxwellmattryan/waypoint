@@ -82,6 +82,9 @@ impl From<ToolCallError> for StepError {
             | ToolCallError::InvalidInput(_)
             | ToolCallError::InvalidOutput(_) => Self::Fail(err.to_string()),
             ToolCallError::Failed(_) | ToolCallError::Database(_) => Self::Retry(err.to_string()),
+            // The step parks whatever it returns; retry is the safe fallback.
+            ToolCallError::AwaitingApproval { .. } => Self::Retry(err.to_string()),
+            ToolCallError::Rejected => Self::Fail(err.to_string()),
             ToolCallError::Claude(err) => {
                 let message = format!("the tool's model call failed: {err}");
                 match Self::from(err) {
@@ -112,7 +115,8 @@ impl From<StepError> for Outcome {
     }
 }
 
-/// The workflows and tools the worker can run. The production runtime is empty for now.
+/// The workflows and tools the worker can run. The production runtime is
+/// [`crate::workflows::runtime`]; tests build their own.
 #[derive(Clone, Default)]
 pub struct Runtime {
     workflows: Arc<HashMap<&'static str, Arc<dyn Workflow>>>,
@@ -172,6 +176,9 @@ pub struct StepContext<'a> {
     run_id: i64,
     step_id: i64,
     meter: Meter,
+    /// Set once a tool call made through this context waits for the user's approval; the
+    /// step then parks whatever it returns.
+    parked: bool,
 }
 
 impl StepContext<'_> {
@@ -242,16 +249,20 @@ impl StepContext<'_> {
             self.pool.clone(),
             self.runner.clone(),
             self.tools.clone(),
+            self.bus.clone(),
+            self.run_id,
             self.step_id,
         );
         Session::start(server, self.runner.mcp_bin())
     }
 
-    /// Stops the session, adds its tools' spend to the step and, when the outer call
-    /// succeeded, links its tool calls to that call.
+    /// Stops the session, adds its tools' spend to the step, parks the step when a tool
+    /// call waits for approval and, when the outer call succeeded, links its tool calls to
+    /// that call.
     async fn close_mcp_session(&mut self, session: Session, log_id: Option<i64>) {
-        let (tool_call_ids, spend) = session.finish().await;
+        let (tool_call_ids, spend, parked) = session.finish().await;
         self.meter.spend.add(spend);
+        self.parked |= parked;
         if let Some(log_id) = log_id
             && !tool_call_ids.is_empty()
         {
@@ -271,15 +282,38 @@ impl StepContext<'_> {
     }
 
     /// Invokes tool `name`, recording it in `tool_calls`. Its model calls count against
-    /// this step even when it fails.
+    /// this step even when it fails. An `external` tool returns
+    /// [`ToolCallError::AwaitingApproval`] until the user approves the request, and the step
+    /// then parks whatever it returns.
     pub async fn tool(&mut self, name: &str, input: Value) -> Result<Value, ToolCallError> {
         let (spend, _, result) = self
             .tools
             .invoke_metered(self.pool, self.runner, self.step_id, None, name, input)
             .await;
         self.meter.spend.add(spend);
+        if matches!(result, Err(ToolCallError::AwaitingApproval { .. })) {
+            self.parked = true;
+        }
         super::publish(self.pool, self.bus, self.run_id).await;
         result
+    }
+
+    /// Sends a result the step isn't sure of to the review queue. When `confidence` is below
+    /// [`super::REVIEW_THRESHOLD`] or isn't finite, stores a `pending` review item for
+    /// `kind` and `payload` (once per step, kind and payload; a rerun gets the same id) and
+    /// returns its id: the step must then not apply the result. Otherwise returns `None`.
+    pub async fn review_if_unsure(
+        &self,
+        kind: &str,
+        confidence: f64,
+        payload: Value,
+    ) -> Result<Option<i64>, sqlx::Error> {
+        if confidence.is_finite() && confidence >= super::REVIEW_THRESHOLD {
+            return Ok(None);
+        }
+        super::review::insert(self.pool, self.step_id, kind, confidence, &payload)
+            .await
+            .map(Some)
     }
 }
 
@@ -342,7 +376,10 @@ async fn run(
     let Some(found) = found else {
         return Ok(Outcome::Fail(format!("run {run_id} does not exist")));
     };
-    if found.status == RunStatus::Succeeded {
+    if matches!(
+        found.status,
+        RunStatus::Succeeded | RunStatus::AwaitingApproval | RunStatus::Rejected
+    ) {
         return Ok(Outcome::Done(json!({"run_id": run_id})));
     }
     let Some(workflow) = runtime.workflow(&found.workflow) else {
@@ -394,11 +431,43 @@ async fn run(
             run_id,
             step_id: step.id,
             meter: Meter::default(),
+            parked: false,
         };
         let result = workflow.run_step(&mut ctx, &step.name, carried).await;
         let Meter { spend, last_call } = ctx.meter;
 
         let mut tx = pool.begin().await?;
+        if ctx.parked {
+            // A call waits for the user's approval, so whatever the step returned is set
+            // aside: it runs again once the run is approved.
+            sqlx::query(
+                "UPDATE run_steps SET status = 'awaiting_approval', output = NULL, \
+                 error = NULL, input_tokens = input_tokens + $2, \
+                 output_tokens = output_tokens + $3, cost_usd = cost_usd + $4, \
+                 claude_call_id = COALESCE($5, claude_call_id), updated_at = now() \
+                 WHERE id = $1",
+            )
+            .bind(step.id)
+            .bind(spend.input_tokens)
+            .bind(spend.output_tokens)
+            .bind(spend.cost_usd)
+            .bind(last_call)
+            .execute(&mut *tx)
+            .await?;
+            add_run_spend(&mut tx, run_id, spend).await?;
+            sqlx::query(
+                "UPDATE agent_runs SET status = 'awaiting_approval', error = NULL, \
+                 updated_at = now() WHERE id = $1",
+            )
+            .bind(run_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            super::publish(pool, bus, run_id).await;
+            return Ok(Outcome::Done(
+                json!({"run_id": run_id, "status": "awaiting_approval"}),
+            ));
+        }
         match result {
             Ok(output) => {
                 sqlx::query(
@@ -592,6 +661,13 @@ mod tests {
             (ToolCallError::Database(sqlx::Error::PoolClosed), "retry"),
             (ToolCallError::Claude(timeout), "retry"),
             (ToolCallError::Claude(usage), "usage_limit"),
+            (
+                ToolCallError::AwaitingApproval {
+                    pending_action_id: 1,
+                },
+                "retry",
+            ),
+            (ToolCallError::Rejected, "fail"),
         ];
         for (err, expected) in cases {
             let label = err.to_string();

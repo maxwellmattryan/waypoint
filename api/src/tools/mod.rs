@@ -3,8 +3,13 @@
 //! invocation through [`Registry::invoke`] is recorded in `tool_calls` (see
 //! docs/agent-runtime.md).
 //!
-//! Permission levels are stored on each call but not enforced yet; the approval gate for
-//! `external` tools is a later job.
+//! Permission levels are enforced here, for step code and the MCP server alike:
+//!
+//! - an `external` call never runs its handler on first request. It waits in
+//!   `pending_actions` for the user's decision ([`ToolCallError::AwaitingApproval`]), and
+//!   the step repeating the same request later runs the approved input once,
+//! - a succeeded `write` call is logged in `agent_actions` with the data its
+//!   [`Tool::undo`] needs, set by the handler through [`ToolContext::set_undo`].
 
 pub mod schema;
 
@@ -16,7 +21,7 @@ use std::time::Instant;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 
 use crate::claude::{
     ClaudeError, ClaudeRequest, ClaudeResponse, ClaudeRunner, MAX_ERROR_BYTES, head,
@@ -156,11 +161,19 @@ pub struct ToolContext<'a> {
     pool: &'a PgPool,
     runner: &'a ClaudeRunner,
     meter: Meter,
+    undo: Option<Value>,
 }
 
 impl ToolContext<'_> {
     pub fn pool(&self) -> &PgPool {
         self.pool
+    }
+
+    /// Records what [`Tool::undo`] needs to revert this call. A `write` tool's handler
+    /// calls it once its change is made; the data is stored on the call's `agent_actions`
+    /// row. Without it the action is logged but can't be undone.
+    pub fn set_undo(&mut self, data: Value) {
+        self.undo = Some(data);
     }
 
     /// [`ClaudeRunner::call`], counted against this tool call.
@@ -193,6 +206,35 @@ impl From<ClaudeError> for ToolError {
     }
 }
 
+/// Why a tool's undo didn't revert an action.
+#[derive(Debug)]
+pub enum UndoError {
+    /// The tool has no undo (the default for every tool).
+    Unsupported,
+    /// The record changed or is gone, so reverting would overwrite something else. Undo
+    /// refuses rather than overwrites.
+    Conflict(String),
+    Database(sqlx::Error),
+}
+
+impl fmt::Display for UndoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsupported => write!(f, "the tool can't undo its actions"),
+            Self::Conflict(message) => write!(f, "cannot undo: {message}"),
+            Self::Database(err) => write!(f, "cannot undo: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for UndoError {}
+
+impl From<sqlx::Error> for UndoError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Database(err)
+    }
+}
+
 /// A typed agent tool. `Input` types should use `#[serde(deny_unknown_fields)]` so the
 /// typed input refuses what the schema would let through. Handlers may run more than once
 /// for the same step (steps are at-least-once), so they should be idempotent.
@@ -214,6 +256,15 @@ pub trait Tool: Send + Sync + 'static {
         ctx: &mut ToolContext<'_>,
         input: Self::Input,
     ) -> Result<Self::Output, ToolError>;
+
+    /// Reverts one earlier call, given the data its handler passed to
+    /// [`ToolContext::set_undo`], on `conn` (inside the undo's transaction). It must report
+    /// [`UndoError::Conflict`] rather than overwrite a record that changed since. The
+    /// default supports no undo.
+    async fn undo(&self, conn: &mut PgConnection, data: Value) -> Result<(), UndoError> {
+        let _ = (conn, data);
+        Err(UndoError::Unsupported)
+    }
 }
 
 /// A registered tool, as the MCP server lists it (name, description and input schema).
@@ -241,11 +292,21 @@ pub enum ToolCallError {
     Claude(ClaudeError),
     /// The `tool_calls` row could not be written.
     Database(sqlx::Error),
+    /// An `external` call waits for the user's decision on this pending action; the
+    /// handler didn't run. The calling step parks until the user decides.
+    AwaitingApproval { pending_action_id: i64 },
+    /// The user rejected this `external` call; the handler never runs.
+    Rejected,
 }
 
 impl fmt::Display for ToolCallError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AwaitingApproval { pending_action_id } => write!(
+                f,
+                "waiting for the user's approval (pending action {pending_action_id})"
+            ),
+            Self::Rejected => write!(f, "the user rejected this action"),
             Self::UnknownTool => write!(f, "no tool has this name"),
             Self::InvalidInput(message) => write!(f, "invalid tool input: {message}"),
             Self::InvalidOutput(message) => write!(f, "invalid tool output: {message}"),
@@ -266,10 +327,23 @@ trait ErasedTool: Send + Sync {
         ctx: &mut ToolContext<'_>,
         input: Value,
     ) -> Result<Value, ToolCallError>;
+
+    /// Whether `input` deserializes into the typed input.
+    fn fits_input(&self, input: &Value) -> bool;
+
+    async fn undo_json(&self, conn: &mut PgConnection, data: Value) -> Result<(), UndoError>;
 }
 
 #[rocket::async_trait]
 impl<T: Tool> ErasedTool for T {
+    fn fits_input(&self, input: &Value) -> bool {
+        T::Input::deserialize(input).is_ok()
+    }
+
+    async fn undo_json(&self, conn: &mut PgConnection, data: Value) -> Result<(), UndoError> {
+        self.undo(conn, data).await
+    }
+
     async fn call_json(
         &self,
         ctx: &mut ToolContext<'_>,
@@ -405,13 +479,25 @@ impl Registry {
             pool,
             runner,
             meter: Meter::default(),
+            undo: None,
         };
+        // The pending action this call runs the approved handler for, if any.
+        let mut executes = None;
         let finished = match entry {
             None => Finished {
                 status: "unknown_tool",
                 output: None,
                 result: Err(ToolCallError::UnknownTool),
             },
+            Some(entry) if entry.info.permission == Permission::External => {
+                match gate(pool, step_id, id, entry, &input).await {
+                    Gate::Run { action_id, input } => {
+                        executes = Some(action_id);
+                        run(entry, &mut ctx, input).await
+                    }
+                    Gate::Done(finished) => finished,
+                }
+            }
             Some(entry) => run(entry, &mut ctx, input).await,
         };
         let spend = ctx.meter.spend;
@@ -421,13 +507,79 @@ impl Registry {
             .as_ref()
             .err()
             .map(|err| head(&err.to_string(), MAX_ERROR_BYTES).to_owned());
+        let succeeded = finished.status == "succeeded";
+        let record = Record {
+            id,
+            step_id,
+            tool: name,
+            // Only a `write` call that succeeded is an action to log.
+            action: entry
+                .filter(|entry| succeeded && entry.info.permission == Permission::Write)
+                .map(|_| ctx.undo),
+            executed: executes.filter(|_| succeeded),
+        };
 
-        let written = sqlx::query(
+        match record
+            .write(pool, &finished, error, spend, duration_ms)
+            .await
+        {
+            Ok(()) => (spend, Some(id), finished.result),
+            Err(err) => (spend, Some(id), Err(ToolCallError::Database(err))),
+        }
+    }
+
+    /// Checks `input` against tool `name`'s input schema and typed input, as an invocation
+    /// does before running the handler. Fails with `UnknownTool` or `InvalidInput`, whose
+    /// message names the path and never quotes a value.
+    pub fn check_input(&self, name: &str, input: &Value) -> Result<(), ToolCallError> {
+        let entry = self.tools.get(name).ok_or(ToolCallError::UnknownTool)?;
+        check(entry, input)
+    }
+
+    /// Runs tool `name`'s [`Tool::undo`] with `data` on `conn`. An unknown name is
+    /// [`UndoError::Unsupported`].
+    pub async fn undo(
+        &self,
+        name: &str,
+        conn: &mut PgConnection,
+        data: Value,
+    ) -> Result<(), UndoError> {
+        match self.tools.get(name) {
+            Some(entry) => entry.tool.undo_json(conn, data).await,
+            None => Err(UndoError::Unsupported),
+        }
+    }
+}
+
+/// The final write of one invocation: its `tool_calls` row, plus the `agent_actions` row of
+/// a succeeded `write` call and the pending action a succeeded approved call executed, all
+/// in one transaction.
+struct Record<'a> {
+    id: i64,
+    step_id: i64,
+    tool: &'a str,
+    /// `Some(undo_data)` when the call is an action to log.
+    action: Option<Option<Value>>,
+    /// The pending action to mark `executed`.
+    executed: Option<i64>,
+}
+
+impl Record<'_> {
+    async fn write(
+        self,
+        pool: &PgPool,
+        finished: &Finished,
+        error: Option<String>,
+        spend: Spend,
+        duration_ms: i64,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = pool.begin().await?;
+        sqlx::query(
             "UPDATE tool_calls SET status = $2, output = $3, error = $4, input_tokens = $5, \
              output_tokens = $6, cost_usd = $7, duration_ms = $8, finished_at = now() \
              WHERE id = $1",
         )
-        .bind(id)
+        .bind(self.id)
         .bind(finished.status)
         .bind(&finished.output)
         .bind(error)
@@ -435,12 +587,150 @@ impl Registry {
         .bind(spend.output_tokens)
         .bind(spend.cost_usd)
         .bind(duration_ms)
-        .execute(pool)
-        .await;
-        match written {
-            Ok(_) => (spend, Some(id), finished.result),
-            Err(err) => (spend, Some(id), Err(ToolCallError::Database(err))),
+        .execute(&mut *tx)
+        .await?;
+        if let Some(undo_data) = self.action {
+            if undo_data.is_none() {
+                rocket::warn!(
+                    "tools: write tool {} set no undo data (tool call {}); it can't be undone",
+                    self.tool,
+                    self.id
+                );
+            }
+            sqlx::query(
+                "INSERT INTO agent_actions (run_id, run_step_id, tool_call_id, tool, undo_data) \
+                 SELECT run_id, id, $2, $3, $4 FROM run_steps WHERE id = $1",
+            )
+            .bind(self.step_id)
+            .bind(self.id)
+            .bind(self.tool)
+            .bind(undo_data)
+            .execute(&mut *tx)
+            .await?;
         }
+        if let Some(action_id) = self.executed {
+            sqlx::query(
+                "UPDATE pending_actions SET status = 'executed', output = $2, \
+                 executed_tool_call_id = $3, executed_at = now() \
+                 WHERE id = $1 AND status = 'approved'",
+            )
+            .bind(action_id)
+            .bind(&finished.output)
+            .bind(self.id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await
+    }
+}
+
+/// What the approval gate decided for an `external` call.
+enum Gate {
+    /// The user approved it: run the handler with `input`, then mark the action executed.
+    Run { action_id: i64, input: Value },
+    /// The call ends here without running the handler.
+    Done(Finished),
+}
+
+/// The approval gate for an `external` call: checks the input, then finds or creates the
+/// step's pending action for this tool and requested input and acts on its status.
+async fn gate(
+    pool: &PgPool,
+    step_id: i64,
+    tool_call_id: i64,
+    entry: &Entry,
+    input: &Value,
+) -> Gate {
+    if let Err(err) = check(entry, input) {
+        return Gate::Done(Finished {
+            status: "invalid_input",
+            output: None,
+            result: Err(err),
+        });
+    }
+    let found = pending_action(pool, step_id, tool_call_id, entry.info.name, input).await;
+    let (action_id, status, approved_input, output) = match found {
+        Ok(found) => found,
+        Err(err) => {
+            return Gate::Done(Finished {
+                status: "failed",
+                output: None,
+                result: Err(ToolCallError::Database(err)),
+            });
+        }
+    };
+    Gate::Done(match status.as_str() {
+        "approved" => {
+            return Gate::Run {
+                action_id,
+                input: approved_input.unwrap_or_else(|| input.clone()),
+            };
+        }
+        // Steps are at-least-once: a rerun gets the stored output, not a second send.
+        "executed" => {
+            let output = output.unwrap_or(Value::Null);
+            Finished {
+                status: "succeeded",
+                output: Some(output.clone()),
+                result: Ok(output),
+            }
+        }
+        "rejected" => Finished {
+            status: "failed",
+            output: None,
+            result: Err(ToolCallError::Rejected),
+        },
+        _ => Finished {
+            status: "awaiting_approval",
+            output: None,
+            result: Err(ToolCallError::AwaitingApproval {
+                pending_action_id: action_id,
+            }),
+        },
+    })
+}
+
+/// `(id, status, approved_input, output)` of the pending action keyed on (step, tool,
+/// requested input), inserted as `pending` by `tool_call_id` when there is none yet.
+async fn pending_action(
+    pool: &PgPool,
+    step_id: i64,
+    tool_call_id: i64,
+    tool: &str,
+    input: &Value,
+) -> Result<(i64, String, Option<Value>, Option<Value>), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO pending_actions (run_id, run_step_id, tool_call_id, tool, input) \
+         SELECT run_id, id, $2, $3, $4 FROM run_steps WHERE id = $1 \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(step_id)
+    .bind(tool_call_id)
+    .bind(tool)
+    .bind(input)
+    .execute(pool)
+    .await?;
+    sqlx::query_as(
+        "SELECT id, status, approved_input, output FROM pending_actions \
+         WHERE run_step_id = $1 AND tool = $2 AND md5(input::text) = md5($3::jsonb::text)",
+    )
+    .bind(step_id)
+    .bind(tool)
+    .bind(input)
+    .fetch_one(pool)
+    .await
+}
+
+/// Checks `input` against the entry's input schema, then its typed input.
+fn check(entry: &Entry, input: &Value) -> Result<(), ToolCallError> {
+    schema::validate(&entry.info.input_schema, input).map_err(ToolCallError::InvalidInput)?;
+    if entry.tool.fits_input(input) {
+        Ok(())
+    } else {
+        // serde's message can quote the input, so only say that it didn't fit.
+        Err(ToolCallError::InvalidInput(
+            "$: does not fit the tool's input type".into(),
+        ))
     }
 }
 
