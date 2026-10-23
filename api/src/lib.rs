@@ -25,6 +25,7 @@ pub mod profile;
 pub mod resumes;
 pub mod retrieval;
 pub mod runs;
+pub mod sourcing;
 pub mod tools;
 pub mod workflows;
 
