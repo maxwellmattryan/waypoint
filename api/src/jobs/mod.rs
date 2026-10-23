@@ -40,6 +40,10 @@ pub const RESUME_PROFILE: &str = "resume_profile";
 pub const GMAIL_SYNC: &str = "gmail_sync";
 /// Attempts each `gmail_sync` page gets.
 pub const GMAIL_SYNC_MAX_ATTEMPTS: i32 = 5;
+/// The `source_board` job kind: payload `{"source": "greenhouse" | "lever" | "ashby",
+/// "board": string}`, reads one public job board and keeps its rows in `job_postings` in
+/// step with it (see `sourcing`).
+pub const SOURCE_BOARD: &str = "source_board";
 
 /// One `jobs` row. This is also the `GET /jobs/<id>` body; the payload is not echoed.
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, utoipa::ToSchema)]

@@ -2814,6 +2814,66 @@
           }
         }
       }
+    },
+    "/sourcing/boards": {
+      "post": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "Queues a fetch of one public job board into `job_postings`.",
+        "operationId": "source_board",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceBoardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The board's `source_board` job: new, or the one already queued or running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceBoardQueued"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "The source or the board slug is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The job could not be queued"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4870,6 +4930,48 @@
           "remove",
           "replace"
         ]
+      },
+      "SourceBoardQueued": {
+        "type": "object",
+        "description": "The 202 body.",
+        "required": [
+          "job",
+          "reused"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job",
+            "description": "The queued or running `source_board` job; its `result` holds the counts."
+          },
+          "reused": {
+            "type": "boolean",
+            "description": "`true` when a fetch of this board was already queued or running and nothing new\nwas enqueued."
+          }
+        }
+      },
+      "SourceBoardRequest": {
+        "type": "object",
+        "description": "The `POST /sourcing/boards` body.",
+        "required": [
+          "source",
+          "board"
+        ],
+        "properties": {
+          "board": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The board's slug, as in its board URL (`boards.greenhouse.io/<board>`,\n`jobs.lever.co/<board>`, `jobs.ashbyhq.com/<board>`): 1–100 letters, digits,\nhyphens or underscores. Trimmed; case is kept. Required."
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`greenhouse`, `lever` or `ashby`. Required."
+          }
+        }
       },
       "SourceEmail": {
         "type": "object",

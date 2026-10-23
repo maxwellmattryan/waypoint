@@ -363,6 +363,7 @@ impl Harness {
             wake: wake.0.clone(),
             runtime: Default::default(),
             google: google.clone(),
+            capture: waypoint_api::capture::Capturer::new(Default::default()),
         }
         .spawn(stopped);
         let harness = Self {

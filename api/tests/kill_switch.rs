@@ -207,6 +207,7 @@ fn spawn_worker(
         wake: wake.0.clone(),
         runtime,
         google: Google::new(google::Config::default()),
+        capture: waypoint_api::capture::Capturer::new(Default::default()),
     }
     .spawn(stopped);
     (fake, stop)

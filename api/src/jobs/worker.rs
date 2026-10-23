@@ -11,13 +11,15 @@ use sqlx::PgPool;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
-use super::{AGENT_RUN, CAPTURE_EXTRACT, Config, GMAIL_SYNC, Job, RESUME_PROFILE, TEST_PROMPT};
+use super::{
+    AGENT_RUN, CAPTURE_EXTRACT, Config, GMAIL_SYNC, Job, RESUME_PROFILE, SOURCE_BOARD, TEST_PROMPT,
+};
 use crate::capture::{self, llm::LlmError};
 use crate::claude::{ClaudeError, ClaudeRequest, ClaudeRunner};
 use crate::events::{Event, EventBus};
 use crate::gmail::sync::PageOutcome;
 use crate::profile::resume::ImportError;
-use crate::{gmail, google, profile, runs};
+use crate::{gmail, google, profile, runs, sourcing};
 
 /// The delay before retry number `attempt` (1-based): `base * 2^(attempt-1)`, capped at
 /// `cap`. It saturates instead of overflowing.
@@ -39,6 +41,8 @@ pub struct Worker {
     pub runtime: runs::Runtime,
     /// Google settings and HTTP client, for `gmail_sync` jobs.
     pub google: google::Google,
+    /// Capture settings and HTTP client, for `source_board` jobs.
+    pub capture: capture::Capturer,
 }
 
 /// What a handler decided about one attempt.
@@ -66,6 +70,7 @@ struct Context {
     config: Config,
     runtime: runs::Runtime,
     google: google::Google,
+    capture: capture::Capturer,
     wake: crate::jobs::Wake,
     /// Tells the loop to pause until this time.
     pause: mpsc::UnboundedSender<DateTime<Utc>>,
@@ -102,6 +107,7 @@ impl Worker {
             config: self.config.clone(),
             runtime: self.runtime.clone(),
             google: self.google.clone(),
+            capture: self.capture.clone(),
             wake: crate::jobs::Wake(self.wake.clone()),
             pause: pause_tx,
         };
@@ -274,7 +280,18 @@ async fn dispatch(ctx: &Context, job: &Job) -> JobOutcome {
         GMAIL_SYNC => gmail::sync::run_page(&ctx.pool, &ctx.bus, &ctx.wake, &ctx.google, job)
             .await
             .into(),
+        SOURCE_BOARD => sourcing::run(&ctx.pool, &ctx.capture, job).await.into(),
         other => JobOutcome::Fail(format!("unknown job kind {other:?}")),
+    }
+}
+
+impl From<sourcing::Outcome> for JobOutcome {
+    fn from(outcome: sourcing::Outcome) -> Self {
+        match outcome {
+            sourcing::Outcome::Done(result) => Self::Done(result),
+            sourcing::Outcome::Retry(error) => Self::Retry(error),
+            sourcing::Outcome::Fail(error) => Self::Fail(error),
+        }
     }
 }
 

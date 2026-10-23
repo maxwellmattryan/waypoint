@@ -645,6 +645,7 @@ pub async fn run(
         runtime: runtime.clone(),
         // Not configured: the scratch database never syncs Gmail.
         google: crate::google::Google::new(crate::google::Config::default()),
+        capture: crate::capture::Capturer::new(crate::capture::Config::default()),
     }
     .spawn(stopped);
 
