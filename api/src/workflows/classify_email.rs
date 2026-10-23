@@ -14,16 +14,18 @@
 //! stored rows. [`crate::email::ingest`] queues the runs.
 
 use std::fmt;
+use std::time::Duration;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, SecondsFormat, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::claude::ClaudeRequest;
-use crate::runs::{StepContext, StepError, Workflow};
+use crate::events::EventBus;
+use crate::runs::{self, Run, StepContext, StepError, Workflow};
 
 /// The workflow's name.
 pub const WORKFLOW: &str = "classify_email";
@@ -149,6 +151,57 @@ fn key_for_version(input: &KeyInput<'_>, version: i32) -> String {
     };
     let text = serde_json::to_string(&keyed).unwrap_or_default();
     format!("{:x}", Sha256::digest(text.as_bytes()))
+}
+
+/// Ingest's half of the trigger, inside its transaction: stores a `pending` row for
+/// `(email_id, key)` and queues a `classify_email` run for it, unless the email already
+/// has a row for this key that isn't `superseded` (one that is becomes `pending` again).
+/// A new row supersedes the email's other `pending` rows. Returns the queued run; the
+/// caller publishes it after the commit and wakes the worker.
+pub(crate) async fn queue(
+    tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
+    email_id: i64,
+    key: &str,
+) -> sqlx::Result<Option<Run>> {
+    let row: Option<i64> = sqlx::query_scalar(
+        "INSERT INTO email_classifications (email_id, input_key, classifier_version) \
+         VALUES ($1, $2, $3) ON CONFLICT (email_id, input_key) DO UPDATE \
+           SET status = 'pending', updated_at = now() \
+           WHERE email_classifications.status = 'superseded' \
+         RETURNING id",
+    )
+    .bind(email_id)
+    .bind(key)
+    .bind(CLASSIFIER_VERSION)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    sqlx::query(
+        "UPDATE email_classifications SET status = 'superseded', updated_at = now() \
+         WHERE email_id = $1 AND input_key <> $2 AND status = 'pending'",
+    )
+    .bind(email_id)
+    .bind(key)
+    .execute(&mut **tx)
+    .await?;
+    let run = runs::insert_run(
+        tx,
+        bus,
+        WORKFLOW,
+        &[STEP],
+        json!({"email_id": email_id, "input_key": key}),
+        Duration::ZERO,
+    )
+    .await?;
+    sqlx::query("UPDATE email_classifications SET run_id = $2, updated_at = now() WHERE id = $1")
+        .bind(row)
+        .bind(run.id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(Some(run))
 }
 
 /// The `--json-schema`: every key required, nothing else, at every level.

@@ -11,12 +11,17 @@ use rocket::http::{ContentType, Header, Status};
 use rocket::local::asynchronous::Client;
 use serde_json::{Value, json};
 use sqlx::PgPool;
+use waypoint_api::email::heuristics::KnownCompanies;
+use waypoint_api::email::{self, Ingested, NewEmail, Source};
 use waypoint_api::events::EventBus;
 use waypoint_api::jobs::Wake;
 use waypoint_api::runs;
 use waypoint_api::workflows::{self, classify_email};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
+const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/emails");
+/// The candidate fixtures under `api/fixtures/emails/` (the other 5 are skips).
+const CANDIDATES: i64 = 15;
 
 fn host() -> Header<'static> {
     Header::new("Host", common::HOST)
@@ -466,4 +471,178 @@ async fn classified_and_superseded_runs_skip_the_model(pool: PgPool) {
 
     assert_eq!(count(&pool, "SELECT count(*) FROM claude_calls").await, 0);
     assert!(!fake.record.join("argv").exists(), "the fake was never run");
+}
+
+/// The body of `POST /dev/emails/import-fixtures`.
+async fn import(client: &Client) -> Value {
+    let response = client
+        .post("/dev/emails/import-fixtures")
+        .header(host())
+        .header(Header::new("X-Waypoint-Dev", "1"))
+        .dispatch()
+        .await;
+    assert_eq!(response.status(), Status::Ok);
+    response.into_json().await.expect("a JSON body")
+}
+
+/// Ingests `raw` as fixture `stem`, the way the import does.
+async fn ingest(pool: &PgPool, stem: &str, raw: Vec<u8>) -> Ingested {
+    email::ingest(
+        pool,
+        &EventBus::default(),
+        &Wake::default(),
+        NewEmail {
+            source: Source::Fixture,
+            provider_message_id: stem.into(),
+            provider_thread_id: None,
+            labels: Vec::new(),
+            raw,
+        },
+        &KnownCompanies::default(),
+    )
+    .await
+    .expect("ingest")
+}
+
+fn fixture(file: &str) -> Vec<u8> {
+    std::fs::read(format!("{FIXTURES}/{file}")).expect("read a fixture")
+}
+
+async fn classify_runs(pool: &PgPool) -> i64 {
+    count(
+        pool,
+        "SELECT count(*) FROM agent_runs WHERE workflow = 'classify_email'",
+    )
+    .await
+}
+
+/// `(status, input_key, run_id)` of each of email `email_id`'s rows, oldest first.
+async fn rows_of(pool: &PgPool, email_id: i64) -> Vec<(String, String, Option<i64>)> {
+    sqlx::query_as(
+        "SELECT status, input_key, run_id FROM email_classifications WHERE email_id = $1 \
+         ORDER BY id",
+    )
+    .bind(email_id)
+    .fetch_all(pool)
+    .await
+    .expect("read the rows")
+}
+
+/// One stored email's keyed columns.
+#[derive(sqlx::FromRow)]
+struct KeyColumns {
+    id: i64,
+    verdict: String,
+    subject: String,
+    from_address: Option<String>,
+    from_name: Option<String>,
+    sent_at: Option<DateTime<Utc>>,
+    body_text: String,
+    signature: Option<String>,
+    ats: Option<String>,
+}
+
+impl KeyColumns {
+    fn key(&self) -> String {
+        classify_email::input_key(&classify_email::KeyInput {
+            subject: &self.subject,
+            from_address: self.from_address.as_deref(),
+            from_name: self.from_name.as_deref(),
+            sent_at: self.sent_at,
+            body_text: &self.body_text,
+            signature: self.signature.as_deref(),
+            ats: self.ats.as_deref(),
+        })
+    }
+}
+
+#[sqlx::test]
+async fn fixture_import_queues_one_run_per_candidate(pool: PgPool) {
+    // Model calls hang, so the queued runs stay in flight and write nothing else.
+    let (client, _fake) = app(&pool, "hang").await;
+    let body = import(&client).await;
+    assert_eq!(body["candidates"], json!(CANDIDATES), "{body}");
+    assert_eq!(body["skipped"], json!(5), "{body}");
+    assert_eq!(body["classify_queued"], json!(CANDIDATES), "{body}");
+    assert_eq!(classify_runs(&pool).await, CANDIDATES);
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM email_classifications").await,
+        CANDIDATES
+    );
+
+    let emails: Vec<KeyColumns> = sqlx::query_as(
+        "SELECT id, verdict, subject, from_address, from_name, sent_at, body_text, signature, \
+         ats FROM emails ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read the emails");
+    for stored in &emails {
+        let rows = rows_of(&pool, stored.id).await;
+        if stored.verdict == "skip" {
+            assert_eq!(rows, [], "a skip queues nothing");
+            continue;
+        }
+        // The key ingest computed is the one the stored row gives.
+        let key = stored.key();
+        assert_eq!(rows.len(), 1, "{}", stored.subject);
+        let (status, row_key, run_id) = &rows[0];
+        assert_eq!((status.as_str(), row_key), ("pending", &key));
+        let input: Value = sqlx::query_scalar(
+            "SELECT input FROM agent_runs WHERE id = $1 AND workflow = 'classify_email'",
+        )
+        .bind(run_id.expect("the row names its run"))
+        .fetch_one(&pool)
+        .await
+        .expect("read the run");
+        assert_eq!(input, json!({"email_id": stored.id, "input_key": key}));
+    }
+}
+
+#[sqlx::test]
+async fn reingest_queues_only_when_content_changes(pool: PgPool) {
+    let (client, _fake) = app(&pool, "hang").await;
+    import(&client).await;
+
+    // An unchanged corpus queues nothing.
+    let again = import(&client).await;
+    assert_eq!(again["updated"], json!(20), "{again}");
+    assert_eq!(again["classify_queued"], json!(0), "{again}");
+    assert_eq!(classify_runs(&pool).await, CANDIDATES);
+
+    // A changed body queues one run and supersedes the pending row.
+    let original = String::from_utf8(fixture("recruiter-outreach.eml")).expect("utf-8");
+    let changed = original.replace("30-minute call", "45-minute call");
+    assert_ne!(changed, original);
+    let done = ingest(&pool, "recruiter-outreach", changed.clone().into_bytes()).await;
+    assert!(!done.inserted);
+    let run = done.classify_run_id.expect("a new run");
+    assert_eq!(classify_runs(&pool).await, CANDIDATES + 1);
+    let rows = rows_of(&pool, done.id).await;
+    let statuses: Vec<(&str, Option<i64>)> = rows
+        .iter()
+        .map(|(status, _, run_id)| (status.as_str(), *run_id))
+        .collect();
+    assert_eq!(statuses.len(), 2, "{rows:?}");
+    assert_eq!(statuses[0].0, "superseded");
+    assert_eq!(statuses[1], ("pending", Some(run)));
+    let input: Value = sqlx::query_scalar("SELECT input FROM agent_runs WHERE id = $1")
+        .bind(run)
+        .fetch_one(&pool)
+        .await
+        .expect("read the run");
+    assert_eq!(
+        input,
+        json!({"email_id": done.id, "input_key": rows[1].1.clone()})
+    );
+
+    // The same changed content again queues nothing.
+    let same = ingest(&pool, "recruiter-outreach", changed.into_bytes()).await;
+    assert_eq!(same.classify_run_id, None);
+
+    // A skip message never queues a run.
+    let skip = ingest(&pool, "newsletter-copy", fixture("newsletter.eml")).await;
+    assert_eq!(skip.verdict, email::VerdictKind::Skip);
+    assert_eq!(skip.classify_run_id, None);
+    assert_eq!(classify_runs(&pool).await, CANDIDATES + 1);
 }
