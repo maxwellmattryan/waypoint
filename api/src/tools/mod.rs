@@ -9,9 +9,11 @@
 //!   `pending_actions` for the user's decision ([`ToolCallError::AwaitingApproval`]), and
 //!   the step repeating the same request later runs the approved input once: the attempt
 //!   that claims the action (`approved` → `executing`) runs the handler, and no attempt
-//!   ever runs it again, whether it ended `executed` or `failed`,
+//!   ever runs it again, whether it ended `executed` or `failed`. A `write` tool that
+//!   declares [`Tool::NEEDS_APPROVAL`] goes through the same gate,
 //! - a succeeded `write` call is logged in `agent_actions` with the data its
-//!   [`Tool::undo`] needs, set by the handler through [`ToolContext::set_undo`].
+//!   [`Tool::undo`] needs, set by the handler through [`ToolContext::set_undo`]. That
+//!   includes a gated `write` call, logged once its approved handler succeeds.
 
 pub mod schema;
 
@@ -245,6 +247,11 @@ pub trait Tool: Send + Sync + 'static {
     const NAME: &'static str;
     const DESCRIPTION: &'static str;
     const PERMISSION: Permission;
+    /// Whether a call waits for the user's approval like an `external` one, although the
+    /// tool only changes Waypoint's data. `external` tools are always gated; this is for a
+    /// `write` tool whose change is the user's decision (approving an application packet,
+    /// say). Default `false`.
+    const NEEDS_APPROVAL: bool = false;
     type Input: DeserializeOwned + Send;
     type Output: Serialize + Send;
 
@@ -275,8 +282,18 @@ pub struct ToolInfo {
     pub name: &'static str,
     pub description: &'static str,
     pub permission: Permission,
+    /// [`Tool::NEEDS_APPROVAL`].
+    pub needs_approval: bool,
     pub input_schema: Value,
     pub output_schema: Value,
+}
+
+impl ToolInfo {
+    /// Whether a call goes through the approval gate: every `external` tool, and a tool
+    /// that declares [`Tool::NEEDS_APPROVAL`].
+    pub fn gated(&self) -> bool {
+        self.permission == Permission::External || self.needs_approval
+    }
 }
 
 /// Why an invocation didn't produce a valid output.
@@ -413,6 +430,7 @@ impl Registry {
             name: T::NAME,
             description: T::DESCRIPTION,
             permission: T::PERMISSION,
+            needs_approval: T::NEEDS_APPROVAL,
             input_schema: T::input_schema(),
             output_schema: T::output_schema(),
         };
@@ -505,7 +523,7 @@ impl Registry {
                 output: None,
                 result: Err(ToolCallError::UnknownTool),
             },
-            Some(entry) if entry.info.permission == Permission::External => {
+            Some(entry) if entry.info.gated() => {
                 match gate(pool, step_id, id, entry, &input).await {
                     Gate::Run { action_id, input } => {
                         executes = Some(action_id);
@@ -528,9 +546,14 @@ impl Registry {
             id,
             step_id,
             tool: name,
-            // Only a `write` call that succeeded is an action to log.
+            // Only a `write` call whose handler ran and succeeded is an action to log: a
+            // gated rerun that gets the stored output ran nothing.
             action: entry
-                .filter(|entry| succeeded && entry.info.permission == Permission::Write)
+                .filter(|entry| {
+                    succeeded
+                        && entry.info.permission == Permission::Write
+                        && (!entry.info.gated() || executes.is_some())
+                })
                 .map(|_| ctx.undo),
             executed: executes,
         };
@@ -951,6 +974,7 @@ mod tests {
                 name: "echo",
                 description: "Returns its input",
                 permission: Permission::Read,
+                needs_approval: false,
                 input_schema: json!({"type": "object"}),
                 output_schema: json!({"type": "object"}),
             }

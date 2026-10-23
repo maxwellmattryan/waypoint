@@ -1123,3 +1123,114 @@ async fn a_failed_approved_action_never_runs_again(pool: PgPool) {
     );
     assert_eq!(tool.calls.load(Ordering::SeqCst), 1, "the handler ran once");
 }
+
+/// A `write` tool that counts its handler runs and sets undo data; gated when `GATED`.
+#[derive(Clone, Default)]
+struct Writer<const GATED: bool> {
+    calls: Arc<AtomicUsize>,
+}
+
+#[rocket::async_trait]
+impl<const GATED: bool> Tool for Writer<GATED> {
+    const NAME: &'static str = if GATED { "gated_write" } else { "plain_write" };
+    const DESCRIPTION: &'static str = "Changes Waypoint's data";
+    const PERMISSION: Permission = Permission::Write;
+    const NEEDS_APPROVAL: bool = GATED;
+    type Input = Value;
+    type Output = Value;
+
+    fn input_schema() -> Value {
+        json!({"type": "object"})
+    }
+    fn output_schema() -> Value {
+        json!({"type": "object"})
+    }
+    async fn call(&self, ctx: &mut ToolContext<'_>, input: Value) -> Result<Value, ToolError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        ctx.set_undo(json!({"undo": input}));
+        Ok(json!({"written": true}))
+    }
+}
+
+/// `(tool, undo_data)` of every logged action, by id.
+async fn logged_actions(pool: &PgPool) -> Vec<(String, Option<Value>)> {
+    sqlx::query_as("SELECT tool, undo_data FROM agent_actions ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .expect("read actions")
+}
+
+#[sqlx::test]
+async fn a_write_tool_that_needs_approval_parks_then_logs_its_action(pool: PgPool) {
+    let gated = Writer::<true>::default();
+    let plain = Writer::<false>::default();
+    let mut registry = Registry::default();
+    registry.register(gated.clone()).expect("gated registers");
+    registry.register(plain.clone()).expect("plain registers");
+    let runner = ClaudeRunner::new("claude", Duration::from_secs(1));
+    let (step,): (i64,) = sqlx::query_as(
+        "WITH run AS (INSERT INTO agent_runs (workflow, input) VALUES ('w', '{}') RETURNING id) \
+         INSERT INTO run_steps (run_id, ordinal, name) SELECT id, 0, 'a' FROM run RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("insert a run and step");
+    let input = json!({"to": "a"});
+
+    // Without the flag a write tool runs at once and is logged.
+    let ran = registry
+        .invoke(&pool, &runner, step, None, "plain_write", input.clone())
+        .await
+        .expect("the plain write runs");
+    assert_eq!(ran.0, json!({"written": true}));
+    assert_eq!(plain.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        logged_actions(&pool).await,
+        [("plain_write".into(), Some(json!({"undo": input})))]
+    );
+
+    // With it the first call parks without running the handler.
+    let asked = registry
+        .invoke(&pool, &runner, step, None, "gated_write", input.clone())
+        .await;
+    let Err(ToolCallError::AwaitingApproval { pending_action_id }) = asked else {
+        panic!("the first request waits for approval: {asked:?}");
+    };
+    assert_eq!(gated.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(action_status(&pool, pending_action_id).await, "pending");
+    assert_eq!(logged_actions(&pool).await.len(), 1, "nothing logged yet");
+
+    let edited = json!({"to": "b"});
+    sqlx::query(
+        "UPDATE pending_actions SET status = 'approved', approved_input = $2, \
+         decided_at = now() WHERE id = $1",
+    )
+    .bind(pending_action_id)
+    .bind(&edited)
+    .execute(&pool)
+    .await
+    .expect("approve");
+
+    // Approved, it runs once with the approved input and is logged with its undo data.
+    let ran = registry
+        .invoke(&pool, &runner, step, None, "gated_write", input.clone())
+        .await
+        .expect("the approved write runs");
+    assert_eq!(ran.0, json!({"written": true}));
+    assert_eq!(gated.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(action_status(&pool, pending_action_id).await, "executed");
+    let logged = logged_actions(&pool).await;
+    assert_eq!(
+        logged[1..],
+        [("gated_write".into(), Some(json!({"undo": edited})))]
+    );
+
+    // A rerun gets the stored output: no second run and no second log entry.
+    let rerun = registry
+        .invoke(&pool, &runner, step, None, "gated_write", input)
+        .await
+        .expect("a rerun gets the stored output");
+    assert_eq!(rerun.0, json!({"written": true}));
+    assert_eq!(gated.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(logged_actions(&pool).await.len(), 2);
+}
