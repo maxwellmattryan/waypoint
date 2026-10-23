@@ -119,6 +119,14 @@ export class RunsStore {
 	/** Applies one event from `/events`. Events before the first load finishes are dropped. */
 	handle(event: Event): void {
 		switch (event.type) {
+			case 'data.deleted':
+				// Every run is gone, so the older pages a refresh keeps must go too.
+				if (this.state.kind === 'loaded') {
+					this.runs = [];
+					this.hasMore = false;
+				}
+				void this.refresh();
+				return;
 			case 'app.connected':
 			case 'app.lagged':
 				void this.refresh();
@@ -202,6 +210,10 @@ export class RunDetailStore {
 	/** Applies one event from `/events`: only this run's updates and reconnects refetch. */
 	handle(event: Event): void {
 		switch (event.type) {
+			case 'data.deleted':
+				// A refresh keeps the shown run when it's gone; a load shows "not found".
+				if (this.state.kind === 'loaded') void this.load();
+				return;
 			case 'app.connected':
 			case 'app.lagged':
 				void this.refresh();

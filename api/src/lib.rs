@@ -12,6 +12,7 @@ pub mod google;
 mod health;
 pub mod host;
 pub mod jobs;
+pub mod kill_switch;
 pub mod mcp;
 pub mod openapi;
 pub mod resumes;
@@ -95,6 +96,9 @@ pub fn rocket(
                 google::callback,
                 google::status,
                 google::disconnect,
+                kill_switch::show,
+                kill_switch::update,
+                kill_switch::delete_all,
             ],
         )
         .attach(AdHoc::on_liftoff("job worker", move |_| {

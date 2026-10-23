@@ -5,7 +5,8 @@ import {
 	startTestPrompt,
 	type EventSourceLike,
 	type GoogleStatus,
-	type Job
+	type Job,
+	type KillSwitch
 } from '#lib/api';
 import { toast } from '#lib/components/ui';
 import { Dashboard } from './dashboard.svelte';
@@ -74,6 +75,9 @@ const notConfigured: GoogleStatus = {
 	scopes: []
 };
 
+const running: KillSwitch = { paused: false, updated_at: '2026-10-22T00:00:00Z' };
+const paused: KillSwitch = { paused: true, updated_at: '2026-10-22T00:00:05Z' };
+
 function job(overrides: Partial<Job> = {}): Job {
 	return {
 		id: 7,
@@ -92,7 +96,11 @@ function job(overrides: Partial<Job> = {}): Job {
 }
 
 function setup(routes: Record<string, Route>, start = startTestPrompt) {
-	const fetch = stub({ '/auth/google': () => json(notConfigured), ...routes });
+	const fetch = stub({
+		'/auth/google': () => json(notConfigured),
+		'/kill-switch': () => json(running),
+		...routes
+	});
 	const dashboard = new Dashboard({
 		client: createApiClient({ baseUrl: 'http://api.test', fetch }),
 		startTestPrompt: (opts) => start({ fetch, baseUrl: 'http://api.test', ...opts }),
@@ -266,6 +274,88 @@ describe('Dashboard', () => {
 		source.emit('app.connected');
 		await settle();
 		expect(dashboard.google).toEqual({ kind: 'error' });
+	});
+
+	it('kill switch: load, event, toggle, failure', async () => {
+		let answer: (request: Request) => Response | Promise<Response> = () => json(running);
+		const { dashboard, source, fetch } = setup({
+			'/health': () => json({ status: 'ok', db: 'ok' }),
+			'/kill-switch': (request) => answer(request)
+		});
+		expect(dashboard.killSwitch).toEqual({ kind: 'loading' });
+		source.emit('app.connected');
+		await settle();
+		expect(dashboard.killSwitch).toEqual({ kind: 'loaded', state: running });
+
+		// Another tab (or delete-all) paused agents.
+		source.emit('kill_switch.updated', { kill_switch: paused });
+		expect(dashboard.killSwitch).toEqual({ kind: 'loaded', state: paused });
+
+		// Resume: a PUT with the new value; the response is applied, saving meanwhile.
+		answer = () => json(running);
+		const resuming = dashboard.setPaused(false);
+		expect(dashboard.savingKillSwitch).toBe(true);
+		await resuming;
+		expect(dashboard.savingKillSwitch).toBe(false);
+		expect(dashboard.killSwitch).toEqual({ kind: 'loaded', state: running });
+		const put = requests(fetch).find((r) => r.method === 'PUT');
+		expect(put?.url).toBe('http://api.test/kill-switch');
+		expect(await put?.json()).toEqual({ paused: false });
+
+		// A failed change shows the error toast and keeps the state.
+		const error = vi.spyOn(toast, 'error');
+		answer = (request) =>
+			request.method === 'PUT' ? new Response(null, { status: 500 }) : json(running);
+		await dashboard.setPaused(true);
+		expect(error).toHaveBeenCalledWith("Couldn't change the kill switch.");
+		expect(dashboard.killSwitch).toEqual({ kind: 'loaded', state: running });
+		expect(dashboard.savingKillSwitch).toBe(false);
+
+		// A failed load shows the error state.
+		answer = () => new Response(null, { status: 500 });
+		source.emit('app.connected');
+		await settle();
+		expect(dashboard.killSwitch).toEqual({ kind: 'error' });
+	});
+
+	it('delete all data: success, not_revoked warning, failure', async () => {
+		let google: 'revoked' | 'not_revoked' = 'revoked';
+		let deleteStatus = 200;
+		let killSwitch = running;
+		const { dashboard, source, fetch } = setup({
+			'/health': () => json({ status: 'ok', db: 'ok' }),
+			'/kill-switch': () => json(killSwitch),
+			'/data': () =>
+				deleteStatus === 200 ? json({ google }) : new Response(null, { status: deleteStatus })
+		});
+		source.emit('app.connected');
+		await settle();
+		const error = vi.spyOn(toast, 'error');
+
+		expect(await dashboard.deleteAllData('delete all data')).toEqual({ google: 'revoked' });
+		const request = requests(fetch).find((r) => r.method === 'DELETE');
+		expect(request?.url).toBe('http://api.test/data');
+		expect(await request?.json()).toEqual({ confirmation: 'delete all data' });
+
+		// The warning about the grant is the caller's to show; the store only passes it on.
+		google = 'not_revoked';
+		expect(await dashboard.deleteAllData('delete all data')).toEqual({ google: 'not_revoked' });
+		expect(error).not.toHaveBeenCalled();
+
+		deleteStatus = 422;
+		expect(await dashboard.deleteAllData('nope')).toBeNull();
+		expect(error).toHaveBeenCalledWith("Couldn't delete the data.");
+
+		// data.deleted reloads Google and the kill switch.
+		const loads = (path: string) =>
+			requests(fetch).filter((r) => r.method === 'GET' && r.url === `http://api.test${path}`)
+				.length;
+		const before = [loads('/auth/google'), loads('/kill-switch')];
+		killSwitch = paused;
+		source.emit('data.deleted');
+		await settle();
+		expect([loads('/auth/google'), loads('/kill-switch')]).toEqual([before[0] + 1, before[1] + 1]);
+		expect(dashboard.killSwitch).toEqual({ kind: 'loaded', state: paused });
 	});
 
 	it('forwards every event to subscribers and ignores application events', async () => {

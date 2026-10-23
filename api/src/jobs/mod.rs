@@ -199,12 +199,14 @@ pub async fn get(pool: &PgPool, id: i64) -> Result<Option<Job>, sqlx::Error> {
 }
 
 /// Marks the oldest ready `queued` job `running` and counts the attempt. Rows another
-/// transaction has locked are skipped, never waited on.
+/// transaction has locked are skipped, never waited on. While the kill switch is on,
+/// `agent_run` jobs are left in the queue.
 pub async fn claim(pool: &PgPool) -> Result<Option<Job>, sqlx::Error> {
     sqlx::query_as(&format!(
         "UPDATE jobs SET status = 'running', attempts = attempts + 1, updated_at = now() \
          WHERE id = ( \
              SELECT id FROM jobs WHERE status = 'queued' AND run_at <= now() \
+             AND (kind <> '{AGENT_RUN}' OR NOT (SELECT paused FROM kill_switch WHERE id)) \
              ORDER BY run_at, id LIMIT 1 FOR UPDATE SKIP LOCKED \
          ) RETURNING {COLUMNS}"
     ))
@@ -252,7 +254,8 @@ pub async fn retry(
     .await
 }
 
-/// Requeues a job that hit the usage limit to run after `pause`, giving its attempt back.
+/// Requeues a job to run after `pause`, giving its attempt back: after a usage limit, or
+/// (with no delay) when the kill switch stopped its run.
 pub async fn defer(
     pool: &PgPool,
     id: i64,

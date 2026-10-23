@@ -10,6 +10,7 @@ export interface BadgeSpec {
 export const runStatusBadge = {
 	queued: { label: 'Queued', tone: 'neutral' },
 	running: { label: 'Running', tone: 'info' },
+	paused: { label: 'Paused', tone: 'warning' },
 	succeeded: { label: 'Succeeded', tone: 'success' },
 	failed: { label: 'Failed', tone: 'danger' }
 } as const satisfies Record<RunStatus, BadgeSpec>;

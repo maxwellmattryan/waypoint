@@ -211,6 +211,16 @@ describe('ApplicationsStore', () => {
 		expect(rows(store)).toHaveLength(2);
 	});
 
+	it('refetches on data.deleted and empties', async () => {
+		const { store, list } = setup({ kind: 'ok', data: [a, b] });
+		await store.load();
+		list.mockImplementation(async () => ({ kind: 'ok', data: [] }));
+		store.apply({ type: 'data.deleted' });
+		await settle();
+		expect(list).toHaveBeenCalledTimes(2);
+		expect(rows(store)).toEqual([]);
+	});
+
 	it('move succeeds', async () => {
 		const { store, setStatus } = setup({ kind: 'ok', data: [a, b] });
 		await store.load();

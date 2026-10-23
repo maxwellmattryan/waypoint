@@ -100,6 +100,8 @@ pub enum Outcome {
     Retry(String),
     UsageLimit(String),
     Fail(String),
+    /// The kill switch is on: the run is `paused` and the job waits until it's off.
+    Paused,
 }
 
 impl From<StepError> for Outcome {
@@ -355,6 +357,9 @@ async fn run(
         return Ok(outcome);
     };
 
+    if crate::kill_switch::is_paused(pool).await? {
+        return pause(pool, bus, run_id).await;
+    }
     sqlx::query(
         "UPDATE agent_runs SET status = 'running', started_at = COALESCE(started_at, now()), \
          updated_at = now() WHERE id = $1",
@@ -375,6 +380,10 @@ async fn run(
         if step.status == StepStatus::Succeeded {
             carried = step.output.unwrap_or(Value::Null);
             continue;
+        }
+        // The step before this one has finished; stop here if the kill switch went on.
+        if crate::kill_switch::is_paused(pool).await? {
+            return pause(pool, bus, run_id).await;
         }
         sqlx::query(
             "UPDATE run_steps SET status = 'running', attempts = attempts + 1, input = $2, \
@@ -461,6 +470,17 @@ async fn run(
     Ok(Outcome::Done(json!({"run_id": run_id})))
 }
 
+/// Marks the run `paused` (its `error` is left alone) and publishes it. The job waits
+/// in the queue until the kill switch is off, when the run is `queued` again.
+async fn pause(pool: &PgPool, bus: &EventBus, run_id: i64) -> Result<Outcome, sqlx::Error> {
+    sqlx::query("UPDATE agent_runs SET status = 'paused', updated_at = now() WHERE id = $1")
+        .bind(run_id)
+        .execute(pool)
+        .await?;
+    super::publish(pool, bus, run_id).await;
+    Ok(Outcome::Paused)
+}
+
 async fn add_run_spend(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     run_id: i64,
@@ -491,7 +511,7 @@ async fn settle<'e>(
     spend: Spend,
 ) -> Result<(), sqlx::Error> {
     let (status, error) = match outcome {
-        Outcome::Done(_) => return Ok(()),
+        Outcome::Done(_) | Outcome::Paused => return Ok(()),
         Outcome::Retry(error) if job.attempts < job.max_attempts => ("queued", error),
         Outcome::UsageLimit(error) => ("queued", error),
         Outcome::Retry(error) | Outcome::Fail(error) => ("failed", error),
@@ -599,7 +619,7 @@ mod tests {
                 Outcome::Retry(_) => "retry",
                 Outcome::UsageLimit(_) => "usage_limit",
                 Outcome::Fail(_) => "fail",
-                Outcome::Done(_) => "done",
+                Outcome::Done(_) | Outcome::Paused => "done",
             };
             assert_eq!(kind, expected, "{label}");
         }

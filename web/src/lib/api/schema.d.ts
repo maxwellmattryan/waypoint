@@ -239,6 +239,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * `DELETE /data`: pauses agents (they stay paused), revokes the Google grant
+         *     (best-effort) and empties every user table.
+         */
+        delete: operations["delete_all_data"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events": {
         parameters: {
             query?: never;
@@ -283,6 +303,27 @@ export interface paths {
         /** `GET /jobs/<id>`: one job's current state. */
         get: operations["show"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kill-switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /kill-switch`: whether agents are paused. */
+        get: operations["get_kill_switch"];
+        /**
+         * `PUT /kill-switch`: pauses or resumes every agent run. Setting the current value is a
+         *     no-op that returns the current state.
+         */
+        put: operations["set_kill_switch"];
         post?: never;
         delete?: never;
         options?: never;
@@ -496,6 +537,15 @@ export interface components {
          * @enum {string}
          */
         ConnectionState: "disconnected" | "connected" | "reconnect_required";
+        /** @description The `DELETE /data` body on success. */
+        DataDeletion: {
+            google: components["schemas"]["GoogleRevocation"];
+        };
+        /** @description The `DELETE /data` body. */
+        DeleteAllData: {
+            /** @description Must be exactly `delete all data`. */
+            confirmation: string;
+        };
         /**
          * @description The kinds of entry the user writes directly.
          * @enum {string}
@@ -559,6 +609,13 @@ export interface components {
             run: components["schemas"]["Run"];
             /** @enum {string} */
             type: "run.updated";
+        } | {
+            kill_switch: components["schemas"]["KillSwitch"];
+            /** @enum {string} */
+            type: "kill_switch.updated";
+        } | {
+            /** @enum {string} */
+            type: "data.deleted";
         };
         /**
          * @description What an event records.
@@ -579,6 +636,11 @@ export interface components {
              */
             revoked: boolean;
         };
+        /**
+         * @description What happened to the Google grant when all data was deleted.
+         * @enum {string}
+         */
+        GoogleRevocation: "revoked" | "not_revoked" | "not_connected";
         /** @description The `GET /auth/google` body. */
         GoogleStatus: {
             /** @description Whether the client id, secret and token key are all set. */
@@ -623,6 +685,16 @@ export interface components {
             /** @description `queued`, `running`, `succeeded` or `failed`. */
             status: string;
             /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description The kill switch: the `GET /kill-switch` body. */
+        KillSwitch: {
+            /** @description Whether agents are paused. */
+            paused: boolean;
+            /**
+             * Format: date-time
+             * @description When `paused` last changed.
+             */
             updated_at: string;
         };
         /**
@@ -736,7 +808,7 @@ export interface components {
          * @description Where a run is.
          * @enum {string}
          */
-        RunStatus: "queued" | "running" | "succeeded" | "failed";
+        RunStatus: "queued" | "running" | "paused" | "succeeded" | "failed";
         /** @description One `run_steps` row. */
         RunStep: {
             /**
@@ -785,6 +857,10 @@ export interface components {
         /** @description A step with its tool calls, oldest first. */
         RunStepDetail: components["schemas"]["RunStep"] & {
             tool_calls: components["schemas"]["ToolCall"][];
+        };
+        /** @description The `PUT /kill-switch` body. */
+        SetKillSwitch: {
+            paused: boolean;
         };
         /** @description One `application_stages` row. */
         Stage: {
@@ -1972,6 +2048,62 @@ export interface operations {
             };
         };
     };
+    delete_all_data: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAllData"];
+            };
+        };
+        responses: {
+            /** @description Every user table is empty and agents are paused; `google` says what happened to the Google grant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataDeletion"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `confirmation` is not exactly `delete all data` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The data could not be deleted; nothing was deleted */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     events: {
         parameters: {
             query?: never;
@@ -2071,6 +2203,87 @@ export interface operations {
                 content?: never;
             };
             /** @description The job could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_kill_switch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The kill switch */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitch"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The kill switch could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_kill_switch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetKillSwitch"];
+            };
+        };
+        responses: {
+            /** @description The kill switch after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitch"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The kill switch could not be changed */
             500: {
                 headers: {
                     [name: string]: unknown;

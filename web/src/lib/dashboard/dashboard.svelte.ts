@@ -4,9 +4,11 @@ import {
 	createApiClient,
 	startTestPrompt as realStartTestPrompt,
 	type ApiClient,
+	type DataDeletion,
 	type Event,
 	type GoogleStatus,
-	type Job
+	type Job,
+	type KillSwitch
 } from '#lib/api';
 import { toast } from '#lib/components/ui';
 import { inFlight, newerJob, phaseOfEvent, phaseOfJob, type JobPhase } from './job';
@@ -27,6 +29,12 @@ export type GoogleState =
 	| { kind: 'error' }
 	| { kind: 'loaded'; status: GoogleStatus };
 
+/** The kill switch, from `GET /kill-switch`. */
+export type KillSwitchState =
+	| { kind: 'loading' }
+	| { kind: 'error' }
+	| { kind: 'loaded'; state: KillSwitch };
+
 /** Why starting a test prompt failed. */
 export type StartFailure = 'debug-build' | 'other';
 
@@ -46,12 +54,16 @@ export interface DashboardDeps {
 /**
  * The dashboard's state and data flow: one instance per app, shared by the shell's
  * connection badge and the dashboard page. `start()` opens the event stream; every
- * `app.connected` (re)loads health, Google and the tracked job, since there is no replay.
+ * `app.connected` (re)loads health, Google, the kill switch and the tracked job, since
+ * there is no replay.
  */
 export class Dashboard {
 	connection = $state<ConnectionState>('connecting');
 	health = $state<HealthState>({ kind: 'loading' });
 	google = $state<GoogleState>({ kind: 'loading' });
+	killSwitch = $state<KillSwitchState>({ kind: 'loading' });
+	/** Whether a kill-switch change is in flight. */
+	savingKillSwitch = $state(false);
 	test = $state<TestState>({ kind: 'idle' });
 	/** When the job queue resumes after a usage limit; `null` while it isn't paused. */
 	queuePausedUntil = $state<string | null>(null);
@@ -111,6 +123,36 @@ export class Dashboard {
 		await this.#refreshJob();
 	}
 
+	/** Pauses or resumes every agent. A failure shows an error toast and changes nothing. */
+	async setPaused(paused: boolean): Promise<void> {
+		if (this.savingKillSwitch) return;
+		this.savingKillSwitch = true;
+		try {
+			const { data } = await this.#deps.client.PUT('/kill-switch', { body: { paused } });
+			if (data) this.killSwitch = { kind: 'loaded', state: data };
+			else toast.error("Couldn't change the kill switch.");
+		} catch {
+			toast.error("Couldn't change the kill switch.");
+		} finally {
+			this.savingKillSwitch = false;
+		}
+	}
+
+	/**
+	 * Deletes all data (`DELETE /data`). Resolves the body on success; on failure shows an
+	 * error toast and resolves `null`. The success toasts are the caller's.
+	 */
+	async deleteAllData(confirmation: string): Promise<DataDeletion | null> {
+		try {
+			const { data } = await this.#deps.client.DELETE('/data', { body: { confirmation } });
+			if (data) return data;
+		} catch {
+			// Shown below.
+		}
+		toast.error("Couldn't delete the data.");
+		return null;
+	}
+
 	/**
 	 * Calls `listener` with every event from the stream, `app.connected` and `app.lagged`
 	 * included, until the returned function is called. Pages use this to share the app's
@@ -130,10 +172,18 @@ export class Dashboard {
 				this.connection = 'live';
 				void this.#loadHealth();
 				void this.#loadGoogle();
+				void this.#loadKillSwitch();
 				void this.#refreshJob();
 				return;
 			case 'app.lagged':
 				void this.#refreshJob();
+				return;
+			case 'kill_switch.updated':
+				this.killSwitch = { kind: 'loaded', state: event.kill_switch };
+				return;
+			case 'data.deleted':
+				void this.#loadGoogle();
+				void this.#loadKillSwitch();
 				return;
 			case 'queue.paused':
 				this.queuePausedUntil = event.until;
@@ -198,6 +248,15 @@ export class Dashboard {
 			next = { kind: 'unreachable' };
 		}
 		if (generation === this.#healthGeneration) this.health = next;
+	}
+
+	async #loadKillSwitch(): Promise<void> {
+		try {
+			const { data } = await this.#deps.client.GET('/kill-switch');
+			this.killSwitch = data ? { kind: 'loaded', state: data } : { kind: 'error' };
+		} catch {
+			this.killSwitch = { kind: 'error' };
+		}
 	}
 
 	async #loadGoogle(): Promise<void> {

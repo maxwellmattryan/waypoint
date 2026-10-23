@@ -19,7 +19,9 @@ export const EVENT_TYPES = [
 	'application.created',
 	'application.updated',
 	'application.deleted',
-	'run.updated'
+	'run.updated',
+	'kill_switch.updated',
+	'data.deleted'
 ] as const satisfies readonly Event['type'][];
 
 export interface EventHandlers {
