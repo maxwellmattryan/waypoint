@@ -233,3 +233,11 @@ API contract (no database needed):
 ```sh
 scripts/gen-api.sh && git diff --exit-code   # api/openapi.json and schema.d.ts are current
 ```
+
+### Evals
+
+Each workflow has a labelled eval set in `api/evals/`. The `eval` binary runs one through the real worker and `claude -p` runner in a throwaway database, scores each run against its labels and prints the pass rate with each case's tokens, cost and duration. It never approves a pending action. Evals call `claude` with your login, so they run locally and CI doesn't run them. [docs/evals.md](docs/evals.md) covers the dataset format, the matching rules and how to add a suite.
+
+```sh
+docker compose up -d --wait db && cargo run --bin eval -- tidy_application   # pass rate: 6/6 (100.0%)
+```
