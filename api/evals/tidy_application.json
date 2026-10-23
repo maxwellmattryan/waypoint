@@ -1,0 +1,81 @@
+{
+  "workflow": "tidy_application",
+  "cases": [
+    {
+      "name": "confident note is applied",
+      "setup": {"application": {"company": "Acme", "title": "Engineer"}},
+      "input": {"application_id": "${application_id}", "note": "Called the recruiter", "message": "Thanks", "confidence": 0.9},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [{"tool": "add_note", "undone": false}],
+        "review_items": [],
+        "pending_actions": [
+          {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Thanks"}}
+        ]
+      }
+    },
+    {
+      "name": "threshold confidence is applied",
+      "setup": {"application": {"company": "Globex", "title": "Staff Engineer", "status": "applied"}},
+      "input": {"application_id": "${application_id}", "note": "Sent the take-home", "message": "Looking forward to it", "confidence": 0.8},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [{"tool": "add_note", "undone": false}],
+        "review_items": [],
+        "pending_actions": [
+          {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Looking forward to it"}}
+        ]
+      }
+    },
+    {
+      "name": "just below threshold goes to review",
+      "setup": {"application": {"company": "Initech", "title": "Backend Engineer"}},
+      "input": {"application_id": "${application_id}", "note": "Maybe a second round", "message": "Any update?", "confidence": 0.79},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [],
+        "review_items": [
+          {"kind": "tidy.note", "confidence": 0.79, "payload": {"application_id": "${application_id}", "note": "Maybe a second round"}}
+        ],
+        "pending_actions": [
+          {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Any update?"}}
+        ]
+      }
+    },
+    {
+      "name": "low confidence goes to review",
+      "setup": {"application": {"company": "Umbrella", "title": "Platform Engineer", "status": "interviewing"}},
+      "input": {"application_id": "${application_id}", "note": "Recruiter might have ghosted", "message": "Checking in", "confidence": 0.2},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [],
+        "review_items": [
+          {"kind": "tidy.note", "confidence": 0.2, "payload": {"application_id": "${application_id}", "note": "Recruiter might have ghosted"}}
+        ],
+        "pending_actions": [
+          {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Checking in"}}
+        ]
+      }
+    },
+    {
+      "name": "unknown application fails",
+      "input": {"application_id": 999999999, "note": "Nobody home", "message": "Hello?", "confidence": 0.9},
+      "expect": {
+        "status": "failed",
+        "error_contains": "doesn't exist",
+        "actions": [],
+        "pending_actions": []
+      }
+    },
+    {
+      "name": "missing confidence fails",
+      "setup": {"application": {"company": "Hooli", "title": "Engineer"}},
+      "input": {"application_id": "${application_id}", "note": "No confidence given", "message": "Thanks"},
+      "expect": {
+        "status": "failed",
+        "error_contains": "confidence",
+        "actions": []
+      }
+    }
+  ]
+}

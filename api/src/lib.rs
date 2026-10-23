@@ -7,6 +7,7 @@ pub mod config;
 pub mod crypto;
 #[cfg(debug_assertions)]
 mod dev;
+pub mod evals;
 pub mod events;
 pub mod google;
 mod health;

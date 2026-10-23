@@ -6,6 +6,8 @@
 #   hang          sleep until killed
 #   hang_tree     start a background `sleep` (its pid goes to <record_dir>/grandchild),
 #                 then sleep until killed
+#   usage_limit_once  the first call creates <record_dir>/usage_limit_hit and plays
+#                 usage_limit.jsonl; later calls play success.jsonl
 #   exit1         write to stderr and exit 1 without a result
 #   garbage       print a line that is not JSON
 #   flood         print 17 MiB with no newline (more than the runner reads)
@@ -60,6 +62,14 @@ slow)
 	cat "$fixtures/success.jsonl"
 	;;
 hang) exec sleep 60 ;;
+usage_limit_once)
+	if [ -e "$record/usage_limit_hit" ]; then
+		cat "$fixtures/success.jsonl"
+	else
+		: >"$record/usage_limit_hit"
+		cat "$fixtures/usage_limit.jsonl"
+	fi
+	;;
 hang_tree)
 	sleep 60 &
 	echo $! >"$record/grandchild"

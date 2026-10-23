@@ -10,13 +10,14 @@ use rocket::State;
 use rocket::http::Status;
 use rocket::serde::json::{self, Json};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sqlx::{PgConnection, PgPool};
 
 use crate::applications::timeline::{self, EventKind};
 use crate::applications::{
     ApiError, FieldError, JsonContent, MAX_NOTES, REQUIRED, ValidationErrors, parsed, text,
 };
+use crate::evals::Suite;
 use crate::events::EventBus;
 use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
@@ -375,6 +376,60 @@ impl Workflow for TidyApplication {
             other => return Err(StepError::Fail(format!("no step is named {other:?}"))),
         }
         Ok(output)
+    }
+}
+
+/// A `tidy_application` eval case's `setup`: `{"application": {...}}` inserts one, and
+/// `{}` or `null` inserts nothing.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalSetup {
+    #[serde(default)]
+    application: Option<EvalApplication>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalApplication {
+    company: String,
+    title: String,
+    /// The column default, `sourced`, when absent.
+    #[serde(default)]
+    status: Option<String>,
+}
+
+/// The eval suite for `tidy_application` (dataset `api/evals/tidy_application.json`).
+/// Setup inserts the case's application and returns `{"application_id": <id>}`; without
+/// one it returns no variables.
+pub struct TidyEval;
+
+#[rocket::async_trait]
+impl Suite for TidyEval {
+    fn workflow(&self) -> &'static str {
+        WORKFLOW
+    }
+
+    async fn setup(&self, pool: &PgPool, setup: &Value) -> Result<Map<String, Value>, String> {
+        let setup = if setup.is_null() {
+            EvalSetup::default()
+        } else {
+            EvalSetup::deserialize(setup).map_err(|err| format!("invalid setup: {err}"))?
+        };
+        let mut vars = Map::new();
+        if let Some(application) = setup.application {
+            let id: i64 = sqlx::query_scalar(
+                "INSERT INTO applications (company, title, status) \
+                 VALUES ($1, $2, COALESCE($3, 'sourced')) RETURNING id",
+            )
+            .bind(&application.company)
+            .bind(&application.title)
+            .bind(&application.status)
+            .fetch_one(pool)
+            .await
+            .map_err(|err| format!("cannot insert the application: {err}"))?;
+            vars.insert("application_id".into(), json!(id));
+        }
+        Ok(vars)
     }
 }
 
