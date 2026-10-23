@@ -20,7 +20,8 @@ git:
 worktrees:
   root: ../{repo}.worktrees
   copy: []
-  setup: []
+  setup:
+    - npm --prefix web ci
   cleanup: on-merge
   cargo:
     sharedTarget: true
@@ -28,17 +29,19 @@ worktrees:
   generated: []
   generatedBy: build
 commands:
-  setup: null
-  build: null
-  test: null
-  lint: null
-  format: null
-  typecheck: null
+  setup: npm --prefix web ci
+  build: cargo build --workspace --all-targets && npm --prefix web run build
+  # The DB tests use #[sqlx::test], so they need the Compose Postgres (the default URL matches .env.example).
+  test: docker compose up -d --wait db && DATABASE_URL="${DATABASE_URL:-postgres://waypoint:waypoint@127.0.0.1:5433/waypoint}" cargo test --workspace && npm --prefix web test
+  lint: cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && npm --prefix web run lint
+  format: cargo fmt --all
+  typecheck: npm --prefix web run check
   dev: null
   e2e: null
 verify:
   - build
-  - lint
+  - - lint
+    - typecheck
   - test
 verifyE2e:
   when: ui
