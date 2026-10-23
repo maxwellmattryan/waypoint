@@ -1,6 +1,6 @@
 //! The memories store and routes: the table's CHECKs, create, read, list with filters and
-//! full-text search, update, confirm and delete, their validation and the guards on every
-//! changing route.
+//! full-text search, update, confirm, delete and evidence, their validation and the guards
+//! on every changing route.
 
 use std::time::Duration;
 
@@ -699,6 +699,125 @@ async fn delete_removes_the_row(pool: PgPool) {
     assert_eq!(response.status(), Status::NotFound);
 }
 
+/// Inserts a signal of `kind` about `subject` for decision `decision` (a pending action or
+/// review item id, unique per signal) and returns its id.
+async fn signal(pool: &PgPool, kind: &str, subject: &str, decision: i64) -> i64 {
+    sqlx::query_scalar(
+        "INSERT INTO memory_signals \
+         (kind, run_id, pending_action_id, review_item_id, subject, drafted, approved, changes, reason) \
+         VALUES ($1, 7, CASE WHEN $1 <> 'dismissal' THEN $3 END, \
+         CASE WHEN $1 = 'dismissal' THEN $3 END, $2, '{}'::jsonb, \
+         CASE WHEN $1 = 'approval' THEN '{}'::jsonb END, \
+         CASE WHEN $1 = 'approval' THEN '[]'::jsonb END, NULL) RETURNING id",
+    )
+    .bind(kind)
+    .bind(subject)
+    .bind(decision)
+    .fetch_one(pool)
+    .await
+    .expect("insert a signal")
+}
+
+async fn link(pool: &PgPool, memory: i64, signal: i64) {
+    sqlx::query("INSERT INTO memory_evidence (memory_id, signal_id) VALUES ($1, $2)")
+        .bind(memory)
+        .bind(signal)
+        .execute(pool)
+        .await
+        .expect("link evidence");
+}
+
+/// `GET /memories/{id}/evidence`, expecting 200; returns the body.
+async fn evidence(client: &Client, id: i64) -> Vec<Value> {
+    let response = get(client, &format!("/memories/{id}/evidence")).await;
+    assert_eq!(response.status(), Status::Ok, "evidence for {id}");
+    json_body(response)
+        .await
+        .as_array()
+        .expect("a list")
+        .clone()
+}
+
+#[sqlx::test]
+async fn evidence_lists_linked_signals(pool: PgPool) {
+    let client = client(pool.clone()).await;
+    let first = signal(&pool, "approval", "send_email", 1).await;
+    let second = signal(&pool, "rejection", "apply", 2).await;
+    let third = signal(&pool, "dismissal", "role_match", 3).await;
+    let learned = seed(
+        &pool,
+        MemoryKind::Preference,
+        MemoryTopic::Location,
+        "Remote only",
+        &[],
+        MemoryStatus::Proposed,
+        MemorySource {
+            kind: SourceKind::Signal,
+            reference: Some(first.to_string()),
+            label: None,
+        },
+    )
+    .await;
+    let manual = seed(
+        &pool,
+        MemoryKind::Fact,
+        MemoryTopic::Skill,
+        "Rust",
+        &[],
+        MemoryStatus::Confirmed,
+        MemorySource::manual(),
+    )
+    .await;
+    let bare = seed(
+        &pool,
+        MemoryKind::Fact,
+        MemoryTopic::Skill,
+        "Go",
+        &[],
+        MemoryStatus::Proposed,
+        MemorySource::manual(),
+    )
+    .await;
+    link(&pool, learned, first).await;
+    link(&pool, learned, third).await;
+    link(&pool, manual, second).await;
+
+    let signals = evidence(&client, learned).await;
+    let ids: Vec<i64> = signals.iter().map(|s| s["id"].as_i64().unwrap()).collect();
+    assert_eq!(ids, [third, first], "only its own signals, newest first");
+    assert_eq!(signals[0]["kind"], "dismissal");
+    assert_eq!(signals[0]["subject"], "role_match");
+    assert_eq!(signals[1]["kind"], "approval");
+    assert_eq!(signals[1]["subject"], "send_email");
+
+    // The same keys as `GET /memory-signals`.
+    let response = get(&client, "/memory-signals").await;
+    assert_eq!(response.status(), Status::Ok);
+    let listed = json_body(response).await;
+    let listed = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"].as_i64() == Some(third))
+        .expect("listed")
+        .clone();
+    assert_eq!(signals[0], listed);
+
+    assert_eq!(evidence(&client, bare).await, Vec::<Value>::new());
+    let response = get(&client, "/memories/999999/evidence").await;
+    assert_eq!(response.status(), Status::NotFound);
+
+    let response = post(&client, &format!("/memories/{learned}/confirm")).await;
+    assert_eq!(response.status(), Status::Ok);
+    assert_eq!(json_body(response).await["status"], "confirmed");
+    let ids: Vec<i64> = evidence(&client, learned)
+        .await
+        .iter()
+        .map(|s| s["id"].as_i64().unwrap())
+        .collect();
+    assert_eq!(ids, [third, first], "confirming keeps the evidence");
+}
+
 #[sqlx::test]
 async fn guards_refuse_foreign_requests(pool: PgPool) {
     let client = client(pool.clone()).await;
@@ -804,10 +923,12 @@ async fn guards_refuse_foreign_requests(pool: PgPool) {
     }
 
     let evil = Header::new("Host", "evil.example");
-    let all: [(Method, &str, &str); 6] = [
+    let evidence = format!("{one}/evidence");
+    let all: [(Method, &str, &str); 7] = [
         (Method::Get, "/memories", ""),
         (Method::Post, "/memories", &valid),
         (Method::Get, &one, ""),
+        (Method::Get, &evidence, ""),
         (Method::Put, &one, &valid),
         (Method::Post, &confirm, ""),
         (Method::Delete, &one, ""),

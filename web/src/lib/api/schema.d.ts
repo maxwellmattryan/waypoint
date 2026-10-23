@@ -456,6 +456,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memories/{id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The learning signals behind a memory: the decisions the memory writer learned it from. */
+        get: operations["list_memory_evidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory-signals": {
         parameters: {
             query?: never;
@@ -3374,6 +3391,50 @@ export interface operations {
                 content?: never;
             };
             /** @description The memory could not be confirmed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_memory_evidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The memory's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signals linked to the memory as evidence, `id` descending; `[]` when it has none */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemorySignal"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No memory has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The evidence could not be read */
             500: {
                 headers: {
                     [name: string]: unknown;

@@ -27,7 +27,8 @@ function setup(overrides: Partial<Memory> = {}) {
 		onconfirm: vi.fn(async () => true),
 		onedit: vi.fn(),
 		ondelete: vi.fn(),
-		ontag: vi.fn()
+		ontag: vi.fn(),
+		loadEvidence: vi.fn(async () => ({ kind: 'ok' as const, data: [] }))
 	};
 	const { container } = render(MemoryItem, { memory: memory(overrides), ...handlers });
 	return { ...handlers, container, source: () => screen.getByTestId('source') };
@@ -67,6 +68,29 @@ describe('MemoryItem', () => {
 		await userEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 		expect(onconfirm).toHaveBeenCalledWith(expect.objectContaining({ id: 4 }));
 	});
+
+	it.each([
+		[
+			'a proposed learned memory',
+			{ status: 'proposed', confirmed_at: null, source_kind: 'signal' },
+			true
+		],
+		['a confirmed learned memory', { source_kind: 'signal' }, false],
+		[
+			'a proposed resume memory',
+			{ status: 'proposed', confirmed_at: null, source_kind: 'resume', source_ref: '12' },
+			false
+		]
+	] as const)(
+		'shows the evidence toggle only for proposed learned memories: %s',
+		(_, overrides, shown) => {
+			const { loadEvidence } = setup(overrides as Partial<Memory>);
+			const toggle = screen.queryByRole('button', { name: 'Show evidence' });
+			if (shown) expect(toggle).toHaveAttribute('aria-expanded', 'false');
+			else expect(toggle).toBeNull();
+			expect(loadEvidence).not.toHaveBeenCalled();
+		}
+	);
 
 	it('has no badge or Confirm when confirmed, and Edit and Delete either way', async () => {
 		const { onedit, ondelete } = setup();

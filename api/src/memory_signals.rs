@@ -247,6 +247,18 @@ pub async fn list_signals(
     .await
 }
 
+/// The signals linked to memory `memory_id` through `memory_evidence`, newest first.
+pub async fn evidence_for(pool: &PgPool, memory_id: i64) -> sqlx::Result<Vec<MemorySignal>> {
+    sqlx::query_as(&format!(
+        "SELECT {COLUMNS} FROM memory_signals \
+         WHERE id IN (SELECT signal_id FROM memory_evidence WHERE memory_id = $1) \
+         ORDER BY id DESC"
+    ))
+    .bind(memory_id)
+    .fetch_all(pool)
+    .await
+}
+
 /// `GET /memory-signals`: the learning signals, newest first, a page at a time.
 #[utoipa::path(
     get,
