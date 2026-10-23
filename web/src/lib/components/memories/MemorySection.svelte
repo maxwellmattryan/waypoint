@@ -2,10 +2,12 @@
 	import type { Memory } from '#lib/api';
 	import type { MemoryItemProps } from './MemoryItem.svelte';
 
-	export type MemorySectionProps = Omit<MemoryItemProps, 'memory'> & {
+	export type MemorySectionProps = Omit<MemoryItemProps, 'memory' | 'highlighted'> & {
 		/** The section heading, e.g. "Answer bank". */
 		heading: string;
 		memories: Memory[];
+		/** The id of the memory to highlight, if it's in this section. */
+		highlighted?: number | null;
 	};
 </script>
 
@@ -15,7 +17,7 @@
 	import { easings, motionDuration } from '#lib/motion.js';
 	import MemoryItem from './MemoryItem.svelte';
 
-	let { heading, memories, ...actions }: MemorySectionProps = $props();
+	let { heading, memories, highlighted = null, ...actions }: MemorySectionProps = $props();
 
 	const headingId = $props.id();
 </script>
@@ -28,7 +30,7 @@
 				animate:flip={{ duration: motionDuration('base'), easing: easings.standard }}
 				transition:fade={{ duration: motionDuration('fast') }}
 			>
-				<MemoryItem {memory} {...actions} />
+				<MemoryItem {memory} highlighted={memory.id === highlighted} {...actions} />
 			</li>
 		{/each}
 	</ul>

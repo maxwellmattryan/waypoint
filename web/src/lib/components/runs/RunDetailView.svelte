@@ -71,5 +71,5 @@
 		</ol>
 	</section>
 
-	<MemoriesUsed />
+	<MemoriesUsed memories={run.memories} />
 </div>

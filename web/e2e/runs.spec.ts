@@ -71,6 +71,32 @@ const detail = {
 			]
 		}),
 		step(11, 1, 'update_status')
+	],
+	memories: [
+		{
+			id: 1,
+			run_id: 1,
+			run_step_id: 10,
+			step: 'classify',
+			memory_id: 4,
+			kind: 'preference',
+			topic: 'location',
+			content: 'Remote only, any time zone',
+			score: 0.6,
+			created_at: startedAt
+		},
+		{
+			id: 2,
+			run_id: 1,
+			run_step_id: 11,
+			step: 'update_status',
+			memory_id: null,
+			kind: 'fact',
+			topic: 'position',
+			content: 'Staff engineer at Initech',
+			score: 0.3,
+			created_at: startedAt
+		}
 	]
 };
 
@@ -120,10 +146,23 @@ test('runs: list, detail with a tool call, and not found', async ({ page }) => {
 	await expect(call.getByLabel('lookup_application output')).toContainText('"application_id": 3');
 	await expect(call.getByText('No error')).toBeVisible();
 
-	await expect(page.getByRole('heading', { name: 'Memories used' })).toBeVisible();
-	await expect(page.getByText('No memories used')).toBeVisible();
+	const memoriesSection = page.getByRole('region', { name: 'Memories used' });
+	const used = memoriesSection.getByRole('list', { name: 'Memories used' }).getByRole('listitem');
+	await expect(used).toHaveCount(2);
+	await expect(used.nth(0)).toContainText('Location');
+	await expect(used.nth(0)).toContainText('Remote only, any time zone');
+	await expect(used.nth(0)).toContainText('Used in classify');
+	await expect(used.nth(0).getByRole('link', { name: 'View memory' })).toHaveAttribute(
+		'href',
+		'/memories?memory=4'
+	);
+	await expect(used.nth(1)).toContainText('Position');
+	await expect(used.nth(1)).toContainText('Used in update_status');
+	await expect(used.nth(1)).toContainText('Deleted');
+	await expect(used.nth(1).getByRole('link')).toHaveCount(0);
 
 	await page.mouse.move(0, 0);
+	await memoriesSection.screenshot({ path: `${screenshots}/run-memories.png` });
 	await page.screenshot({ path: `${screenshots}/run-detail.png`, fullPage: true });
 	await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
 	await page.screenshot({ path: `${screenshots}/run-detail-dark.png`, fullPage: true });
