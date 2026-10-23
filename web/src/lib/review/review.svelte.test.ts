@@ -182,6 +182,31 @@ function fitScore(id: number): ReviewItem {
 	});
 }
 
+/** A `prep_packet.packet` review item for a posting at Globex, missing its salary answer. */
+function packet(id: number): ReviewItem {
+	return review(id, {
+		kind: 'prep_packet.packet',
+		confidence: 0.9,
+		payload: {
+			posting_id: 9,
+			company: 'Globex',
+			title: 'Backend Engineer',
+			resume: { id: 1, name: 'Backend', reasons: [] },
+			answers: [
+				{
+					key: 'salary_expectation',
+					question: 'What are your salary expectations?',
+					answer: null,
+					citations: []
+				}
+			],
+			confidence: 0.9,
+			missing: ['salary_expectation'],
+			dropped: { resume_reasons: 0, citations: 0, answers: 0 }
+		}
+	});
+}
+
 const keys = (store: QueueStore) => store.items.map(queueKey);
 
 describe('QueueStore', () => {
@@ -315,6 +340,16 @@ describe('QueueStore', () => {
 		expect(accept).toHaveBeenCalledWith(client, 5);
 		expect(store.items).toEqual([]);
 		expect(toasts()).toEqual([['success', 'Applied fit score for Acme', undefined]]);
+	});
+
+	it('applies a packet review item and toasts', async () => {
+		const { store, accept } = setupQueue([ok([])], [ok([packet(6)])]);
+		await store.load();
+		accept.mockResolvedValueOnce(ok({ ...packet(6), status: 'accepted' }));
+		await store.accept(6);
+		expect(accept).toHaveBeenCalledWith(client, 6);
+		expect(store.items).toEqual([]);
+		expect(toasts()).toEqual([['success', 'Packet ready for Globex', undefined]]);
 	});
 
 	it('keeps the item when apply conflicts', async () => {
