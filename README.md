@@ -111,7 +111,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/resumes
 
 ## Memory
 
-The Memory page (`/memories`, "What Waypoint knows about me") lists everything Waypoint knows about you, one section per kind: **facts** (positions, skills, education), **preferences** (target role, seniority, location and remote, comp floor, industry, deal-breakers) and **answers** for application forms (work authorization, notice period, salary expectation, why you're leaving). Every kind also allows the topic Other. Each memory shows its content, its tags, where it came from (added by you, a resume version, a LinkedIn export, an agent run or an email) and when it was added and last updated. **Add memory** opens a form for the kind, topic, content and tags; **Edit** changes them, and **Delete** removes the memory after you confirm. A delete is permanent.
+The Memory page (`/memories`, "What Waypoint knows about me") lists everything Waypoint knows about you, one section per kind: **facts** (positions, skills, education), **preferences** (target role, seniority, location and remote, comp floor, industry, deal-breakers) and **answers** for application forms (work authorization, notice period, salary expectation, why you're leaving). Every kind also allows the topic Other. Each memory shows its content, its tags, where it came from (added by you, a resume version, a LinkedIn export, an agent run, an email or your decisions) and when it was added and last updated. **Add memory** opens a form for the kind, topic, content and tags; **Edit** changes them, and **Delete** removes the memory after you confirm. A delete is permanent.
 
 A memory is either **confirmed** or **proposed**. Proposed memories are ones Waypoint learned on its own, waiting for you: they carry a Proposed badge and a **Confirm** button. Everything you add yourself is confirmed. The search box, the Status filter and clicking a tag (which filters by that tag until you remove it) narrow the list; **Clear filters** brings everything back.
 
@@ -125,6 +125,7 @@ Content is required (trimmed, at most 5,000 characters) and the topic must belon
 | `PUT /memories/<id>` | Replaces the kind, topic, content and tags; status and source are kept |
 | `POST /memories/<id>/confirm` | Confirms a proposed memory; confirming one already confirmed changes nothing |
 | `DELETE /memories/<id>` | Deletes one permanently: 204 |
+| `POST /memories/learn` | Asks the memory writer to learn from your unprocessed decisions now (no body): 202 `{run_id, reused}`, reusing a writer run that is already waiting |
 
 The HTTP routes never set the status or the source, so a client can't add a proposed memory or claim one came from somewhere else; only Waypoint's own workflows store those. Errors follow the applications routes: 422 with every failing field, 400 for a body that isn't valid JSON or names an unknown kind or topic, and 403 to an HTML form or a request a browser sends from another site. [Delete all data](docs/google-oauth.md#delete-all-data) (`DELETE /data`) empties the memories along with everything else. With the API running:
 
@@ -137,6 +138,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/memorie
 ```
 
 **Import LinkedIn** on the Memory page reads the positions, skills and education in a LinkedIn data export into confirmed facts, and **Add to profile** on a resume's page has Claude read that version into proposed ones. Re-importing adds no duplicates and never changes a memory you edited. [docs/profile-import.md](docs/profile-import.md) covers both routes, the limits, the content format and the dedupe rules.
+
+Waypoint also learns from your decisions. About a minute after you approve, edit, reject or dismiss something an agent drafted, the memory writer has Claude read those decisions and stores what they show as proposed memories ("Learned from your decisions"). It never changes a confirmed memory: a correction to one becomes a new proposal. Nothing it learns affects a draft until you confirm it. [docs/memory-writer.md](docs/memory-writer.md) covers the scheduling, the validation rules and the eval set.
 
 ## Model calls
 
