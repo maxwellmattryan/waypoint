@@ -148,6 +148,40 @@ export type GmailSyncStatus = components['schemas']['GmailSyncStatus'];
 export type GmailSyncQueued = components['schemas']['GmailSyncQueued'];
 /** How a Gmail sync run reads the mailbox. */
 export type SyncMode = components['schemas']['SyncMode'];
+/** One goal, as `GET /goals` lists it and `goal.updated` carries it. */
+export type Goal = components['schemas']['Goal'];
+/** Where a goal is. */
+export type GoalStatus = components['schemas']['GoalStatus'];
+/** The `GET /goals/{id}` body: the goal, its questions, current plan, versions and latest run. */
+export type GoalDetail = components['schemas']['GoalDetail'];
+/** One clarifying question of a goal. */
+export type GoalQuestion = components['schemas']['GoalQuestion'];
+/** A goal's latest `plan_goal` run. */
+export type GoalRun = components['schemas']['GoalRun'];
+/** The 409 body of a goal route: why nothing changed. */
+export type GoalConflict = components['schemas']['GoalConflict'];
+/** One version of a goal's plan, with its steps and shortlist. */
+export type Plan = components['schemas']['Plan'];
+/** One target company of a plan, with whether its board has been sourced. */
+export type PlanCompany = components['schemas']['PlanCompany'];
+/** One step of a plan. */
+export type PlanStep = components['schemas']['PlanStep'];
+/** What a plan step does. */
+export type PlanStepKind = components['schemas']['PlanStepKind'];
+/** Where a plan step is. */
+export type PlanStepStatus = components['schemas']['PlanStepStatus'];
+/** Whether a plan version may run. */
+export type PlanStatus = components['schemas']['PlanStatus'];
+/** One version in a goal's history. */
+export type PlanVersion = components['schemas']['PlanVersion'];
+/** What validation dropped from the planner's answer. */
+export type PlanDropped = components['schemas']['PlanDropped'];
+/** One shortlisted posting. */
+export type ShortlistEntry = components['schemas']['ShortlistEntry'];
+/** The `PUT /goals/{id}/plan` body. */
+export type PlanEdit = components['schemas']['PlanEdit'];
+/** One company in {@link PlanEdit}. */
+export type PlanCompanyInput = components['schemas']['PlanCompanyInput'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 

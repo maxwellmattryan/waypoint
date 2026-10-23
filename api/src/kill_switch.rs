@@ -30,6 +30,12 @@ const CONFIRMATION_MESSAGE: &str = "type \"delete all data\" to confirm";
 /// `kill_switch`. A new table that references one of these makes the `TRUNCATE` fail
 /// until it is added here.
 pub const USER_TABLES: &[&str] = &[
+    "plan_shortlist",
+    "plan_step_tasks",
+    "plan_steps",
+    "plans",
+    "goal_questions",
+    "goals",
     "applications",
     "application_stages",
     "application_events",

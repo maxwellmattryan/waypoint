@@ -224,6 +224,10 @@ On the Applications page, **Capture from URL** reads a job posting's link and op
 
 Waypoint can read a target company's whole public Greenhouse, Lever or Ashby board into the `job_postings` table. `POST /sourcing/boards` with `{"source": "greenhouse" | "lever" | "ashby", "board": "<slug>"}` queues a `source_board` job (or returns the one already queued or running for that board). The job fetches every page, then inserts new postings, updates changed ones and marks the ones the board stopped listing as removed, and a failed fetch changes nothing. There is no UI or schedule yet. [docs/sourcing.md](docs/sourcing.md) covers the route, each board's pagination, the field mapping, the location rules and removal.
 
+## Goals and planning
+
+On the Goals page you describe what you're looking for in your own words, such as "senior frontend roles at climate companies in NYC". The `plan_goal` workflow asks clarifying questions if it needs to, then turns the goal into a plan you can read and edit: target companies, sourcing filters, how many postings to score and shortlist, and a placeholder for application prep. Running the plan sources the companies' boards, scores the matching postings for fit and shortlists the best ones. When a step fails, Waypoint replans (at most twice) and keeps the steps that already finished; you can also replan by hand. A plan the planner isn't sure about goes to the review queue instead of becoming ready. Nothing is applied for or sent anywhere. [docs/goals.md](docs/goals.md) covers the statuses, the routes, the planner's validation, versions and the keep rule, and execution.
+
 ## Google account
 
 Gmail and Calendar access goes through one Google account that you connect with your own Google Cloud OAuth client. [docs/google-oauth.md](docs/google-oauth.md) walks through creating the client, the three `.env` settings (`WAYPOINT_GOOGLE_CLIENT_ID`, `WAYPOINT_GOOGLE_CLIENT_SECRET`, `WAYPOINT_TOKEN_KEY`) and connecting. Waypoint asks only for read-only Gmail and Calendar events, and stores the tokens encrypted.
@@ -281,7 +285,7 @@ scripts/gen-api.sh && git diff --exit-code   # api/openapi.json and schema.d.ts 
 
 ### Evals
 
-Each workflow has a labelled eval set in `api/evals/`. The `eval` binary runs one through the real worker and `claude -p` runner in a throwaway database, scores each run against its labels and prints the pass rate with each case's tokens, cost and duration. It never approves a pending action. Evals call `claude` with your login, so they run locally and CI doesn't run them. [docs/evals.md](docs/evals.md) covers the dataset format, the matching rules and how to add a suite.
+Each workflow has a labelled eval set in `api/evals/`. The `eval` binary runs one through the real worker and `claude -p` runner in a throwaway database, scores each run against its labels and prints the pass rate with each case's tokens, cost and duration. It never approves a pending action. Evals call `claude` with your login, so they run locally and CI doesn't run them. [docs/evals.md](docs/evals.md) covers the dataset format, the matching rules and how to add a suite, and records each suite's results, including the planner's [`plan_goal` set](docs/evals.md#the-plan_goal-eval-set).
 
 ```sh
 docker compose up -d --wait db && cargo run --bin eval -- tidy_application   # pass rate: 6/6 (100.0%)

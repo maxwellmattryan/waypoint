@@ -6,7 +6,7 @@
 		/** A decision is in flight; the buttons are disabled. */
 		busy?: boolean;
 		ondismiss: () => void;
-		/** Applies the item. Only email, fit-score and packet items with a readable payload offer it. */
+		/** Applies the item. Only email, fit-score, plan and packet items with a readable payload offer it. */
 		onaccept?: () => void;
 	}
 </script>
@@ -18,18 +18,21 @@
 	import { describeEmailReview } from '#lib/review/email.js';
 	import { describeFitReview } from '#lib/review/fit.js';
 	import { describePacketReview } from '#lib/review/packet.js';
+	import { describePlanReview } from '#lib/review/plan.js';
 	import EmailReviewSummary from './EmailReviewSummary.svelte';
 	import FitReviewSummary from './FitReviewSummary.svelte';
 	import ItemMeta from './ItemMeta.svelte';
 	import PacketReviewSummary from './PacketReviewSummary.svelte';
+	import PlanReviewSummary from './PlanReviewSummary.svelte';
 
 	let { item, busy = false, ondismiss, onaccept }: ReviewItemCardProps = $props();
 
 	const confidence = $derived(Math.round(item.confidence * 100));
 	const email = $derived(describeEmailReview(item));
 	const fit = $derived(describeFitReview(item));
+	const plan = $derived(describePlanReview(item));
 	const packet = $derived(describePacketReview(item));
-	const summary = $derived(email ?? fit ?? packet);
+	const summary = $derived(email ?? fit ?? plan ?? packet);
 	const badge = $derived<{ label: string; tone: BadgeTone }>(
 		summary?.badge ?? { label: 'Low confidence', tone: 'warning' }
 	);
@@ -50,6 +53,8 @@
 			<EmailReviewSummary summary={email} />
 		{:else if fit}
 			<FitReviewSummary summary={fit} />
+		{:else if plan}
+			<PlanReviewSummary summary={plan} />
 		{:else if packet}
 			<PacketReviewSummary summary={packet} />
 		{/if}

@@ -152,6 +152,7 @@ export function watchJob(
 				case 'application.deleted':
 				case 'run.updated':
 				case 'kill_switch.updated':
+				case 'goal.updated':
 				case 'data.deleted':
 					return;
 				default:

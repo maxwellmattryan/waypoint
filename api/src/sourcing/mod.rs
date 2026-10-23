@@ -28,8 +28,8 @@ use crate::jobs::{self, COLUMNS, Job, SOURCE_BOARD, Wake};
 
 /// Most characters in a board slug.
 pub const MAX_BOARD: usize = 100;
-const BAD_SOURCE: &str = "Must be greenhouse, lever or ashby";
-const BAD_BOARD: &str = "Must be 1–100 letters, digits, hyphens or underscores";
+pub(crate) const BAD_SOURCE: &str = "Must be greenhouse, lever or ashby";
+pub(crate) const BAD_BOARD: &str = "Must be 1–100 letters, digits, hyphens or underscores";
 
 /// A public job board this module reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]

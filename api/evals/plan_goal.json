@@ -1,0 +1,156 @@
+{
+  "workflow": "plan_goal",
+  "cases": [
+    {
+      "name": "a vague goal with nothing known gets clarifying questions",
+      "setup": {
+        "goal": "find me a new job",
+        "boards": [],
+        "memories": []
+      },
+      "input": {"goal_id": "${goal_id}", "trigger": "goal"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"kind": "questions"},
+        "review_items": []
+      }
+    },
+    {
+      "name": "a specific goal with three known boards gets a ready plan on them",
+      "setup": {
+        "goal": "Senior frontend engineer roles at climate tech companies in New York City. I want to apply to 5 this week.",
+        "boards": [
+          {"source": "greenhouse", "board": "arcadia", "company": "Arcadia", "title": "Senior Frontend Engineer"},
+          {"source": "lever", "board": "palmetto", "company": "Palmetto", "title": "Staff Frontend Engineer"},
+          {"source": "ashby", "board": "watershed", "company": "Watershed", "title": "Senior Software Engineer, Frontend"}
+        ],
+        "memories": [
+          {"name": "role", "kind": "preference", "topic": "target_role", "content": "Senior frontend engineering roles"},
+          {"name": "place", "kind": "preference", "topic": "location", "content": "New York City, hybrid or on-site"},
+          {"name": "industry", "kind": "preference", "topic": "industry", "content": "Climate tech"},
+          {"name": "skill", "kind": "fact", "topic": "skill", "content": "React, TypeScript, Svelte, design systems"}
+        ]
+      },
+      "input": {"goal_id": "${goal_id}", "trigger": "goal"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"kind": "plan", "status": "ready", "unverified": 0},
+        "review_items": []
+      }
+    },
+    {
+      "name": "a goal whose questions were already answered gets a plan, never questions",
+      "setup": {
+        "goal": "find me a new job",
+        "boards": [
+          {"source": "greenhouse", "board": "arcadia", "company": "Arcadia", "title": "Senior Frontend Engineer"},
+          {"source": "lever", "board": "palmetto", "company": "Palmetto", "title": "Staff Frontend Engineer"},
+          {"source": "ashby", "board": "watershed", "company": "Watershed", "title": "Senior Software Engineer, Frontend"}
+        ],
+        "questions": [
+          {"question": "What kind of role are you looking for?", "answer": "Senior frontend engineer"},
+          {"question": "Which industries or companies interest you?", "answer": "Climate tech"},
+          {"question": "Where do you want to work?", "answer": "New York City"}
+        ],
+        "memories": []
+      },
+      "input": {"goal_id": "${goal_id}", "trigger": "goal"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"kind": "plan"}
+      }
+    },
+    {
+      "name": "a remote-only preference shapes the plan",
+      "setup": {
+        "goal": "Backend engineering roles at companies Waypoint already tracks; I want to apply to 3.",
+        "boards": [
+          {"source": "greenhouse", "board": "arcadia", "company": "Arcadia", "title": "Senior Backend Engineer"},
+          {"source": "lever", "board": "palmetto", "company": "Palmetto", "title": "Backend Engineer"},
+          {"source": "ashby", "board": "watershed", "company": "Watershed", "title": "Software Engineer, Backend"}
+        ],
+        "memories": [
+          {"name": "remote", "kind": "preference", "topic": "location", "content": "Remote only; won't relocate or commute"},
+          {"name": "skill", "kind": "fact", "topic": "skill", "content": "Go, PostgreSQL, Kafka"}
+        ]
+      },
+      "input": {"goal_id": "${goal_id}", "trigger": "goal"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"kind": "plan"}
+      },
+      "note": "remote_only should be true; the run output has no field for it, so check the stored plan with --keep-db"
+    },
+    {
+      "name": "a step_failed replan drops the board that couldn't be sourced",
+      "setup": {
+        "goal": "Senior frontend engineer roles at climate tech companies in New York City.",
+        "boards": [
+          {"source": "greenhouse", "board": "arcadia", "company": "Arcadia", "title": "Senior Frontend Engineer"},
+          {"source": "lever", "board": "palmetto", "company": "Palmetto", "title": "Staff Frontend Engineer"}
+        ],
+        "memories": [
+          {"name": "role", "kind": "preference", "topic": "target_role", "content": "Senior frontend engineering roles"}
+        ],
+        "replan": {
+          "plan": {
+            "summary": "Senior frontend roles at three climate companies in NYC",
+            "companies": [
+              {"name": "Ghost Climate", "source": "greenhouse", "board": "ghost", "reason": "Climate software"},
+              {"name": "Arcadia", "source": "greenhouse", "board": "arcadia", "reason": "Clean energy platform"},
+              {"name": "Palmetto", "source": "lever", "board": "palmetto", "reason": "Home solar"}
+            ],
+            "title_keywords": ["Frontend"],
+            "locations": ["New York"],
+            "max_to_score": 20,
+            "shortlist_size": 5,
+            "min_score": 60
+          },
+          "step": "source",
+          "error": "Couldn't source greenhouse/ghost: the fetch failed: the board answered HTTP 404"
+        }
+      },
+      "input": {"goal_id": "${goal_id}", "trigger": "step_failed", "plan_id": "${plan_id}", "step": "source"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"kind": "plan", "unverified": 0}
+      },
+      "note": "every other board is seeded, so unverified 0 proves greenhouse/ghost was removed"
+    },
+    {
+      "name": "a user replan follows the instruction",
+      "setup": {
+        "goal": "Senior frontend engineer roles at climate tech companies in New York City.",
+        "boards": [
+          {"source": "greenhouse", "board": "arcadia", "company": "Arcadia", "title": "Senior Frontend Engineer"},
+          {"source": "lever", "board": "palmetto", "company": "Palmetto", "title": "Staff Frontend Engineer"},
+          {"source": "ashby", "board": "watershed", "company": "Watershed", "title": "Senior Software Engineer, Frontend"}
+        ],
+        "memories": [
+          {"name": "role", "kind": "preference", "topic": "target_role", "content": "Senior frontend engineering roles"}
+        ],
+        "replan": {
+          "plan": {
+            "summary": "Senior frontend roles at three climate companies in NYC",
+            "companies": [
+              {"name": "Arcadia", "source": "greenhouse", "board": "arcadia", "reason": "Clean energy platform"},
+              {"name": "Palmetto", "source": "lever", "board": "palmetto", "reason": "Home solar"},
+              {"name": "Watershed", "source": "ashby", "board": "watershed", "reason": "Carbon accounting"}
+            ],
+            "title_keywords": ["Frontend"],
+            "locations": ["New York"],
+            "max_to_score": 20,
+            "shortlist_size": 5,
+            "min_score": 60
+          },
+          "instruction": "Include remote roles too, not only New York"
+        }
+      },
+      "input": {"goal_id": "${goal_id}", "trigger": "user_replan", "plan_id": "${plan_id}", "instruction": "Include remote roles too, not only New York"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"kind": "plan", "status": "ready"}
+      }
+    }
+  ]
+}

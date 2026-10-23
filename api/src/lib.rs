@@ -12,6 +12,7 @@ pub mod email;
 pub mod evals;
 pub mod events;
 pub mod gmail;
+pub mod goals;
 pub mod google;
 mod health;
 pub mod host;
@@ -120,6 +121,13 @@ pub fn rocket(
                 sourcing::postings::show,
                 sourcing::postings::fit,
                 sourcing::postings::score,
+                goals::list,
+                goals::create,
+                goals::show,
+                goals::answer,
+                goals::edit_plan,
+                goals::run,
+                goals::replan,
                 sourcing::postings::packets,
                 sourcing::postings::show_packet,
                 sourcing::postings::prepare_packet,

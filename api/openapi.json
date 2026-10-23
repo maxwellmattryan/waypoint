@@ -1430,6 +1430,466 @@
         }
       }
     },
+    "/goals": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "`GET /goals`: goals newest first.",
+        "operationId": "list_goals",
+        "responses": {
+          "200": {
+            "description": "Up to 200 goals, `id` descending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Goal"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The goals could not be read"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "`POST /goals`: stores a goal and queues its planner.",
+        "operationId": "create_goal",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewGoal"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The goal, `planning`, with its queued `plan_goal` run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`)"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "`text` is blank or longer than 1000 characters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The goal could not be stored"
+          }
+        }
+      }
+    },
+    "/goals/{id}": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "`GET /goals/{id}`: a goal with its questions, current plan, versions and latest run.",
+        "operationId": "get_goal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The goal's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The goal, its questions by ordinal, its current plan with steps and shortlist, its versions newest first and its latest `plan_goal` run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No goal has this id"
+          },
+          "500": {
+            "description": "The goal could not be read"
+          }
+        }
+      }
+    },
+    "/goals/{id}/answers": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "`POST /goals/{id}/answers`: answers the open clarifying questions and plans again.",
+        "operationId": "answer_goal_questions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The goal's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalAnswers"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The answers are stored, every open question is answered (blank ones skipped) and a `plan_goal` run is queued; the goal is `planning`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`)"
+          },
+          "404": {
+            "description": "No goal has this id"
+          },
+          "409": {
+            "description": "The goal isn't waiting for answers; nothing changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalConflict"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "An answer is longer than 1000 characters, or names a question that isn't one of the goal's open ones",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The answers could not be stored"
+          }
+        }
+      }
+    },
+    "/goals/{id}/plan": {
+      "put": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "`PUT /goals/{id}/plan`: replaces the plan with the user's own, as a new version.",
+        "operationId": "edit_goal_plan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The goal's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The goal with its new plan version (`author: user`, `trigger: user_edit`, `ready`), finished steps kept where their inputs are unchanged; or unchanged when the body equals the current plan. A `running` goal goes on from the first changed step; a `completed` or `failed` one becomes `planned`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`)"
+          },
+          "404": {
+            "description": "No goal has this id"
+          },
+          "409": {
+            "description": "The goal is `planning` or `needs_answers`, has no plan, or `base_plan_id` isn't its current plan; nothing changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalConflict"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "A field breaks the plan limits; every failing field is named, e.g. `companies[1].board`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The plan could not be stored"
+          }
+        }
+      }
+    },
+    "/goals/{id}/replan": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "`POST /goals/{id}/replan`: asks the planner for a new version.",
+        "operationId": "replan_goal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The goal's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplanGoal"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "A `plan_goal` run is queued (`user_replan` with the current plan, or `goal` when there is none) and the goal is `planning`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`)"
+          },
+          "404": {
+            "description": "No goal has this id"
+          },
+          "409": {
+            "description": "The goal isn't `planned`, `completed` or `failed`; nothing changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalConflict"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "`instruction` is longer than 1000 characters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The replan could not be queued"
+          }
+        }
+      }
+    },
+    "/goals/{id}/run": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "`POST /goals/{id}/run`: runs the current plan from its first unfinished step.",
+        "operationId": "run_goal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The goal's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunGoal"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The goal is `running`: failed steps are `pending` again, the automatic replan count is 0 and a `plan_step` tick is queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form body (`application/x-www-form-urlencoded`, `multipart/form-data` or `text/plain`)"
+          },
+          "404": {
+            "description": "No goal has this id"
+          },
+          "409": {
+            "description": "The goal isn't `planned` or `failed`, or its current plan isn't `ready`; nothing changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalConflict"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "500": {
+            "description": "The run could not be started"
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -3886,6 +4346,31 @@
         },
         "additionalProperties": false
       },
+      "DroppedCompany": {
+        "type": "object",
+        "description": "A company the planner gave that validation dropped.",
+        "required": [
+          "name",
+          "source",
+          "board",
+          "why"
+        ],
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string",
+            "description": "The rule it broke."
+          }
+        }
+      },
       "EntryKind": {
         "type": "string",
         "description": "The kinds of entry the user writes directly.",
@@ -4162,6 +4647,25 @@
                 "type": "string",
                 "enum": [
                   "kill_switch.updated"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A goal, its questions, its plan versions, its steps or its shortlist changed;\n`goal` is the `GET /goals` row. Refetch `GET /goals/{id}` for the rest.",
+            "required": [
+              "goal",
+              "type"
+            ],
+            "properties": {
+              "goal": {
+                "$ref": "#/components/schemas/Goal"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "goal.updated"
                 ]
               }
             }
@@ -4485,6 +4989,245 @@
             "format": "date-time"
           }
         }
+      },
+      "Goal": {
+        "type": "object",
+        "description": "One `goals` row.",
+        "required": [
+          "id",
+          "text",
+          "status",
+          "error",
+          "auto_replans",
+          "current_plan_id",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "auto_replans": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Automatic replans since the last Run click."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current_plan_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The newest plan version."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the goal failed; `null` unless `failed`."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GoalStatus"
+          },
+          "text": {
+            "type": "string",
+            "description": "The goal in the user's words."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "GoalAnswer": {
+        "type": "object",
+        "description": "One answer in `POST /goals/{id}/answers`.",
+        "required": [
+          "question_id"
+        ],
+        "properties": {
+          "answer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Trimmed, at most 1000 characters; blank or omitted means skipped."
+          },
+          "question_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "One of the goal's open questions."
+          }
+        },
+        "additionalProperties": false
+      },
+      "GoalAnswers": {
+        "type": "object",
+        "description": "The `POST /goals/{id}/answers` body.",
+        "properties": {
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GoalAnswer"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "GoalConflict": {
+        "type": "object",
+        "description": "The 409 body of a goal route.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Why nothing changed."
+          }
+        }
+      },
+      "GoalDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Goal"
+          },
+          {
+            "type": "object",
+            "required": [
+              "questions",
+              "plan",
+              "versions",
+              "run"
+            ],
+            "properties": {
+              "plan": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Plan",
+                    "description": "The current plan with its steps and shortlist; `null` before the first plan."
+                  }
+                ]
+              },
+              "questions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/GoalQuestion"
+                },
+                "description": "Every clarifying question, by ordinal."
+              },
+              "run": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GoalRun",
+                    "description": "The latest `plan_goal` run."
+                  }
+                ]
+              },
+              "versions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PlanVersion"
+                },
+                "description": "Every version, newest first."
+              }
+            }
+          }
+        ],
+        "description": "The `GET /goals/{id}` body."
+      },
+      "GoalQuestion": {
+        "type": "object",
+        "description": "One clarifying question.",
+        "required": [
+          "id",
+          "ordinal",
+          "question",
+          "answer",
+          "answered_at"
+        ],
+        "properties": {
+          "answer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user's answer; `null` when skipped or not answered yet."
+          },
+          "answered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the answers were submitted; `null` while the question is open."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its position, from 1."
+          },
+          "question": {
+            "type": "string"
+          }
+        }
+      },
+      "GoalRun": {
+        "type": "object",
+        "description": "A goal's latest `plan_goal` run.",
+        "required": [
+          "id",
+          "status",
+          "error",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        }
+      },
+      "GoalStatus": {
+        "type": "string",
+        "description": "Where a goal is.",
+        "enum": [
+          "planning",
+          "needs_answers",
+          "planned",
+          "running",
+          "completed",
+          "failed"
+        ]
       },
       "GoogleDisconnect": {
         "type": "object",
@@ -5145,6 +5888,23 @@
           }
         }
       },
+      "NewGoal": {
+        "type": "object",
+        "description": "The `POST /goals` body.",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "1–1000 characters after trimming. Required."
+          }
+        },
+        "additionalProperties": false
+      },
       "NewStage": {
         "type": "object",
         "description": "The `POST /applications/{id}/stages` body.",
@@ -5349,6 +6109,511 @@
           "external"
         ]
       },
+      "Plan": {
+        "type": "object",
+        "description": "One plan version.",
+        "required": [
+          "id",
+          "goal_id",
+          "version",
+          "author",
+          "trigger",
+          "status",
+          "summary",
+          "confidence",
+          "companies",
+          "title_keywords",
+          "locations",
+          "remote_only",
+          "max_to_score",
+          "shortlist_size",
+          "min_score",
+          "prep_notes",
+          "dropped",
+          "run_id",
+          "review_item_id",
+          "claude_call_id",
+          "cost_usd",
+          "failed_step",
+          "created_at",
+          "updated_at",
+          "steps",
+          "shortlist"
+        ],
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/PlanAuthor"
+          },
+          "claude_call_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "companies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanCompany"
+            }
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The planner's confidence; `null` for user edits."
+          },
+          "cost_usd": {
+            "type": "number",
+            "format": "double",
+            "description": "The planner call's reported cost in US dollars; 0 for user edits."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dropped": {
+            "$ref": "#/components/schemas/PlanDropped"
+          },
+          "failed_step": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlanStepKind",
+                "description": "For a `step_failed` version, the step whose failure asked for it."
+              }
+            ]
+          },
+          "goal_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "locations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_to_score": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "min_score": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "prep_notes": {
+            "type": "string"
+          },
+          "remote_only": {
+            "type": "boolean"
+          },
+          "review_item_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "run_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The `plan_goal` run that wrote it; `null` for user edits."
+          },
+          "shortlist": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShortlistEntry"
+            },
+            "description": "The shortlist step's postings, by rank."
+          },
+          "shortlist_size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PlanStatus"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "description": "The five steps in order."
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title_keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/PlanTrigger"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1, 2, …"
+          }
+        }
+      },
+      "PlanAuthor": {
+        "type": "string",
+        "description": "Who wrote a plan version.",
+        "enum": [
+          "planner",
+          "user"
+        ]
+      },
+      "PlanCompany": {
+        "type": "object",
+        "description": "A target company as `GET /goals/{id}` shows it.",
+        "required": [
+          "name",
+          "source",
+          "board",
+          "reason",
+          "verified"
+        ],
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether Waypoint has sourced any posting from this board, computed when read."
+          }
+        }
+      },
+      "PlanCompanyInput": {
+        "type": "object",
+        "description": "One company in `PUT /goals/{id}/plan`.",
+        "required": [
+          "name",
+          "source",
+          "board"
+        ],
+        "properties": {
+          "board": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "1–100 letters, digits, hyphens or underscores, trimmed. Required."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "1–100 characters. Required."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "At most 300 characters are kept."
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`greenhouse`, `lever` or `ashby`. Required."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlanDropped": {
+        "type": "object",
+        "description": "What validation dropped from the planner's answer; empty for user edits.",
+        "properties": {
+          "companies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DroppedCompany"
+            }
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "locations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "PlanEdit": {
+        "type": "object",
+        "description": "The `PUT /goals/{id}/plan` body: the whole plan, replacing the current one.",
+        "required": [
+          "base_plan_id",
+          "max_to_score",
+          "shortlist_size",
+          "min_score"
+        ],
+        "properties": {
+          "base_plan_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The current plan's id, as the editor loaded it. Required."
+          },
+          "companies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanCompanyInput"
+            }
+          },
+          "locations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_to_score": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "1–50. Required."
+          },
+          "min_score": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "0–100. Required."
+          },
+          "prep_notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "At most 1000 characters."
+          },
+          "remote_only": {
+            "type": "boolean"
+          },
+          "shortlist_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "1–20. Required."
+          },
+          "title_keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlanStatus": {
+        "type": "string",
+        "description": "Whether a plan version may run.",
+        "enum": [
+          "ready",
+          "in_review",
+          "dismissed"
+        ]
+      },
+      "PlanStep": {
+        "type": "object",
+        "description": "One `plan_steps` row.",
+        "required": [
+          "id",
+          "ordinal",
+          "kind",
+          "status",
+          "config",
+          "output",
+          "last_error",
+          "kept_from",
+          "kept_from_version",
+          "started_at",
+          "finished_at"
+        ],
+        "properties": {
+          "config": {
+            "description": "The step's inputs: cumulative, so a change to an earlier step's inputs changes it."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kept_from": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The step of an earlier version this one was copied from."
+          },
+          "kept_from_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The version of `kept_from`'s plan."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PlanStepKind"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed; `null` unless `failed`."
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its position, from 0."
+          },
+          "output": {
+            "description": "What the step found; `null` until it finishes."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PlanStepStatus"
+          }
+        }
+      },
+      "PlanStepKind": {
+        "type": "string",
+        "description": "What a plan step does. Every plan has all five, in this order.",
+        "enum": [
+          "target_companies",
+          "source",
+          "score",
+          "shortlist",
+          "prep"
+        ]
+      },
+      "PlanStepStatus": {
+        "type": "string",
+        "description": "Where a plan step is.",
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "failed",
+          "skipped"
+        ]
+      },
+      "PlanTrigger": {
+        "type": "string",
+        "description": "Why a plan version was written.",
+        "enum": [
+          "goal",
+          "step_failed",
+          "user_replan",
+          "user_edit"
+        ]
+      },
+      "PlanVersion": {
+        "type": "object",
+        "description": "One version in a goal's history.",
+        "required": [
+          "id",
+          "version",
+          "author",
+          "trigger",
+          "status",
+          "summary",
+          "cost_usd",
+          "created_at"
+        ],
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/PlanAuthor"
+          },
+          "cost_usd": {
+            "type": "number",
+            "format": "double"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PlanStatus"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/PlanTrigger"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "PostingFit": {
         "type": "object",
         "description": "The `GET /postings/{id}/fit` body.",
@@ -5488,6 +6753,20 @@
             "minimum": 0
           }
         }
+      },
+      "ReplanGoal": {
+        "type": "object",
+        "description": "The `POST /goals/{id}/replan` body: `{}`, or `{\"instruction\": \"…\"}`.",
+        "properties": {
+          "instruction": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to change; trimmed, at most 1000 characters, blank means none."
+          }
+        },
+        "additionalProperties": false
       },
       "ResumeLink": {
         "type": "object",
@@ -5761,6 +7040,11 @@
         ],
         "description": "The `GET /runs/{id}` body: the run with its steps in order and the memories they used."
       },
+      "RunGoal": {
+        "type": "object",
+        "description": "The `POST /goals/{id}/run` body: `{}`.",
+        "additionalProperties": false
+      },
       "RunMemory": {
         "type": "object",
         "description": "One `run_memories` row: a memory a step retrieved, with a snapshot of it at retrieval\ntime.",
@@ -5996,6 +7280,43 @@
           }
         },
         "additionalProperties": false
+      },
+      "ShortlistEntry": {
+        "type": "object",
+        "description": "One shortlisted posting.",
+        "required": [
+          "rank",
+          "posting_id",
+          "company",
+          "title",
+          "score",
+          "band"
+        ],
+        "properties": {
+          "band": {
+            "$ref": "#/components/schemas/FitBand"
+          },
+          "company": {
+            "type": "string"
+          },
+          "posting_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rank": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1-based."
+          },
+          "score": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The fit score it was shortlisted with."
+          },
+          "title": {
+            "type": "string"
+          }
+        }
       },
       "SignalChange": {
         "type": "object",

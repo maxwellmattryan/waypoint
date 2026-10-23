@@ -10,6 +10,7 @@ use serde::Serialize;
 use tokio::sync::broadcast::{self, error::RecvError};
 
 use crate::applications::Application;
+use crate::goals::Goal;
 use crate::host::LocalHost;
 use crate::jobs::Job;
 use crate::kill_switch::KillSwitch;
@@ -58,6 +59,10 @@ pub enum Event {
     /// The kill switch changed; `kill_switch` is the `GET /kill-switch` body.
     #[serde(rename = "kill_switch.updated")]
     KillSwitchUpdated { kill_switch: KillSwitch },
+    /// A goal, its questions, its plan versions, its steps or its shortlist changed;
+    /// `goal` is the `GET /goals` row. Refetch `GET /goals/{id}` for the rest.
+    #[serde(rename = "goal.updated")]
+    GoalUpdated { goal: Goal },
     /// `DELETE /data` emptied every user table; refetch everything.
     #[serde(rename = "data.deleted")]
     DataDeleted,
@@ -82,6 +87,7 @@ impl Event {
             Self::ApplicationDeleted { .. } => "application.deleted",
             Self::RunUpdated { .. } => "run.updated",
             Self::KillSwitchUpdated { .. } => "kill_switch.updated",
+            Self::GoalUpdated { .. } => "goal.updated",
             Self::DataDeleted => "data.deleted",
         }
     }

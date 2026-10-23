@@ -18,6 +18,12 @@ use crate::capture::{
 };
 use crate::events::{self, Event};
 use crate::gmail::{self, GmailSyncQueued, GmailSyncStatus, SyncActivity, SyncCounts, SyncMode};
+use crate::goals::{
+    self, DroppedCompany, Goal, GoalAnswer, GoalAnswers, GoalConflict, GoalDetail, GoalQuestion,
+    GoalRun, GoalStatus, NewGoal, Plan, PlanAuthor, PlanCompany, PlanCompanyInput, PlanDropped,
+    PlanEdit, PlanStatus, PlanStep, PlanStepKind, PlanStepStatus, PlanTrigger, PlanVersion,
+    ReplanGoal, RunGoal, ShortlistEntry,
+};
 use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleRevocation, GoogleStatus};
 use crate::health::{self, Health};
 use crate::jobs::{self, Job};
@@ -57,6 +63,13 @@ use crate::workflows::tidy::{self, TidyRequest};
 #[openapi(
     info(title = "Waypoint API"),
     paths(
+        goals::list,
+        goals::create,
+        goals::show,
+        goals::answer,
+        goals::edit_plan,
+        goals::run,
+        goals::replan,
         health::health,
         jobs::show,
         events::events,
@@ -169,6 +182,31 @@ use crate::workflows::tidy::{self, TidyRequest};
         PostingFit,
         ScoreFitRequest,
         ScoreFitQueued,
+        Goal,
+        GoalStatus,
+        GoalQuestion,
+        GoalRun,
+        GoalDetail,
+        GoalConflict,
+        NewGoal,
+        GoalAnswer,
+        GoalAnswers,
+        Plan,
+        PlanAuthor,
+        PlanTrigger,
+        PlanStatus,
+        PlanCompany,
+        PlanCompanyInput,
+        PlanDropped,
+        DroppedCompany,
+        PlanStep,
+        PlanStepKind,
+        PlanStepStatus,
+        PlanVersion,
+        ShortlistEntry,
+        PlanEdit,
+        RunGoal,
+        ReplanGoal,
         PacketQuestion,
         PacketStatus,
         PacketReason,

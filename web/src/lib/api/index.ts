@@ -1,5 +1,24 @@
 export { createApiClient } from './client';
 export type {
+	Goal,
+	GoalConflict,
+	GoalDetail,
+	GoalQuestion,
+	GoalRun,
+	GoalStatus,
+	Plan,
+	PlanCompany,
+	PlanCompanyInput,
+	PlanDropped,
+	PlanEdit,
+	PlanStatus,
+	PlanStep,
+	PlanStepKind,
+	PlanStepStatus,
+	PlanVersion,
+	ShortlistEntry
+} from './client';
+export type {
 	AgentAction,
 	ApiClient,
 	ApiClientOptions,

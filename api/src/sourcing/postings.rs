@@ -6,14 +6,11 @@
 //! `description`, which can run to 100,000 characters, so a page stays small; each
 //! posting carries its current fit score. See `docs/sourcing.md`.
 
-use std::time::Duration;
-
 use chrono::{DateTime, Utc};
 use rocket::State;
 use rocket::http::Status;
 use rocket::serde::json::{self, Json};
 use serde::Serialize;
-use serde_json::json;
 use sqlx::PgPool;
 
 use super::Source;
@@ -22,7 +19,6 @@ use crate::events::{Event, EventBus};
 use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
 use crate::memories::{filter, present};
-use crate::runs;
 use crate::workflows::prep_packet::{
     self, ApplicationPacket, PacketQueued, PostingPackets, PreparePacketRequest, QueueError,
 };
@@ -350,38 +346,11 @@ pub async fn score(
     body: Result<Json<ScoreFitRequest>, json::Error<'_>>,
 ) -> Result<(Status, Json<ScoreFitQueued>), ApiError> {
     let ScoreFitRequest {} = parsed(body)?;
-    let failed = |err: sqlx::Error| internal("queue a fit score")(err);
-    let mut tx = pool.begin().await.map_err(failed)?;
-    let locked: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM job_postings WHERE id = $1 FOR UPDATE")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(failed)?;
-    if locked.is_none() {
-        return Err(ApiError::NotFound);
-    }
-    if let Some(run) = score_fit::active_run(&mut tx, id).await.map_err(failed)? {
-        tx.commit().await.map_err(failed)?;
-        return Ok((Status::Accepted, Json(ScoreFitQueued { run, reused: true })));
-    }
-    let run = runs::insert_run(
-        &mut tx,
-        bus,
-        score_fit::WORKFLOW,
-        &[score_fit::STEP],
-        json!({"posting_id": id}),
-        Duration::ZERO,
-    )
-    .await
-    .map_err(failed)?;
-    tx.commit().await.map_err(failed)?;
-    bus.publish(Event::RunUpdated { run: run.clone() });
-    wake.0.notify_one();
-    Ok((
-        Status::Accepted,
-        Json(ScoreFitQueued { run, reused: false }),
-    ))
+    let (run, reused) = score_fit::request(pool, bus, wake, id)
+        .await
+        .map_err(internal("queue a fit score"))?
+        .ok_or(ApiError::NotFound)?;
+    Ok((Status::Accepted, Json(ScoreFitQueued { run, reused })))
 }
 
 /// `GET /postings/{id}/packets`: the posting's application packets and latest prep run.
