@@ -170,8 +170,8 @@ pub enum CitationSource {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct FitCitation {
     pub source: CitationSource,
-    /// The cited memory; `null` for a posting excerpt. The memory may since have been
-    /// deleted.
+    /// The cited memory; `null` for a posting excerpt. `GET /postings/{id}/fit` also gives
+    /// `null` once the memory has been deleted (the snapshot stays).
     #[schema(required = true)]
     pub memory_id: Option<i64>,
     /// The memory's topic when it was cited; `null` for a posting excerpt.
@@ -858,12 +858,47 @@ pub async fn posting_fit(pool: &PgPool, posting_id: i64) -> sqlx::Result<Posting
     .bind(posting_id)
     .fetch_optional(pool)
     .await?;
-    Ok(PostingFit {
+    let mut fit = PostingFit {
         posting_id,
         current,
         in_review,
         run,
-    })
+    };
+    forget_deleted_memories(pool, &mut fit).await?;
+    Ok(fit)
+}
+
+/// Clears `memory_id` on every citation of `fit`'s scores whose memory has been deleted; the
+/// snapshot stays.
+async fn forget_deleted_memories(pool: &PgPool, fit: &mut PostingFit) -> sqlx::Result<()> {
+    let citations = || {
+        [&fit.current, &fit.in_review]
+            .into_iter()
+            .flatten()
+            .flat_map(|score| score.reasons.iter())
+            .flat_map(|reason| reason.citations.iter())
+    };
+    let cited: Vec<i64> = citations().filter_map(|c| c.memory_id).collect();
+    if cited.is_empty() {
+        return Ok(());
+    }
+    let existing: HashSet<i64> =
+        sqlx::query_scalar::<_, i64>("SELECT id FROM memories WHERE id = ANY($1)")
+            .bind(&cited)
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
+    for score in [&mut fit.current, &mut fit.in_review].into_iter().flatten() {
+        for reason in score.reasons.iter_mut() {
+            for citation in reason.citations.iter_mut() {
+                if citation.memory_id.is_some_and(|id| !existing.contains(&id)) {
+                    citation.memory_id = None;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The posting a `score_fit` eval case scores.

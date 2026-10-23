@@ -4,9 +4,11 @@ import {
 	type Event,
 	type JobPosting,
 	type JobPostingDetail,
+	type PostingFit,
 	type Source
 } from '#lib/api';
 import { toast } from '#lib/components/ui';
+import { fitView, getPostingFit, SCORE_FIT_WORKFLOW, scorePosting, type FitView } from './fit';
 import {
 	EMPTY_FILTERS,
 	getPosting,
@@ -200,6 +202,12 @@ export class PostingsStore {
 				if (job.kind === SOURCE_BOARD) void this.refresh();
 				return;
 			}
+			case 'run.updated':
+				// A new score may change a posting's fit badge.
+				if (event.run.workflow === SCORE_FIT_WORKFLOW && event.run.status === 'succeeded') {
+					void this.refresh();
+				}
+				return;
 			case 'job.failed': {
 				const slug = this.#forget(event.job.id);
 				if (slug !== undefined)
@@ -275,5 +283,110 @@ export class PostingDetailStore {
 		const result = await this.#deps.get(this.#deps.client, this.id);
 		if (result.kind === 'ok') this.state = { kind: 'loaded', posting: result.data };
 		else this.state = { kind: result.kind === 'not-found' ? 'not-found' : 'error' };
+	}
+}
+
+export type PostingFitState =
+	| { kind: 'loading' }
+	| { kind: 'error' }
+	| { kind: 'loaded'; fit: PostingFit; view: FitView };
+
+export interface PostingFitDeps {
+	client: ApiClient;
+	get: typeof getPostingFit;
+	score: typeof scorePosting;
+}
+
+/** The posting a `score_fit` run's input names (`{"posting_id": id}`), or null. */
+function scoredPosting(input: unknown): number | null {
+	if (typeof input !== 'object' || input === null) return null;
+	const id = (input as Record<string, unknown>).posting_id;
+	return typeof id === 'number' ? id : null;
+}
+
+/**
+ * The posting page's Fit section: `GET /postings/{id}/fit`, kept current by `/events`. The
+ * skeleton shows until the first load; later reloads keep what's shown, and a response older
+ * than the latest request is dropped.
+ */
+export class PostingFitStore {
+	state = $state<PostingFitState>({ kind: 'loading' });
+	/** A `POST /postings/{id}/fit` is in flight. */
+	starting = $state(false);
+
+	readonly id: number;
+	#deps: PostingFitDeps;
+	#request = 0;
+
+	constructor(id: number, deps: Partial<PostingFitDeps> = {}) {
+		this.id = id;
+		this.#deps = {
+			client: deps.client ?? createApiClient(),
+			get: deps.get ?? getPostingFit,
+			score: deps.score ?? scorePosting
+		};
+	}
+
+	/** Loads the scores. A failure shows the error state until a load succeeds. */
+	async load(): Promise<void> {
+		const request = ++this.#request;
+		const result = await this.#deps.get(this.#deps.client, this.id);
+		if (request !== this.#request) return;
+		if (result.kind === 'ok') this.#show(result.data);
+		else this.state = { kind: 'error' };
+	}
+
+	/** Queues a score (or rejoins the waiting one) and shows its run as scoring at once. */
+	async score(): Promise<void> {
+		if (this.starting) return;
+		this.starting = true;
+		try {
+			const result = await this.#deps.score(this.#deps.client, this.id);
+			if (result.kind !== 'ok') {
+				toast.error("Couldn't start scoring", {
+					description: 'Check that the API is running, then try again.'
+				});
+				return;
+			}
+			// Any load in flight predates this run.
+			this.#request++;
+			const { id, status, error } = result.data.run;
+			const run = { id, status, error };
+			const fit: PostingFit =
+				this.state.kind === 'loaded'
+					? { ...this.state.fit, run }
+					: { posting_id: this.id, current: null, in_review: null, run };
+			this.#show(fit);
+		} finally {
+			this.starting = false;
+		}
+	}
+
+	/** Applies one event from `/events`. */
+	handle(event: Event): void {
+		switch (event.type) {
+			case 'run.updated':
+				if (
+					event.run.workflow === SCORE_FIT_WORKFLOW &&
+					scoredPosting(event.run.input) === this.id
+				) {
+					void this.load();
+				}
+				return;
+			case 'app.connected':
+			case 'app.lagged':
+			case 'data.deleted':
+				void this.load();
+				return;
+		}
+	}
+
+	/** Drops any response in flight. Call when the page goes. */
+	destroy(): void {
+		this.#request++;
+	}
+
+	#show(fit: PostingFit): void {
+		this.state = { kind: 'loaded', fit, view: fitView(fit) };
 	}
 }

@@ -3,6 +3,7 @@
 	import type { JobPosting } from '#lib/api';
 	import { formatDate } from '#lib/applications/format.js';
 	import { Card } from '#lib/components/ui';
+	import FitBadge from './FitBadge.svelte';
 	import PostingBadges from './PostingBadges.svelte';
 
 	let { posting }: { posting: JobPosting } = $props();
@@ -29,7 +30,8 @@
 				<span>{seen}</span>
 			</p>
 		</div>
-		<div class="shrink-0">
+		<div class="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+			<FitBadge score={posting.fit_score} band={posting.fit_band} inReview={posting.fit_in_review} />
 			<PostingBadges {posting} />
 		</div>
 	</div>

@@ -549,4 +549,16 @@ async fn fit_route_and_list_show_current_and_in_review_scores(pool: PgPool) {
     let detail = get(&client, &format!("/postings/{posting}")).await;
     assert_eq!(detail["fit_score"], 75);
     assert_eq!(detail["fit_in_review"], true);
+
+    // A deleted memory's citation keeps its snapshot but loses its id.
+    sqlx::query("DELETE FROM memories WHERE id = 1")
+        .execute(&pool)
+        .await
+        .expect("delete memory 1");
+    let fit = get(&client, &format!("/postings/{posting}/fit")).await;
+    assert_eq!(
+        fit["in_review"]["reasons"][0]["citations"][0],
+        json!({"source": "memory", "memory_id": null, "topic": "skill",
+               "text": "Shipped Rust services"})
+    );
 }

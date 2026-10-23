@@ -3961,7 +3961,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "The cited memory; `null` for a posting excerpt. The memory may since have been\ndeleted."
+            "description": "The cited memory; `null` for a posting excerpt. `GET /postings/{id}/fit` also gives\n`null` once the memory has been deleted (the snapshot stays)."
           },
           "source": {
             "$ref": "#/components/schemas/CitationSource"

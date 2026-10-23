@@ -1080,8 +1080,8 @@ export interface components {
         FitCitation: {
             /**
              * Format: int64
-             * @description The cited memory; `null` for a posting excerpt. The memory may since have been
-             *     deleted.
+             * @description The cited memory; `null` for a posting excerpt. `GET /postings/{id}/fit` also gives
+             *     `null` once the memory has been deleted (the snapshot stays).
              */
             memory_id: number | null;
             source: components["schemas"]["CitationSource"];

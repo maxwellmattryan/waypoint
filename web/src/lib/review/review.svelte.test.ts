@@ -158,6 +158,30 @@ function newApplication(id: number): ReviewItem {
 	});
 }
 
+/** A `score_fit.score` review item for a posting at Acme. */
+function fitScore(id: number): ReviewItem {
+	return review(id, {
+		kind: 'score_fit.score',
+		payload: {
+			posting_id: 9,
+			company: 'Acme',
+			title: 'Backend Engineer',
+			score: 55,
+			band: 'partial',
+			confidence: 0.5,
+			summary: 'Unclear seniority',
+			reasons: [
+				{
+					stance: 'for',
+					text: 'Knows Rust',
+					citations: [{ source: 'posting', memory_id: null, topic: null, text: 'Rust' }]
+				}
+			],
+			dropped: { reasons: 0, citations: 0 }
+		}
+	});
+}
+
 const keys = (store: QueueStore) => store.items.map(queueKey);
 
 describe('QueueStore', () => {
@@ -281,6 +305,16 @@ describe('QueueStore', () => {
 			['success', 'Applied to Stark Industries', undefined],
 			['success', 'Added Globex', undefined]
 		]);
+	});
+
+	it('applies a fit review item and toasts', async () => {
+		const { store, accept } = setupQueue([ok([])], [ok([fitScore(5)])]);
+		await store.load();
+		accept.mockResolvedValueOnce(ok({ ...fitScore(5), status: 'accepted' }));
+		await store.accept(5);
+		expect(accept).toHaveBeenCalledWith(client, 5);
+		expect(store.items).toEqual([]);
+		expect(toasts()).toEqual([['success', 'Applied fit score for Acme', undefined]]);
 	});
 
 	it('keeps the item when apply conflicts', async () => {

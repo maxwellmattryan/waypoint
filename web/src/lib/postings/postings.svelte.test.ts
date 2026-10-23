@@ -1,8 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createApiClient, type Event, type Job, type JobPosting, type JobPostingDetail } from '#lib/api';
+import {
+	createApiClient,
+	type Event,
+	type Job,
+	type JobPosting,
+	type JobPostingDetail,
+	type PostingFit,
+	type Run,
+	type ScoreFitQueued
+} from '#lib/api';
 import { toast } from '#lib/components/ui';
 import { EMPTY_FILTERS, PAGE_SIZE, type PostingFilters, type PostingsPage, type Result } from './api';
-import { FILTER_DEBOUNCE_MS, PostingDetailStore, PostingsStore } from './postings.svelte';
+import {
+	FILTER_DEBOUNCE_MS,
+	PostingDetailStore,
+	PostingFitStore,
+	PostingsStore
+} from './postings.svelte';
 
 function makePosting(id: number, overrides: Partial<JobPosting> = {}): JobPosting {
 	return {
@@ -27,6 +41,9 @@ function makePosting(id: number, overrides: Partial<JobPosting> = {}): JobPostin
 		created_at: '2026-10-22T00:00:00Z',
 		updated_at: '2026-10-22T00:00:00Z',
 		removed_at: null,
+		fit_score: null,
+		fit_band: null,
+		fit_in_review: false,
 		...overrides
 	};
 }
@@ -247,6 +264,18 @@ describe('PostingsStore', () => {
 		expect(toasts()).toEqual([]);
 	});
 
+	it('refreshes when a score_fit run succeeds, and not for other runs', async () => {
+		const { store, list } = setup(ok([]));
+		await store.load();
+		store.handle(runUpdated({ workflow: 'score_fit', status: 'running' }));
+		store.handle(runUpdated({ workflow: 'classify_email', status: 'succeeded' }));
+		await settle();
+		expect(list).toHaveBeenCalledTimes(1);
+		store.handle(runUpdated({ workflow: 'score_fit', status: 'succeeded' }));
+		await settle();
+		expect(list).toHaveBeenCalledTimes(2);
+	});
+
 	it('ignores events before the first load, and jobs of other kinds', async () => {
 		const { store, list } = setup(ok([]));
 		store.handle({ type: 'app.connected' });
@@ -290,6 +319,30 @@ describe('PostingsStore', () => {
 	});
 });
 
+function makeRun(overrides: Partial<Run> = {}): Run {
+	return {
+		id: 40,
+		workflow: 'score_fit',
+		status: 'queued',
+		input: { posting_id: 9 },
+		output: null,
+		error: null,
+		input_tokens: 0,
+		output_tokens: 0,
+		cost_usd: 0,
+		job_id: 1,
+		created_at: '2026-10-22T00:00:00Z',
+		updated_at: '2026-10-22T00:00:00Z',
+		started_at: null,
+		finished_at: null,
+		...overrides
+	};
+}
+
+function runUpdated(overrides: Partial<Run> = {}): Event {
+	return { type: 'run.updated', run: makeRun(overrides) };
+}
+
 type GetResult = Result<JobPostingDetail>;
 
 describe('PostingDetailStore', () => {
@@ -304,5 +357,83 @@ describe('PostingDetailStore', () => {
 		await store.load();
 		expect(get).toHaveBeenCalledWith(client, 9);
 		expect(store.state.kind).toBe(kind);
+	});
+});
+
+describe('PostingFitStore', () => {
+	const empty: PostingFit = { posting_id: 9, current: null, in_review: null, run: null };
+
+	function setupFit(...results: Result<PostingFit>[]) {
+		const get = vi.fn<(c: unknown, id: number) => Promise<Result<PostingFit>>>();
+		for (const result of results) get.mockResolvedValueOnce(result);
+		get.mockResolvedValue({ kind: 'ok', data: empty });
+		const score = vi.fn<(c: unknown, id: number) => Promise<Result<ScoreFitQueued>>>();
+		const store = new PostingFitStore(9, { client, get, score });
+		return { store, get, score };
+	}
+
+	it('loads the fit, and shows the error state until a load succeeds', async () => {
+		const { store, get } = setupFit({ kind: 'failed' });
+		expect(store.state.kind).toBe('loading');
+		await store.load();
+		expect(get).toHaveBeenCalledWith(client, 9);
+		expect(store.state).toEqual({ kind: 'error' });
+		await store.load();
+		expect(store.state).toEqual({ kind: 'loaded', fit: empty, view: { kind: 'empty' } });
+	});
+
+	it('posts a score and shows the scoring state at once', async () => {
+		const { store, score } = setupFit();
+		await store.load();
+		score.mockResolvedValueOnce({ kind: 'ok', data: { run: makeRun(), reused: false } });
+		const started = store.score();
+		expect(store.starting).toBe(true);
+		await started;
+		expect(score).toHaveBeenCalledWith(client, 9);
+		expect(store.starting).toBe(false);
+		expect(store.state.kind === 'loaded' && store.state.view).toEqual({
+			kind: 'scoring',
+			run: { id: 40, status: 'queued', error: null }
+		});
+	});
+
+	it('toasts when a score cannot start', async () => {
+		const { store, score } = setupFit();
+		await store.load();
+		score.mockResolvedValueOnce({ kind: 'failed' });
+		await store.score();
+		expect(store.state.kind === 'loaded' && store.state.view).toEqual({ kind: 'empty' });
+		expect(toasts()).toEqual([['danger', "Couldn't start scoring"]]);
+	});
+
+	it('reloads on run.updated for its own score_fit run only', async () => {
+		const { store, get } = setupFit();
+		await store.load();
+		store.handle(runUpdated({ input: { posting_id: 10 } }));
+		store.handle(runUpdated({ workflow: 'classify_email', input: { posting_id: 9 } }));
+		store.handle(runUpdated({ input: { email_id: 9 } }));
+		await settle();
+		expect(get).toHaveBeenCalledTimes(1);
+		store.handle(runUpdated({ status: 'succeeded' }));
+		await settle();
+		expect(get).toHaveBeenCalledTimes(2);
+		store.handle({ type: 'app.connected' });
+		store.handle({ type: 'app.lagged', skipped: 3 });
+		await settle();
+		expect(get).toHaveBeenCalledTimes(4);
+	});
+
+	it('drops a response older than the latest load', async () => {
+		const first = deferred<Result<PostingFit>>();
+		const get = vi.fn<(c: unknown, id: number) => Promise<Result<PostingFit>>>();
+		get.mockReturnValueOnce(first.promise);
+		const newer: PostingFit = { ...empty, run: { id: 41, status: 'running', error: null } };
+		get.mockResolvedValueOnce({ kind: 'ok', data: newer });
+		const store = new PostingFitStore(9, { client, get });
+		const stale = store.load();
+		await store.load();
+		first.resolve({ kind: 'ok', data: empty });
+		await stale;
+		expect(store.state.kind === 'loaded' && store.state.view.kind).toBe('scoring');
 	});
 });

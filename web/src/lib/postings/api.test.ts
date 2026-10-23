@@ -32,7 +32,10 @@ const posting: JobPosting = {
 	last_seen_at: '2026-10-22T00:00:00Z',
 	created_at: '2026-10-22T00:00:00Z',
 	updated_at: '2026-10-22T00:00:00Z',
-	removed_at: null
+	removed_at: null,
+	fit_score: null,
+	fit_band: null,
+	fit_in_review: false
 };
 
 const job: Job = {

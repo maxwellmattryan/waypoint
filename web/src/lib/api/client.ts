@@ -108,6 +108,20 @@ export type Source = components['schemas']['Source'];
 export type JobPosting = components['schemas']['JobPosting'];
 /** The `GET /postings/{id}` body: the posting with its plain-text description. */
 export type JobPostingDetail = components['schemas']['JobPostingDetail'];
+/** How well a fit score fits: `strong`, `partial` or `weak`. */
+export type FitBand = components['schemas']['FitBand'];
+/** One stored fit score with its cited reasons. */
+export type FitScore = components['schemas']['FitScore'];
+/** One reason of a fit score, `for` or `against`. */
+export type FitReason = components['schemas']['FitReason'];
+/** One citation of a fit reason: a memory snapshot or a posting excerpt. */
+export type FitCitation = components['schemas']['FitCitation'];
+/** The latest `score_fit` run for a posting. */
+export type FitRun = components['schemas']['FitRun'];
+/** The `GET /postings/{id}/fit` body. */
+export type PostingFit = components['schemas']['PostingFit'];
+/** The `POST /postings/{id}/fit` 202 body: the scoring run, new or reused. */
+export type ScoreFitQueued = components['schemas']['ScoreFitQueued'];
 /** The `POST /sourcing/boards` 202 body: the board's fetch job, new or reused. */
 export type SourceBoardQueued = components['schemas']['SourceBoardQueued'];
 /** What a profile import did: the LinkedIn import's body and the resume import job's `result`. */

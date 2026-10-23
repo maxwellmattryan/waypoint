@@ -1,11 +1,13 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import type { JobPostingDetail } from '#lib/api';
 	import { formatDateTime, isWebUrl } from '#lib/applications/format.js';
 	import { Card, KeyValue, Link, type KeyValueItem } from '#lib/components/ui';
 	import { SOURCE_LABELS } from '#lib/postings/api.js';
 	import PostingBadges from './PostingBadges.svelte';
 
-	let { posting }: { posting: JobPostingDetail } = $props();
+	/** `fit` renders between the header and the details: the posting's Fit section. */
+	let { posting, fit }: { posting: JobPostingDetail; fit?: Snippet } = $props();
 
 	const NONE = '—';
 	const text = (value: string | null) => value || NONE;
@@ -53,6 +55,8 @@
 			</div>
 		{/if}
 	</header>
+
+	{@render fit?.()}
 
 	<Card>
 		<KeyValue items={details} />
