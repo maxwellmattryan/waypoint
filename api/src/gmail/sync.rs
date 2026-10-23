@@ -206,8 +206,14 @@ struct Cursor {
 
 /// The `gmail_sync` handler: runs one page (a start job first picks the mode). Every
 /// outcome but success is recorded as the state's `last_error`.
-pub async fn run_page(pool: &PgPool, bus: &EventBus, google: &Google, job: &Job) -> PageOutcome {
-    let failure = match page(pool, bus, google, &job.payload).await {
+pub async fn run_page(
+    pool: &PgPool,
+    bus: &EventBus,
+    wake: &Wake,
+    google: &Google,
+    job: &Job,
+) -> PageOutcome {
+    let failure = match page(pool, bus, wake, google, &job.payload).await {
         Ok(result) => return PageOutcome::Done(result),
         Err(failure) => failure,
     };
@@ -226,6 +232,7 @@ pub async fn run_page(pool: &PgPool, bus: &EventBus, google: &Google, job: &Job)
 async fn page(
     pool: &PgPool,
     bus: &EventBus,
+    wake: &Wake,
     google: &Google,
     payload: &Value,
 ) -> Result<Value, Failure> {
@@ -245,7 +252,7 @@ async fn page(
         Some(cursor) => cursor,
         None => start(pool, &client).await?,
     };
-    process(pool, bus, &client, config, cursor).await
+    process(pool, bus, wake, &client, config, cursor).await
 }
 
 /// The start job: reads the profile, picks the mode and resets the run in the state row.
@@ -303,6 +310,7 @@ struct Listed {
 async fn process(
     pool: &PgPool,
     bus: &EventBus,
+    wake: &Wake,
     client: &GmailClient<'_>,
     config: &Config,
     mut cursor: Cursor,
@@ -376,7 +384,7 @@ async fn process(
     let more = listed.next_page_token.is_some()
         && (cursor.mode == SyncMode::Incremental || listed_so_far < config.max_messages);
 
-    let counts = fetch_and_ingest(pool, client, config, &ids).await?;
+    let counts = fetch_and_ingest(pool, bus, wake, client, config, &ids).await?;
 
     let mut tx = pool.begin().await.map_err(db_failure)?;
     let exists: Option<bool> =
@@ -488,6 +496,8 @@ async fn list_window(
 /// Fetches each id one at a time and ingests it. Only these ids are written.
 async fn fetch_and_ingest(
     pool: &PgPool,
+    bus: &EventBus,
+    wake: &Wake,
     client: &GmailClient<'_>,
     config: &Config,
     ids: &[String],
@@ -511,7 +521,7 @@ async fn fetch_and_ingest(
                     labels: message.label_ids,
                     raw: message.raw,
                 };
-                match email::ingest(pool, new, &known).await {
+                match email::ingest(pool, bus, wake, new, &known).await {
                     Ok(stored) if stored.inserted => counts.inserted += 1,
                     Ok(_) => counts.updated += 1,
                     Err(IngestError::Parse(_)) => {

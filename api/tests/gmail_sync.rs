@@ -700,7 +700,10 @@ async fn sync_now_reuses_pending_and_chain_ends(pool: PgPool) {
     assert_eq!(results.len(), 3, "{results:?}");
     assert_eq!(sum(&results, "inserted"), 7);
     assert_eq!(pending_syncs(&pool).await, 0);
-    assert_eq!(count(&pool, "SELECT count(*) FROM jobs").await, 3);
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM jobs WHERE kind = 'gmail_sync'").await,
+        3
+    );
     // And a new request starts a new run.
     assert!(!harness.request().await.expect("request").reused);
 }
@@ -829,7 +832,7 @@ async fn startup_catch_up_when_stale(pool: PgPool) {
         assert!(events.last().is_some_and(ends_run), "{state:?}: {events:?}");
         assert_eq!(startup_jobs().await, 1, "{state:?}");
         assert_eq!(
-            count(&pool, "SELECT count(*) FROM jobs").await,
+            count(&pool, "SELECT count(*) FROM jobs WHERE kind = 'gmail_sync'").await,
             1,
             "{state:?}"
         );

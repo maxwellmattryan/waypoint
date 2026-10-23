@@ -66,6 +66,7 @@ struct Context {
     config: Config,
     runtime: runs::Runtime,
     google: google::Google,
+    wake: crate::jobs::Wake,
     /// Tells the loop to pause until this time.
     pause: mpsc::UnboundedSender<DateTime<Utc>>,
 }
@@ -101,6 +102,7 @@ impl Worker {
             config: self.config.clone(),
             runtime: self.runtime.clone(),
             google: self.google.clone(),
+            wake: crate::jobs::Wake(self.wake.clone()),
             pause: pause_tx,
         };
         let poll = self.config.poll_interval;
@@ -269,7 +271,7 @@ async fn dispatch(ctx: &Context, job: &Job) -> JobOutcome {
         AGENT_RUN => runs::execute(&ctx.pool, &ctx.runner, &ctx.runtime, &ctx.bus, job)
             .await
             .into(),
-        GMAIL_SYNC => gmail::sync::run_page(&ctx.pool, &ctx.bus, &ctx.google, job)
+        GMAIL_SYNC => gmail::sync::run_page(&ctx.pool, &ctx.bus, &ctx.wake, &ctx.google, job)
             .await
             .into(),
         other => JobOutcome::Fail(format!("unknown job kind {other:?}")),
