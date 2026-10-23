@@ -16,6 +16,7 @@ import {
 	Select,
 	Skeleton,
 	Tabs,
+	Tag,
 	Textarea,
 	Tooltip
 } from './index';
@@ -159,6 +160,24 @@ const interactiveRows: Row[] = [
 		disabledClass: 'disabled:cursor-not-allowed'
 	},
 	{
+		name: 'Tag with onclick',
+		component: Tag,
+		props: { label: 'remote', onclick: () => {} },
+		find: (c) => c.querySelector('button'),
+		pointer: true,
+		disabledProps: { disabled: true },
+		disabledClass: 'disabled:cursor-not-allowed'
+	},
+	{
+		name: 'Tag remove button',
+		component: Tag,
+		props: { label: 'remote', onremove: () => {} },
+		find: (c) => c.querySelector('button[aria-label="Remove tag remote"]'),
+		pointer: true,
+		disabledProps: { disabled: true },
+		disabledClass: 'disabled:cursor-not-allowed'
+	},
+	{
 		name: 'Menu trigger',
 		component: MenuHarness,
 		props: {},
@@ -238,6 +257,7 @@ describe('drag sources carry the grab cursors', () => {
 
 const staticRows: { name: string; component: AnyComponent; props: Record<string, unknown> }[] = [
 	{ name: 'Badge', component: Badge, props: { children: text('New') } },
+	{ name: 'Tag', component: Tag, props: { label: 'remote' } },
 	{ name: 'EmptyState', component: EmptyState, props: { title: 'Nothing here' } },
 	{ name: 'Skeleton', component: Skeleton, props: {} },
 	{ name: 'Card without href', component: Card, props: { children: text('Card') } },

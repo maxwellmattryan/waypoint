@@ -10,6 +10,9 @@ export { default as Checkbox, type CheckboxProps } from './Checkbox.svelte';
 export { default as FileInput, type FileInputProps } from './FileInput.svelte';
 export { default as Card, type CardProps } from './Card.svelte';
 export { default as Badge, type BadgeProps } from './Badge.svelte';
+export { default as Tag, type TagProps } from './Tag.svelte';
+export { default as TagInput, type TagInputProps } from './TagInput.svelte';
+export { normaliseTag, normaliseTags } from './tags';
 export { default as EmptyState, type EmptyStateProps } from './EmptyState.svelte';
 export { default as Skeleton, type SkeletonProps } from './Skeleton.svelte';
 export { default as Stat, type StatProps } from './Stat.svelte';
@@ -17,6 +20,7 @@ export { default as KeyValue, type KeyValueProps, type KeyValueItem } from './Ke
 export { default as JsonView, type JsonViewProps } from './JsonView.svelte';
 export { default as Tabs, type TabsProps, type TabItem } from './Tabs.svelte';
 export { default as Dialog, type DialogProps } from './Dialog.svelte';
+export { default as ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog.svelte';
 export { default as Drawer, type DrawerProps } from './Drawer.svelte';
 export { default as Tooltip, type TooltipProps,
 	type TooltipTriggerProps
@@ -35,6 +39,7 @@ export type {
 	ButtonVariant,
 	DialogSize,
 	DrawerSide,
+	IconButtonSize,
 	MenuPlacement,
 	SkeletonShape,
 	ToastTone,

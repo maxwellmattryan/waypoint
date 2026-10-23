@@ -4,6 +4,7 @@
 		Button,
 		Card,
 		Checkbox,
+		ConfirmDialog,
 		Dialog,
 		Drawer,
 		EmptyState,
@@ -19,6 +20,8 @@
 		Skeleton,
 		Stat,
 		Tabs,
+		Tag,
+		TagInput,
 		Textarea,
 		Tooltip,
 		toast,
@@ -78,6 +81,24 @@
 	];
 	let picked = $state('nothing yet');
 	let menuDialogOpen = $state(false);
+
+	let tagClicked = $state('none yet');
+	let removableTags = $state(['remote', 'rust', 'staff level']);
+	let tagInputValue = $state(['remote', 'rust']);
+	let confirmOpen = $state(false);
+	let confirmFails = $state(false);
+	let confirmed = $state(0);
+
+	/** Waits a second, then succeeds or fails as the gallery's toggle says. */
+	async function slowConfirm(): Promise<boolean> {
+		await new Promise((resolve) => setTimeout(resolve, 1000));
+		if (confirmFails) {
+			toast.error("Couldn't delete the memory");
+			return false;
+		}
+		confirmed++;
+		return true;
+	}
 
 	/** A string holding markup: JsonView shows it as text. */
 	const markupSample = '<img src=x onerror=alert(1)>';
@@ -288,6 +309,55 @@
 				<Badge {tone}>{tone}</Badge>
 			{/each}
 		</div>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="tag">
+		<h2 id="tag" class="text-lg font-semibold text-fg">Tag</h2>
+		<div class="flex flex-wrap items-center gap-2">
+			<Tag label="static" />
+			<Tag label="clickable" onclick={() => (tagClicked = 'clickable')} />
+			<Tag label="disabled" onclick={() => (tagClicked = 'disabled')} disabled />
+			{#each removableTags as tag (tag)}
+				<Tag label={tag} onremove={() => (removableTags = removableTags.filter((t) => t !== tag))} />
+			{/each}
+			<Tag
+				label="click or remove"
+				onclick={() => (tagClicked = 'click or remove')}
+				onremove={() => (tagClicked = 'removed')}
+			/>
+		</div>
+		<p class="text-sm text-fg-muted">Last clicked: {tagClicked}</p>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="tag-input">
+		<h2 id="tag-input" class="text-lg font-semibold text-fg">TagInput</h2>
+		<div class="grid gap-4 sm:grid-cols-2">
+			<TagInput
+				label="Tags"
+				hint="Enter or comma adds a tag; Backspace removes the last."
+				placeholder="Add a tag"
+				bind:value={tagInputValue}
+			/>
+			<TagInput label="At most 3" max={3} value={['a', 'b', 'c']} />
+			<TagInput label="With an error" value={['remote']} error="Each tag at most 50 characters" />
+			<TagInput label="Disabled" value={['remote']} disabled />
+		</div>
+		<p class="text-sm text-fg-muted">Bound value: {JSON.stringify(tagInputValue)}</p>
+	</section>
+
+	<section class="flex flex-col gap-4" aria-labelledby="confirm-dialog">
+		<h2 id="confirm-dialog" class="text-lg font-semibold text-fg">ConfirmDialog</h2>
+		<div class="flex flex-wrap items-center gap-4">
+			<Button variant="danger" onclick={() => (confirmOpen = true)}>Delete memory</Button>
+			<Checkbox label="Fail the next confirm" bind:checked={confirmFails} />
+			<span class="text-sm text-fg-muted">Confirmed {confirmed} times</span>
+		</div>
+		<ConfirmDialog
+			bind:open={confirmOpen}
+			title="Delete memory"
+			description="Waypoint will forget this. This can't be undone."
+			onconfirm={slowConfirm}
+		/>
 	</section>
 
 	<section class="flex flex-col gap-4" aria-labelledby="empty-state">
