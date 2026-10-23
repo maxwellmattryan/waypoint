@@ -11,6 +11,7 @@ pub mod review;
 
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use rocket::State;
@@ -283,17 +284,41 @@ pub async fn start(
     let Some(found) = runtime.workflow(workflow) else {
         return Err(StartError::UnknownWorkflow(workflow.to_owned()));
     };
-    let steps: Vec<&str> = found.steps().to_vec();
-
     let mut tx = pool.begin().await?;
-    let status = initial_status(&mut tx).await?;
+    let run = insert_run(
+        &mut tx,
+        bus,
+        found.name(),
+        found.steps(),
+        input,
+        Duration::ZERO,
+    )
+    .await?;
+    tx.commit().await?;
+    bus.publish(Event::RunUpdated { run: run.clone() });
+    wake.0.notify_one();
+    Ok(run)
+}
+
+/// The inserts of [`start`] inside `tx`: the run (`queued`, or `paused` while the kill
+/// switch is on), one `pending` step per name in `steps`, and its `agent_run` job, which may
+/// start `delay` from now. The caller commits, publishes `run.updated` and wakes the worker.
+pub(crate) async fn insert_run(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    bus: &EventBus,
+    workflow: &str,
+    steps: &[&str],
+    input: Value,
+    delay: Duration,
+) -> Result<Run, sqlx::Error> {
+    let status = initial_status(tx).await?;
     let run_id: i64 = sqlx::query_scalar(
         "INSERT INTO agent_runs (workflow, input, status) VALUES ($1, $2, $3) RETURNING id",
     )
-    .bind(found.name())
+    .bind(workflow)
     .bind(&input)
     .bind(status)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     sqlx::query(
         "INSERT INTO run_steps (run_id, ordinal, name) \
@@ -301,14 +326,10 @@ pub async fn start(
          FROM unnest($2::text[]) WITH ORDINALITY AS step (name, ordinal)",
     )
     .bind(run_id)
-    .bind(&steps)
-    .execute(&mut *tx)
+    .bind(steps)
+    .execute(&mut **tx)
     .await?;
-    let run = enqueue(&mut tx, bus, run_id).await?;
-    tx.commit().await?;
-    bus.publish(Event::RunUpdated { run: run.clone() });
-    wake.0.notify_one();
-    Ok(run)
+    enqueue(tx, bus, run_id, delay).await
 }
 
 /// Queues a `failed` run again (`paused` instead while the kill switch is on); its job
@@ -334,7 +355,7 @@ pub async fn resume(
     if reopened.is_none() {
         return Ok(None);
     }
-    let run = enqueue(&mut tx, bus, run_id).await?;
+    let run = enqueue(&mut tx, bus, run_id, Duration::ZERO).await?;
     tx.commit().await?;
     bus.publish(Event::RunUpdated { run: run.clone() });
     wake.0.notify_one();
@@ -373,18 +394,21 @@ pub async fn publish(pool: &PgPool, bus: &EventBus, run_id: i64) {
     }
 }
 
-/// Inserts the run's `agent_run` job and points the run at it.
+/// Inserts the run's `agent_run` job, which may start `delay` from now, and points the run
+/// at it.
 pub(crate) async fn enqueue(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     bus: &EventBus,
     run_id: i64,
+    delay: Duration,
 ) -> Result<Run, sqlx::Error> {
-    let job = jobs::enqueue_tx(
+    let job = jobs::enqueue_tx_after(
         tx,
         bus,
         jobs::AGENT_RUN,
         json!({"run_id": run_id}),
         jobs::Config::default().max_attempts,
+        delay,
     )
     .await?;
     sqlx::query_as(&format!(

@@ -742,6 +742,71 @@ async fn dismiss_validates_its_body(pool: PgPool) {
     assert_eq!(signals(&client).await[0]["reason"], json!("x".repeat(1000)));
 }
 
+/// `(id, status, input, seconds until its job may start)` of each `memory_writer` run.
+async fn writer_runs(pool: &PgPool) -> Vec<(i64, String, Value, f64)> {
+    sqlx::query_as(
+        "SELECT r.id, r.status, r.input, EXTRACT(EPOCH FROM j.run_at - now())::float8 \
+         FROM agent_runs AS r JOIN jobs AS j ON j.id = r.job_id \
+         WHERE r.workflow = 'memory_writer' ORDER BY r.id",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read writer runs")
+}
+
+#[sqlx::test]
+async fn decisions_schedule_one_memory_writer_run(pool: PgPool) {
+    let (client, mut subscriber) = app(&pool).await;
+    let application = create_application(&client).await;
+    let (_, approved) = parked(&client, &mut subscriber, application, 1.0).await;
+    let (_, rejected) = parked(&client, &mut subscriber, application, 1.0).await;
+    parked(&client, &mut subscriber, application, 0.3).await;
+    let item = get(&client, "/review-items").await[0]["id"].clone();
+    assert!(writer_runs(&pool).await.is_empty(), "no decision yet");
+
+    for (path, body) in [
+        (
+            format!("/pending-actions/{approved}/approve"),
+            Some(json!({})),
+        ),
+        (format!("/pending-actions/{rejected}/reject"), None),
+        (format!("/review-items/{item}/dismiss"), Some(json!({}))),
+    ] {
+        let (status, response) = post(&client, &path, body).await;
+        assert_eq!(status, Status::Ok, "{path}: {response}");
+    }
+    assert_eq!(signal_count(&pool).await, 3);
+    let runs = writer_runs(&pool).await;
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    let (writer, status, input, delay) = &runs[0];
+    assert_eq!(status, "queued");
+    assert_eq!(input, &json!({"trigger": "decision"}));
+    assert!(*delay >= 55.0, "the run waits for more decisions: {delay}");
+
+    // A running writer isn't waiting: the next decision schedules another run.
+    sqlx::query("UPDATE agent_runs SET status = 'running' WHERE id = $1")
+        .bind(writer)
+        .execute(&pool)
+        .await
+        .expect("mark the writer running");
+    let (_, next) = parked(&client, &mut subscriber, application, 1.0).await;
+    let (status, _) = post(
+        &client,
+        &format!("/pending-actions/{next}/approve"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, Status::Ok);
+    let runs = writer_runs(&pool).await;
+    assert_eq!(runs.len(), 2, "{runs:?}");
+    assert_eq!(runs[0].1, "running");
+    assert_eq!(
+        (runs[1].1.as_str(), &runs[1].2),
+        ("queued", &json!({"trigger": "decision"}))
+    );
+    assert!(runs[1].3 >= 55.0, "{runs:?}");
+}
+
 #[sqlx::test]
 async fn undo_refuses_a_changed_record(pool: PgPool) {
     let (client, mut subscriber) = app(&pool).await;

@@ -359,7 +359,7 @@ fn document_matches_wire_shapes() {
     );
     assert_eq!(
         schemas["SourceKind"]["enum"],
-        serde_json::json!(["manual", "resume", "linkedin", "run", "email"])
+        serde_json::json!(["manual", "resume", "linkedin", "run", "email", "signal"])
     );
     for operation in [
         &paths["/memories"]["get"],

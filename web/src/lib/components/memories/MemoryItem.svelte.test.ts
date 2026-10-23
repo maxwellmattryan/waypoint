@@ -99,7 +99,13 @@ describe('MemoryItem', () => {
 			{ source_kind: 'email', source_ref: '18f2a', source_label: 'Acme recruiter' },
 			'From email Acme recruiter',
 			null
-		]
+		],
+		[
+			{ source_kind: 'signal', source_ref: '3', source_label: '2 decisions' },
+			'Learned from 2 decisions',
+			null
+		],
+		[{ source_kind: 'signal', source_ref: '3' }, 'Learned from your decisions', null]
 	] as const)('shows the provenance %o', (overrides, text, href) => {
 		const { source } = setup(overrides as Partial<Memory>);
 		expect(source().textContent?.trim()).toBe(text);

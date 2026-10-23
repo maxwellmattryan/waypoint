@@ -99,5 +99,7 @@ export function sourceLine(
 			return { text: line('From LinkedIn export') };
 		case 'email':
 			return { text: line('From email') };
+		case 'signal':
+			return { text: line('Learned from', 'your decisions') };
 	}
 }

@@ -181,14 +181,29 @@ pub async fn enqueue_tx(
     payload: Value,
     max_attempts: i32,
 ) -> Result<Job, sqlx::Error> {
+    enqueue_tx_after(tx, bus, kind, payload, max_attempts, Duration::ZERO).await
+}
+
+/// [`enqueue_tx`] for a job that may start only `delay` from now (`run_at = now() + delay`).
+/// `job.queued` carries that `run_at`.
+pub async fn enqueue_tx_after(
+    tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
+    kind: &str,
+    payload: Value,
+    max_attempts: i32,
+    delay: Duration,
+) -> Result<Job, sqlx::Error> {
     // `job.queued` goes out before the commit, so the worker can't claim the row (and
     // publish `job.started`) first.
     let job: Job = sqlx::query_as(&format!(
-        "INSERT INTO jobs (kind, payload, max_attempts) VALUES ($1, $2, $3) RETURNING {COLUMNS}"
+        "INSERT INTO jobs (kind, payload, max_attempts, run_at) \
+         VALUES ($1, $2, $3, now() + $4 * interval '1 millisecond') RETURNING {COLUMNS}"
     ))
     .bind(kind)
     .bind(payload)
     .bind(max_attempts)
+    .bind(millis(delay))
     .fetch_one(&mut **tx)
     .await?;
     bus.publish(Event::JobQueued { job: job.clone() });

@@ -94,6 +94,7 @@ pub fn rocket(
                 memories::update,
                 memories::confirm,
                 memories::delete,
+                workflows::memory_writer::learn,
                 memory_signals::list,
                 profile::linkedin::import,
                 profile::resume::start,
