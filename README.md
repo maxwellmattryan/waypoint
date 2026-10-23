@@ -113,7 +113,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/resumes
 
 The Memory page (`/memories`, "What Waypoint knows about me") lists everything Waypoint knows about you, one section per kind: **facts** (positions, skills, education), **preferences** (target role, seniority, location and remote, comp floor, industry, deal-breakers) and **answers** for application forms (work authorization, notice period, salary expectation, why you're leaving). Every kind also allows the topic Other. Each memory shows its content, its tags, where it came from (added by you, a resume version, a LinkedIn export, an agent run, an email or your decisions) and when it was added and last updated. **Add memory** opens a form for the kind, topic, content and tags; **Edit** changes them, and **Delete** removes the memory after you confirm. A delete is permanent.
 
-A memory is either **confirmed** or **proposed**. Proposed memories are ones Waypoint learned on its own, waiting for you: they carry a Proposed badge and a **Confirm** button. Everything you add yourself is confirmed. The search box, the Status filter and clicking a tag (which filters by that tag until you remove it) narrow the list; **Clear filters** brings everything back.
+A memory is either **confirmed** or **proposed**. Proposed memories are ones Waypoint learned on its own, waiting for you: they carry a Proposed badge and a **Confirm** button. A proposed memory learned from your decisions also has **Show evidence**, which lists the decisions behind it so you can confirm on evidence. Everything you add yourself is confirmed. The search box, the Status filter and clicking a tag (which filters by that tag until you remove it) narrow the list; **Clear filters** brings everything back.
 
 Content is required (trimmed, at most 5,000 characters) and the topic must belong to the kind. Tags are trimmed, lowercased and single-spaced, with blanks and duplicates dropped; a memory has at most 20 tags of at most 50 characters each.
 
@@ -123,6 +123,7 @@ Content is required (trimmed, at most 5,000 characters) and the topic must belon
 | `POST /memories` | Adds one (`kind`, `topic`, `content`, optional `tags`): 201, always `confirmed` with source `manual` |
 | `GET /memories/<id>` | Reads one |
 | `PUT /memories/<id>` | Replaces the kind, topic, content and tags; status and source are kept |
+| `GET /memories/<id>/evidence` | Lists the learning signals (decisions) linked to a memory as evidence, newest first; `[]` when it has none, 404 for an unknown id |
 | `POST /memories/<id>/confirm` | Confirms a proposed memory; confirming one already confirmed changes nothing |
 | `DELETE /memories/<id>` | Deletes one permanently: 204 |
 | `POST /memories/learn` | Asks the memory writer to learn from your unprocessed decisions now (no body): 202 `{run_id, reused}`, reusing a writer run that is already waiting |
