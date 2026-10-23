@@ -19,7 +19,7 @@ cargo run --bin eval -- <workflow> [--case <name>]... [--json] [--keep-db] [--da
 
 | Argument | Meaning |
 |---|---|
-| `<workflow>` | A registered eval suite: `tidy_application`, `memory_writer`, `classify_email` or `match_email`. |
+| `<workflow>` | A registered eval suite: `tidy_application`, `memory_writer`, `classify_email`, `match_email` or `propose_interview`. |
 | `--case <name>` | Runs only the named case. Repeat it for several. A name the dataset doesn't have is a usage error. |
 | `--json` | Prints the report as JSON on stdout instead of the text table. |
 | `--keep-db` | Keeps the scratch database and prints its name on stderr, so you can inspect the runs. |
@@ -273,6 +273,44 @@ cargo run --bin eval -- match_email --json \
 No misses.
 
 The cases and their classifications were written to exercise each signal and outcome, so these numbers check the rules, not how often matching is right on real mail. Real-inbox numbers need your own labelled emails.
+
+## The `propose_interview` eval set
+
+`api/evals/propose_interview.json` covers [calendar proposals](email.md#calendar-proposals): 6 cases. Building a proposal is deterministic Rust and the harness never approves, so the set makes **no model call and no Calendar request**. Setup takes:
+
+```json
+{"application": {"company", "title", "status"?},
+ "email": "<file under api/fixtures/>",
+ "classification": {"class", "confidence", "stage"?, "interviewer"?, "proposed_times": [{"text", "start_local", "end_local", "time_zone", "start_utc", "end_utc"}]},
+ "slot"?: 2}
+```
+
+with unknown fields refused. It clears proposals, matches, classifications, emails, threads, application events, stages and applications; inserts the application (`interviewing` unless given) with its `created` event; ingests the email like the `classify_email` set (**without queuing a run**); stores its `classified` row; and stores the proposals as of now, **without queuing their runs**. Variables: `application_id`, `email_id`, `classification_id` and `interview_event_id`, the row of the 1-based `slot` (default 1). Each case's input is `{"interview_event_id": "${interview_event_id}"}`. A bad path, an unknown class, a confidence outside 0..=1, a blank company or title, slot 0, or a slot the email doesn't have is a setup error.
+
+Every case uses 2030 dates and labels `status: awaiting_approval`, `actions: []`, `review_items: []` and the one pending `create_calendar_event` action with its exact `input`:
+
+| Case | Fixture | Checks |
+|---|---|---|
+| `named-zone-with-end` | `lever-interview-invite` | an IANA zone and the stated end |
+| `utc-without-end-defaults-30-min` | `lever-interview-invite` | `UTC`, end 30 minutes after the start |
+| `offset-zone-drops-time-zone` | `interview-invite-ics` | a `+05:30` time keeps its instant, `time_zone: null` |
+| `stage-and-interviewer-in-summary-and-description` | `interview-invite-ics` | the stage in the summary, `Stage:` and `Interviewer:` lines |
+| `blank-stage-uses-title` | `recruiter-outreach` | an `availability_request` with a blank stage uses the title |
+| `second-of-three-slots` | `lever-interview-invite` | slot 2: `Proposed time 2 of 3` |
+
+**Proposal accuracy** is the share of passing cases:
+
+```sh
+cargo run --bin eval -- propose_interview --json | jq .totals.pass_rate
+```
+
+**Fixture results (synthetic corpus, not your inbox)**, recorded on 2026-10-23:
+
+| Pass rate | Proposal accuracy | Model calls | Calendar requests | Cost |
+|---|---|---|---|---|
+| 6/6 (100%) | 6/6 (100%) | 0 | 0 | $0.0000 |
+
+The times are the classifier's normalized output written by hand, so these numbers check the slot and request rules, not how well times are extracted from real mail.
 
 ## Labelling emails
 

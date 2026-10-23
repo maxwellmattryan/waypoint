@@ -1,6 +1,7 @@
 //! Waypoint's HTTP API.
 
 pub mod applications;
+pub mod calendar;
 pub mod capture;
 pub mod claude;
 pub mod config;
@@ -55,8 +56,8 @@ pub fn rocket(
     let bus = EventBus::new();
     let wake = Wake::default();
     let (stop, stopped) = watch::channel(false);
-    let runtime = workflows::runtime();
     let google = google::Google::new(google);
+    let runtime = workflows::runtime_with(google.clone());
     let worker = Worker {
         pool: pool.clone(),
         runner: claude.clone(),

@@ -3593,7 +3593,8 @@
           "stage_reopened",
           "stage_removed",
           "note",
-          "rejection_feedback"
+          "rejection_feedback",
+          "interview_scheduled"
         ]
       },
       "FieldError": {

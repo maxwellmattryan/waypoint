@@ -3,6 +3,7 @@
 pub mod classify_email;
 pub mod match_email;
 pub mod memory_writer;
+pub mod propose_interview;
 pub mod tidy;
 
 use std::sync::Arc;
@@ -12,16 +13,24 @@ use serde_json::{Map, Value, json};
 use sqlx::PgPool;
 
 use crate::evals::Suite;
+use crate::google;
 use crate::memories::{
     self, MemoryInput, MemoryKind, MemorySource, MemoryStatus, MemoryTopic, NewMemory,
 };
 use crate::runs::Runtime;
 use crate::tools::Registry;
 
-/// The production runtime: the `tidy_application` sample workflow and its tools, the
-/// `memory_writer` and `classify_email` workflows (no tools), and `match_email` with its
-/// two `write` tools.
+/// The production runtime with Google not configured, for the eval binary and tests (see
+/// [`runtime_with`]).
 pub fn runtime() -> Runtime {
+    runtime_with(google::Google::new(google::Config::default()))
+}
+
+/// The production runtime: the `tidy_application` sample workflow and its tools, the
+/// `memory_writer` and `classify_email` workflows (no tools), `match_email` with its two
+/// `write` tools, and `propose_interview` with its `external` tool, which writes to
+/// Google Calendar through `google`.
+pub fn runtime_with(google: google::Google) -> Runtime {
     let mut tools = Registry::default();
     tools
         .register(tidy::GetApplication)
@@ -36,12 +45,16 @@ pub fn runtime() -> Runtime {
     tools
         .register(match_email::AddApplicationStage)
         .expect("add_application_stage registers");
+    tools
+        .register(propose_interview::CreateCalendarEvent { google })
+        .expect("create_calendar_event registers");
     Runtime::new(
         vec![
             Arc::new(tidy::TidyApplication),
             Arc::new(memory_writer::MemoryWriter),
             Arc::new(classify_email::ClassifyEmail),
             Arc::new(match_email::MatchEmail),
+            Arc::new(propose_interview::ProposeInterview),
         ],
         tools,
     )
@@ -55,6 +68,7 @@ pub fn eval_suites() -> Vec<Arc<dyn Suite>> {
         Arc::new(memory_writer::MemoryWriterEval),
         Arc::new(classify_email::ClassifyEmailEval),
         Arc::new(match_email::MatchEmailEval),
+        Arc::new(propose_interview::ProposeInterviewEval),
     ]
 }
 
@@ -146,6 +160,10 @@ mod tests {
             .workflow("match_email")
             .expect("match_email is registered");
         assert_eq!(matcher.steps(), ["match"]);
+        let proposer = runtime
+            .workflow("propose_interview")
+            .expect("propose_interview is registered");
+        assert_eq!(proposer.steps(), ["create"]);
         let suites: Vec<&str> = eval_suites().iter().map(|suite| suite.workflow()).collect();
         assert_eq!(
             suites,
@@ -153,7 +171,8 @@ mod tests {
                 "tidy_application",
                 "memory_writer",
                 "classify_email",
-                "match_email"
+                "match_email",
+                "propose_interview"
             ]
         );
 
@@ -168,6 +187,7 @@ mod tests {
             [
                 ("add_application_stage", Permission::Write),
                 ("add_note", Permission::Write),
+                ("create_calendar_event", Permission::External),
                 ("draft_follow_up", Permission::External),
                 ("get_application", Permission::Read),
                 ("set_application_status", Permission::Write),

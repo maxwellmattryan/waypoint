@@ -13,7 +13,9 @@ use waypoint_api::claude::ClaudeRequest;
 use waypoint_api::evals::{self, CaseResult, Options, Report, ScratchDb, Suite};
 use waypoint_api::runs::{RunStatus, Runtime, StepContext, StepError, Workflow};
 use waypoint_api::tools::Registry;
-use waypoint_api::workflows::{self, classify_email, match_email, memory_writer, tidy};
+use waypoint_api::workflows::{
+    self, classify_email, match_email, memory_writer, propose_interview, tidy,
+};
 
 /// The runner's own timeout; longer than any case timeout used here.
 const RUNNER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -509,6 +511,136 @@ async fn match_email_suite_seeds_and_passes(pool: PgPool) {
         common::fast_config(),
         &dataset,
         "match_email.json",
+        &options(Duration::from_secs(30)),
+    )
+    .await
+    .expect("the eval runs");
+    let text = report.text();
+    assert!(report.passed(), "{text}");
+    assert_eq!(report.totals.cases, dataset.cases.len(), "{text}");
+    assert_eq!(report.totals.usage.calls, 0, "{text}");
+}
+
+#[sqlx::test]
+async fn propose_interview_suite_seeds_and_passes(pool: PgPool) {
+    let suite = propose_interview::ProposeInterviewEval;
+
+    // The application with its `created` event, the email, its classification and one
+    // proposal per future slot, without a model call or a queued run.
+    let time = |text: &str, start: &str| {
+        json!({"text": text, "start_local": "2030-11-05T14:00:00", "end_local": null,
+               "time_zone": "UTC", "start_utc": start, "end_utc": null})
+    };
+    let setup = json!({
+        "application": {"company": "Hooli", "title": "Backend Engineer"},
+        "email": "emails/lever-interview-invite.eml",
+        "slot": 2,
+        "classification": {
+            "class": "interview_invite", "confidence": 0.9,
+            "proposed_times": [
+                time("past", "2020-01-07T10:00:00Z"),
+                time("first", "2030-11-05T14:00:00Z"),
+                time("second", "2030-11-06T14:00:00Z")
+            ]
+        }
+    });
+    let vars = suite.setup(&pool, &setup).await.expect("setup");
+    let names: Vec<&String> = vars.keys().collect();
+    assert_eq!(
+        names,
+        [
+            "application_id",
+            "classification_id",
+            "email_id",
+            "interview_event_id"
+        ]
+    );
+    let stored: Vec<(i64, i64, String, Option<i64>, Value)> = sqlx::query_as(
+        "SELECT id, application_id, status, run_id, request FROM interview_events ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read the proposals");
+    assert_eq!(stored.len(), 2, "the past time is dropped");
+    assert_eq!(vars["interview_event_id"], json!(stored[1].0));
+    assert_eq!(vars["application_id"], json!(stored[1].1));
+    assert!(
+        stored
+            .iter()
+            .all(|(_, _, status, run, _)| status == "proposed" && run.is_none())
+    );
+    assert_eq!(
+        stored[1].4["description"]
+            .as_str()
+            .expect("a description")
+            .lines()
+            .nth(1),
+        Some("Proposed time 2 of 2: \"second\"")
+    );
+    let status: String = sqlx::query_scalar("SELECT status FROM applications")
+        .fetch_one(&pool)
+        .await
+        .expect("the application is stored");
+    assert_eq!(status, "interviewing");
+    assert_eq!(
+        count(&pool, "application_events").await,
+        1,
+        "its created event"
+    );
+    for table in ["agent_runs", "jobs", "claude_calls", "email_matches"] {
+        assert_eq!(count(&pool, table).await, 0, "{table}");
+    }
+
+    // A later setup starts from its own rows only, and bad setups are refused.
+    let mut single = setup.clone();
+    single["slot"] = json!(1);
+    single["classification"]["proposed_times"] = json!([time("only", "2030-12-01T10:00:00Z")]);
+    suite.setup(&pool, &single).await.expect("setup");
+    for (table, rows) in [
+        ("applications", 1),
+        ("emails", 1),
+        ("email_classifications", 1),
+        ("interview_events", 1),
+    ] {
+        assert_eq!(count(&pool, table).await, rows, "{table}");
+    }
+    let with = |key: &str, value: Value| {
+        let mut bad = setup.clone();
+        bad[key] = value;
+        bad
+    };
+    let mut unknown_class = setup.clone();
+    unknown_class["classification"]["class"] = json!("maybe");
+    let mut rejection = setup.clone();
+    rejection["classification"]["class"] = json!("rejection");
+    for bad in [
+        json!(null),
+        json!({}),
+        with("extra", json!(1)),
+        with("email", json!("../Cargo.toml")),
+        with("email", json!("/etc/hosts")),
+        with("email", json!("emails/missing.eml")),
+        with("slot", json!(0)),
+        with("slot", json!(3)),
+        unknown_class,
+        rejection,
+    ] {
+        assert!(suite.setup(&pool, &bad).await.is_err(), "{bad}");
+    }
+
+    // The shipped dataset passes through the real worker, without a model call.
+    let fake = common::fake("hang", RUNNER_TIMEOUT);
+    let path = evals::default_path(propose_interview::WORKFLOW);
+    let dataset =
+        evals::load(&path, propose_interview::WORKFLOW).expect("the shipped dataset loads");
+    let report = evals::run(
+        &pool,
+        fake.runner.clone(),
+        workflows::runtime(),
+        &suite,
+        common::fast_config(),
+        &dataset,
+        "propose_interview.json",
         &options(Duration::from_secs(30)),
     )
     .await

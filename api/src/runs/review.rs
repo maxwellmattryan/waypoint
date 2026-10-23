@@ -165,8 +165,9 @@ pub async fn dismiss(
 /// Accepts `pending` item `id`: applies its result as the user's own change, in one
 /// transaction that locks the item, then its application, and marks it `accepted` with
 /// `resolved_at` set. Only the `email.match` and `email.new_application` kinds can be
-/// accepted; a refusal changes nothing. Publishes `application.created` or
-/// `application.updated` after the commit.
+/// accepted; a refusal changes nothing. The email's interview times are proposed in the
+/// same transaction. Publishes `application.created` or `application.updated`, and the
+/// queued `propose_interview` runs, after the commit.
 pub async fn accept(pool: &PgPool, bus: &EventBus, id: i64) -> Result<ReviewItem, DecisionError> {
     let mut tx = pool.begin().await?;
     let item: ReviewItem = sqlx::query_as(&format!(
@@ -192,7 +193,7 @@ pub async fn accept(pool: &PgPool, bus: &EventBus, id: i64) -> Result<ReviewItem
             item.kind
         )));
     }
-    let accepted = match_email::accept(&mut tx, &item).await?;
+    let accepted = match_email::accept(&mut tx, bus, &item).await?;
     let item: ReviewItem = sqlx::query_as(&format!(
         "UPDATE review_items SET status = 'accepted', resolved_at = now() WHERE id = $1 \
          RETURNING {ITEM_COLUMNS}"
@@ -207,6 +208,9 @@ pub async fn accept(pool: &PgPool, bus: &EventBus, id: i64) -> Result<ReviewItem
     } else {
         Event::ApplicationUpdated { application }
     });
+    for run in accepted.runs {
+        bus.publish(Event::RunUpdated { run });
+    }
     Ok(item)
 }
 

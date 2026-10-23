@@ -43,18 +43,19 @@ use std::collections::{BTreeSet, HashMap};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::{PgConnection, PgPool};
+use sqlx::{PgConnection, PgPool, Postgres, Transaction};
 
 use crate::applications::stages::MAX_STAGES;
 use crate::applications::timeline::{self, EventKind};
 use crate::applications::{self, Application, ApplicationStatus, MAX_SHORT};
 use crate::email::heuristics;
-use crate::events::Event;
+use crate::events::{Event, EventBus};
 use crate::runs::approvals::DecisionError;
 use crate::runs::review::ReviewItem;
-use crate::runs::{REVIEW_THRESHOLD, StepContext, StepError, Workflow};
+use crate::runs::{REVIEW_THRESHOLD, Run, StepContext, StepError, Workflow};
 use crate::tools::{Permission, Tool, ToolContext, ToolError, UndoError};
 use crate::workflows::classify_email::EmailClass;
+use crate::workflows::propose_interview;
 
 /// The workflow's name.
 pub const WORKFLOW: &str = "match_email";
@@ -1299,6 +1300,8 @@ async fn match_step(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, St
         _ => outcome.status = "unmatched".into(),
     }
 
+    // The match row and the interview proposals of a linked email commit together.
+    let mut tx = pool.begin().await.map_err(db("store the match"))?;
     let updated = sqlx::query(
         "UPDATE email_matches SET status = $2, application_id = $3, confidence = $4, \
          reasons = $5, candidates = $6, ops = $7, review_item_id = $8, run_id = $9, \
@@ -1313,9 +1316,22 @@ async fn match_step(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, St
     .bind(&outcome.ops)
     .bind(outcome.review_item_id)
     .bind(ctx.run_id())
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .map_err(db("store the match"))?;
+    let mut proposals = Vec::new();
+    if updated.rows_affected() > 0
+        && matches!(outcome.status.as_str(), "applied" | "no_action")
+        && let Some(id) = outcome.application_id
+    {
+        proposals = propose_interview::queue_proposals(&mut tx, ctx.bus(), classification_id, id)
+            .await
+            .map_err(db("queue the interview proposals"))?;
+    }
+    tx.commit().await.map_err(db("store the match"))?;
+    for run in proposals {
+        ctx.bus().publish(Event::RunUpdated { run });
+    }
     if updated.rows_affected() == 0 {
         // Another attempt or an accept finished it first.
         if let Some(row) = stored(&pool, classification_id)
@@ -1335,7 +1351,7 @@ async fn match_step(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, St
 }
 
 /// Publishes `application.updated` with application `id`'s current row. Best effort.
-async fn publish_updated(ctx: &StepContext<'_>, pool: &PgPool, id: i64) {
+pub(crate) async fn publish_updated(ctx: &StepContext<'_>, pool: &PgPool, id: i64) {
     let found = sqlx::query_as::<_, Application>(&format!(
         "SELECT {} FROM applications WHERE id = $1",
         applications::COLUMNS
@@ -1399,6 +1415,9 @@ pub(crate) struct Accepted {
     pub application: Application,
     /// The application is new (`email.new_application`).
     pub created: bool,
+    /// The `propose_interview` runs the email's interview times queued; the caller
+    /// publishes them after the commit.
+    pub runs: Vec<Run>,
 }
 
 fn accept_conflict(err: ApplyError) -> DecisionError {
@@ -1436,10 +1455,12 @@ async fn link(
 /// Applies a pending `email.match` or `email.new_application` item inside the caller's
 /// transaction, as the user's own change (no action, no undo): the match's ops with the
 /// email as their source, or the proposed application with a sourced `created` event. Its
-/// match row becomes `applied`. Any refusal is a [`DecisionError::Conflict`], and the
-/// caller rolls back.
+/// match row becomes `applied`, and its interview times are proposed
+/// ([`propose_interview::queue_proposals`]). Any refusal is a
+/// [`DecisionError::Conflict`], and the caller rolls back.
 pub(crate) async fn accept(
-    conn: &mut PgConnection,
+    tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
     item: &ReviewItem,
 ) -> Result<Accepted, DecisionError> {
     let unreadable = |_| DecisionError::Conflict(format!("review item {} doesn't parse", item.id));
@@ -1447,32 +1468,35 @@ pub(crate) async fn accept(
         MATCH_REVIEW_KIND => {
             let payload = MatchPayload::deserialize(&item.payload).map_err(unreadable)?;
             let id = payload.application_id;
-            lock(conn, id).await.map_err(accept_conflict)?;
+            lock(tx, id).await.map_err(accept_conflict)?;
             for op in &payload.ops {
                 match op {
                     Op::SetStatus { from, to } => {
-                        apply_status(conn, id, *from, *to, payload.email_id)
+                        apply_status(tx, id, *from, *to, payload.email_id)
                             .await
                             .map_err(accept_conflict)?;
                     }
                     Op::AddStage { name } => {
-                        apply_stage(conn, id, name, payload.email_id)
+                        apply_stage(tx, id, name, payload.email_id)
                             .await
                             .map_err(accept_conflict)?;
                     }
                 }
             }
-            link(conn, payload.classification_id, id).await?;
+            link(tx, payload.classification_id, id).await?;
+            let runs =
+                propose_interview::queue_proposals(tx, bus, payload.classification_id, id).await?;
             let application = sqlx::query_as(&format!(
                 "SELECT {} FROM applications WHERE id = $1",
                 applications::COLUMNS
             ))
             .bind(id)
-            .fetch_one(&mut *conn)
+            .fetch_one(&mut **tx)
             .await?;
             Ok(Accepted {
                 application,
                 created: false,
+                runs,
             })
         }
         NEW_APPLICATION_REVIEW_KIND => {
@@ -1500,10 +1524,10 @@ pub(crate) async fn accept(
             .bind(company.trim())
             .bind(title.trim())
             .bind(status.as_str())
-            .fetch_one(&mut *conn)
+            .fetch_one(&mut **tx)
             .await?;
             timeline::record_sourced(
-                conn,
+                tx,
                 application.id,
                 EventKind::Created,
                 None,
@@ -1512,10 +1536,18 @@ pub(crate) async fn accept(
                 Some(payload.email_id),
             )
             .await?;
-            link(conn, payload.classification_id, application.id).await?;
+            link(tx, payload.classification_id, application.id).await?;
+            let runs = propose_interview::queue_proposals(
+                tx,
+                bus,
+                payload.classification_id,
+                application.id,
+            )
+            .await?;
             Ok(Accepted {
                 application,
                 created: true,
+                runs,
             })
         }
         other => Err(DecisionError::Conflict(format!(

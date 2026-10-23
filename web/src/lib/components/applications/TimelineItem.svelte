@@ -26,6 +26,10 @@
 	<time datetime={event.created_at} class="text-xs text-fg-muted">
 		{formatDateTime(event.created_at)}
 	</time>
+	{#if event.body && event.kind === 'interview_scheduled'}
+		<!-- The event's summary and time; the email that proposed it follows. -->
+		<p class="text-sm break-words whitespace-pre-wrap text-fg">{event.body}</p>
+	{/if}
 	{#if source}
 		<p class="text-xs break-words text-fg-muted">{source}</p>
 	{/if}

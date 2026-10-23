@@ -452,7 +452,7 @@ pub fn validate(
 }
 
 /// A time zone a proposed time names.
-enum Zone {
+pub(crate) enum Zone {
     Utc,
     Fixed(FixedOffset),
     Named(Tz),
@@ -476,7 +476,7 @@ impl Zone {
 }
 
 /// `UTC`/`Z`, a `±HH:MM` offset up to 14:00, or an IANA name, with its normalized name.
-fn parse_zone(text: &str) -> Option<(Zone, String)> {
+pub(crate) fn parse_zone(text: &str) -> Option<(Zone, String)> {
     if text == "UTC" || text == "Z" {
         return Some((Zone::Utc, "UTC".into()));
     }

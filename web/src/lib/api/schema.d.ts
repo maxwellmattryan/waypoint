@@ -986,7 +986,7 @@ export interface components {
          * @description What an event records.
          * @enum {string}
          */
-        EventKind: "created" | "status_changed" | "stage_added" | "stage_completed" | "stage_reopened" | "stage_removed" | "note" | "rejection_feedback";
+        EventKind: "created" | "status_changed" | "stage_added" | "stage_completed" | "stage_reopened" | "stage_removed" | "note" | "rejection_feedback" | "interview_scheduled";
         /** @description One rule a field broke. */
         FieldError: {
             /** @description The JSON field name, or `body` when the body itself didn't parse. */

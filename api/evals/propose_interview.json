@@ -1,0 +1,186 @@
+{
+  "workflow": "propose_interview",
+  "cases": [
+    {
+      "name": "named-zone-with-end",
+      "setup": {
+        "application": {"company": "Hooli", "title": "Backend Engineer"},
+        "email": "emails/lever-interview-invite.eml",
+        "classification": {
+          "class": "interview_invite", "confidence": 0.9,
+          "proposed_times": [
+            {"text": "Tue Nov 5, 2pm ET", "start_local": "2030-11-05T14:00:00", "end_local": "2030-11-05T15:00:00",
+             "time_zone": "America/New_York", "start_utc": "2030-11-05T19:00:00Z", "end_utc": "2030-11-05T20:00:00Z"}
+          ]
+        }
+      },
+      "input": {"interview_event_id": "${interview_event_id}"},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [],
+        "review_items": [],
+        "pending_actions": [
+          {"tool": "create_calendar_event", "status": "pending", "input": {
+            "summary": "Interview: Hooli — Backend Engineer",
+            "description": "Role: Backend Engineer\nProposed time: \"Tue Nov 5, 2pm ET\"\nFrom email: \"Schedule your interview with Hooli\" · Hooli Talent\nAdded by Waypoint after your approval.",
+            "start": "2030-11-05T19:00:00Z",
+            "end": "2030-11-05T20:00:00Z",
+            "time_zone": "America/New_York"
+          }}
+        ]
+      }
+    },
+    {
+      "name": "utc-without-end-defaults-30-min",
+      "setup": {
+        "application": {"company": "Hooli", "title": "Backend Engineer"},
+        "email": "emails/lever-interview-invite.eml",
+        "classification": {
+          "class": "interview_invite", "confidence": 0.9,
+          "proposed_times": [
+            {"text": "Nov 6 at 15:00 UTC", "start_local": "2030-11-06T15:00:00", "end_local": null,
+             "time_zone": "UTC", "start_utc": "2030-11-06T15:00:00Z", "end_utc": null}
+          ]
+        }
+      },
+      "input": {"interview_event_id": "${interview_event_id}"},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [],
+        "review_items": [],
+        "pending_actions": [
+          {"tool": "create_calendar_event", "status": "pending", "input": {
+            "summary": "Interview: Hooli — Backend Engineer",
+            "description": "Role: Backend Engineer\nProposed time: \"Nov 6 at 15:00 UTC\"\nFrom email: \"Schedule your interview with Hooli\" · Hooli Talent\nAdded by Waypoint after your approval.",
+            "start": "2030-11-06T15:00:00Z",
+            "end": "2030-11-06T15:30:00Z",
+            "time_zone": "UTC"
+          }}
+        ]
+      }
+    },
+    {
+      "name": "offset-zone-drops-time-zone",
+      "setup": {
+        "application": {"company": "Stark Industries", "title": "Software Engineer"},
+        "email": "emails/interview-invite-ics.eml",
+        "classification": {
+          "class": "interview_invite", "confidence": 0.95,
+          "proposed_times": [
+            {"text": "Nov 7, 2pm IST", "start_local": "2030-11-07T14:00:00", "end_local": "2030-11-07T15:00:00",
+             "time_zone": "+05:30", "start_utc": "2030-11-07T08:30:00Z", "end_utc": "2030-11-07T09:30:00Z"}
+          ]
+        }
+      },
+      "input": {"interview_event_id": "${interview_event_id}"},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [],
+        "review_items": [],
+        "pending_actions": [
+          {"tool": "create_calendar_event", "status": "pending", "input": {
+            "summary": "Interview: Stark Industries — Software Engineer",
+            "description": "Role: Software Engineer\nProposed time: \"Nov 7, 2pm IST\"\nFrom email: \"Invitation: Interview with Stark Industries\" · Stark Scheduling\nAdded by Waypoint after your approval.",
+            "start": "2030-11-07T08:30:00Z",
+            "end": "2030-11-07T09:30:00Z",
+            "time_zone": null
+          }}
+        ]
+      }
+    },
+    {
+      "name": "stage-and-interviewer-in-summary-and-description",
+      "setup": {
+        "application": {"company": "Stark Industries", "title": "Software Engineer"},
+        "email": "emails/interview-invite-ics.eml",
+        "classification": {
+          "class": "interview_invite", "confidence": 0.95,
+          "stage": "Technical interview", "interviewer": "Pepper Potts",
+          "proposed_times": [
+            {"text": "Friday Nov 8 at 10am PT", "start_local": "2030-11-08T10:00:00", "end_local": "2030-11-08T11:00:00",
+             "time_zone": "America/Los_Angeles", "start_utc": "2030-11-08T18:00:00Z", "end_utc": "2030-11-08T19:00:00Z"}
+          ]
+        }
+      },
+      "input": {"interview_event_id": "${interview_event_id}"},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [],
+        "review_items": [],
+        "pending_actions": [
+          {"tool": "create_calendar_event", "status": "pending", "input": {
+            "summary": "Interview: Stark Industries — Technical interview",
+            "description": "Role: Software Engineer\nStage: Technical interview\nInterviewer: Pepper Potts\nProposed time: \"Friday Nov 8 at 10am PT\"\nFrom email: \"Invitation: Interview with Stark Industries\" · Stark Scheduling\nAdded by Waypoint after your approval.",
+            "start": "2030-11-08T18:00:00Z",
+            "end": "2030-11-08T19:00:00Z",
+            "time_zone": "America/Los_Angeles"
+          }}
+        ]
+      }
+    },
+    {
+      "name": "blank-stage-uses-title",
+      "setup": {
+        "application": {"company": "Soylent", "title": "Staff Engineer", "status": "applied"},
+        "email": "emails/recruiter-outreach.eml",
+        "classification": {
+          "class": "availability_request", "confidence": 0.86,
+          "stage": "   ", "interviewer": "Dana Lee",
+          "proposed_times": [
+            {"text": "Mon Nov 11 at 9:00 Berlin", "start_local": "2030-11-11T09:00:00", "end_local": null,
+             "time_zone": "Europe/Berlin", "start_utc": "2030-11-11T08:00:00Z", "end_utc": null}
+          ]
+        }
+      },
+      "input": {"interview_event_id": "${interview_event_id}"},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [],
+        "review_items": [],
+        "pending_actions": [
+          {"tool": "create_calendar_event", "status": "pending", "input": {
+            "summary": "Interview: Soylent — Staff Engineer",
+            "description": "Role: Staff Engineer\nInterviewer: Dana Lee\nProposed time: \"Mon Nov 11 at 9:00 Berlin\"\nFrom email: \"Staff engineer role at Soylent\" · Dana Lee\nAdded by Waypoint after your approval.",
+            "start": "2030-11-11T08:00:00Z",
+            "end": "2030-11-11T08:30:00Z",
+            "time_zone": "Europe/Berlin"
+          }}
+        ]
+      }
+    },
+    {
+      "name": "second-of-three-slots",
+      "setup": {
+        "application": {"company": "Hooli", "title": "Backend Engineer"},
+        "email": "emails/lever-interview-invite.eml",
+        "slot": 2,
+        "classification": {
+          "class": "availability_request", "confidence": 0.9, "stage": "Onsite",
+          "proposed_times": [
+            {"text": "Tue Nov 12, 9am ET", "start_local": "2030-11-12T09:00:00", "end_local": "2030-11-12T10:00:00",
+             "time_zone": "America/New_York", "start_utc": "2030-11-12T14:00:00Z", "end_utc": "2030-11-12T15:00:00Z"},
+            {"text": "Wed Nov 13, 1pm ET", "start_local": "2030-11-13T13:00:00", "end_local": "2030-11-13T14:00:00",
+             "time_zone": "America/New_York", "start_utc": "2030-11-13T18:00:00Z", "end_utc": "2030-11-13T19:00:00Z"},
+            {"text": "Thu Nov 14, 4pm ET", "start_local": "2030-11-14T16:00:00", "end_local": "2030-11-14T17:00:00",
+             "time_zone": "America/New_York", "start_utc": "2030-11-14T21:00:00Z", "end_utc": "2030-11-14T22:00:00Z"}
+          ]
+        }
+      },
+      "input": {"interview_event_id": "${interview_event_id}"},
+      "expect": {
+        "status": "awaiting_approval",
+        "actions": [],
+        "review_items": [],
+        "pending_actions": [
+          {"tool": "create_calendar_event", "status": "pending", "input": {
+            "summary": "Interview: Hooli — Onsite",
+            "description": "Role: Backend Engineer\nStage: Onsite\nProposed time 2 of 3: \"Wed Nov 13, 1pm ET\"\nFrom email: \"Schedule your interview with Hooli\" · Hooli Talent\nAdded by Waypoint after your approval.",
+            "start": "2030-11-13T18:00:00Z",
+            "end": "2030-11-13T19:00:00Z",
+            "time_zone": "America/New_York"
+          }}
+        ]
+      }
+    }
+  ]
+}

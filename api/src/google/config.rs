@@ -28,6 +28,8 @@ pub struct Config {
     pub redirect_uri: String,
     /// Gmail sync settings (code defaults; tests override them).
     pub gmail: crate::gmail::Config,
+    /// Google Calendar's endpoint (a code default; tests override it).
+    pub calendar: crate::calendar::Config,
 }
 
 /// The settings a configured flow needs, borrowed from a [`Config`].
@@ -59,6 +61,7 @@ impl Default for Config {
             revoke_url: REVOKE_URL.into(),
             redirect_uri: redirect_uri(DEFAULT_PORT),
             gmail: crate::gmail::Config::default(),
+            calendar: crate::calendar::Config::default(),
         }
     }
 }
@@ -76,6 +79,7 @@ impl fmt::Debug for Config {
             .field("redirect_uri", &self.redirect_uri)
             // Only the endpoint: the sync limits are code defaults, not settings.
             .field("gmail_base_url", &self.gmail.base_url)
+            .field("calendar_base_url", &self.calendar.base_url)
             .finish_non_exhaustive()
     }
 }

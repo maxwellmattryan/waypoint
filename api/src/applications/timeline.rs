@@ -39,11 +39,14 @@ pub enum EventKind {
     Note,
     /// What the company said when it rejected the application; the text is `body`.
     RejectionFeedback,
+    /// An interview the user approved was added to Google Calendar; `body` names its
+    /// summary and time, and `source_email` the email that proposed it.
+    InterviewScheduled,
 }
 
 impl EventKind {
     /// Every kind.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Created,
         Self::StatusChanged,
         Self::StageAdded,
@@ -52,6 +55,7 @@ impl EventKind {
         Self::StageRemoved,
         Self::Note,
         Self::RejectionFeedback,
+        Self::InterviewScheduled,
     ];
 
     /// The wire and database name.
@@ -65,6 +69,7 @@ impl EventKind {
             Self::StageRemoved => "stage_removed",
             Self::Note => "note",
             Self::RejectionFeedback => "rejection_feedback",
+            Self::InterviewScheduled => "interview_scheduled",
         }
     }
 }
@@ -231,6 +236,27 @@ pub(crate) async fn record_sourced(
         to,
         stage_name,
         None,
+        source_email_id,
+    )
+    .await
+}
+
+/// Records an `interview_scheduled` event: `body` names the event, and `source_email_id`
+/// the email that proposed it (no email when that one no longer exists).
+pub(crate) async fn record_interview(
+    conn: &mut PgConnection,
+    application_id: i64,
+    body: &str,
+    source_email_id: Option<i64>,
+) -> Result<ApplicationEvent, sqlx::Error> {
+    insert(
+        conn,
+        application_id,
+        EventKind::InterviewScheduled,
+        None,
+        None,
+        None,
+        Some(body),
         source_email_id,
     )
     .await
