@@ -220,6 +220,10 @@ The **Runs** page shows the run live, including while it awaits approval. `POST 
 
 On the Applications page, **Capture from URL** reads a job posting's link and opens the add form prefilled for you to check. It uses the page's JSON-LD first, then the Greenhouse, Lever or Ashby posting API, and asks Claude to read the page text only when neither has the details. [docs/capture.md](docs/capture.md) covers the tiers, the limits, the redirect guard and what is sent to Claude.
 
+## Board sourcing
+
+Waypoint can read a target company's whole public Greenhouse, Lever or Ashby board into the `job_postings` table. `POST /sourcing/boards` with `{"source": "greenhouse" | "lever" | "ashby", "board": "<slug>"}` queues a `source_board` job (or returns the one already queued or running for that board). The job fetches every page, then inserts new postings, updates changed ones and marks the ones the board stopped listing as removed, and a failed fetch changes nothing. There is no UI or schedule yet. [docs/sourcing.md](docs/sourcing.md) covers the route, each board's pagination, the field mapping, the location rules and removal.
+
 ## Google account
 
 Gmail and Calendar access goes through one Google account that you connect with your own Google Cloud OAuth client. [docs/google-oauth.md](docs/google-oauth.md) walks through creating the client, the three `.env` settings (`WAYPOINT_GOOGLE_CLIENT_ID`, `WAYPOINT_GOOGLE_CLIENT_SECRET`, `WAYPOINT_TOKEN_KEY`) and connecting. Waypoint asks only for read-only Gmail and Calendar events, and stores the tokens encrypted.
