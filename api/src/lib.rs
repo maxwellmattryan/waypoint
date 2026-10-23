@@ -17,6 +17,7 @@ pub mod kill_switch;
 pub mod mcp;
 pub mod memories;
 pub mod openapi;
+pub mod profile;
 pub mod resumes;
 pub mod runs;
 pub mod tools;
@@ -91,6 +92,8 @@ pub fn rocket(
                 memories::update,
                 memories::confirm,
                 memories::delete,
+                profile::linkedin::import,
+                profile::resume::start,
                 applications::stages::list,
                 applications::stages::add,
                 applications::stages::update,
