@@ -439,6 +439,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory-signals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /memory-signals`: the learning signals, newest first, a page at a time. */
+        get: operations["list_memory_signals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pending-actions": {
         parameters: {
             query?: never;
@@ -771,6 +788,14 @@ export interface components {
             /** @description Must be exactly `delete all data`. */
             confirmation: string;
         };
+        /** @description The `POST /review-items/{id}/dismiss` body: `{}`, or `{"reason": "…"}` to say why. */
+        DismissReviewItem: {
+            /**
+             * @description Why the result was wrong; trimmed, with a blank one stored as `null`. At most 1000
+             *     characters. Never logged.
+             */
+            reason?: string | null;
+        };
         /**
          * @description The kinds of entry the user writes directly.
          * @enum {string}
@@ -965,6 +990,36 @@ export interface components {
          * @enum {string}
          */
         MemoryKind: "fact" | "preference" | "answer";
+        /** @description One `memory_signals` row: the body of `GET /memory-signals`' entries. */
+        MemorySignal: {
+            /** @description Approvals only: the approved input. */
+            approved: unknown;
+            /** @description Approvals only: the diff from `drafted` to `approved`; `[]` when unedited. */
+            changes: components["schemas"]["SignalChange"][] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** @description The action's requested input, or the item's payload. */
+            drafted: unknown;
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["SignalKind"];
+            /**
+             * Format: int64
+             * @description The decided pending action, for an approval or a rejection.
+             */
+            pending_action_id: number | null;
+            /** @description Dismissals only: the user's reason, when they gave one. */
+            reason: string | null;
+            /**
+             * Format: int64
+             * @description The dismissed review item, for a dismissal.
+             */
+            review_item_id: number | null;
+            /** Format: int64 */
+            run_id: number;
+            /** @description The tool name, or the review item's kind. */
+            subject: string;
+        };
         /**
          * @description Whether the user has confirmed a memory.
          * @enum {string}
@@ -1210,6 +1265,26 @@ export interface components {
         SetKillSwitch: {
             paused: boolean;
         };
+        /** @description One entry of an approval's diff. */
+        SignalChange: {
+            /** @description The approved value; `null` for a `remove`. */
+            after: unknown;
+            /** @description The drafted value; `null` for an `add`. */
+            before: unknown;
+            op: components["schemas"]["SignalOp"];
+            /** @description An RFC 6901 JSON Pointer: `/message`, `/a~1b`, or `""` for the whole input. */
+            path: string;
+        };
+        /**
+         * @description What decision a signal records.
+         * @enum {string}
+         */
+        SignalKind: "approval" | "rejection" | "dismissal";
+        /**
+         * @description How one value changed between the drafted and the approved input.
+         * @enum {string}
+         */
+        SignalOp: "add" | "remove" | "replace";
         /**
          * @description Where a memory came from.
          * @enum {string}
@@ -3141,6 +3216,56 @@ export interface operations {
             };
         };
     };
+    list_memory_signals: {
+        parameters: {
+            query?: {
+                /** @description Only signals of this kind; blank means any */
+                kind?: components["schemas"]["SignalKind"];
+                /** @description Most signals to return; default 50, clamped to 1..=200 */
+                limit?: number;
+                /** @description Only signals with an `id` below this one, for the next page */
+                before?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signals, `id` descending */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemorySignal"][];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `kind` is not a known value */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The signals could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_pending_actions: {
         parameters: {
             query?: never;
@@ -3588,7 +3713,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DismissReviewItem"];
+            };
+        };
         responses: {
             /** @description The dismissed item, with `resolved_at` set */
             200: {
@@ -3597,6 +3726,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewItem"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
                 };
             };
             /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
@@ -3619,6 +3757,22 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `reason` is longer than 1000 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
             };
             /** @description The dismissal could not be stored */
             500: {

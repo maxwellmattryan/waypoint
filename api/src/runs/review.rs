@@ -1,20 +1,34 @@
 //! Review items: results a step wasn't confident enough to apply (see
-//! [`super::StepContext::review_if_unsure`]). They are stored, listed and dismissed;
-//! accepting one (applying its result) comes later, per workflow.
+//! [`super::StepContext::review_if_unsure`]). They are stored, listed and dismissed (each
+//! dismissal records a learning signal, [`crate::memory_signals`]); accepting one (applying
+//! its result) comes later, per workflow.
 
 use chrono::{DateTime, Utc};
 use rocket::State;
-use rocket::serde::json::Json;
+use rocket::serde::json::{self, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
 
 use super::approvals::DecisionError;
-use crate::applications::{ApiError, internal};
+use crate::applications::{ApiError, JsonContent, ValidationErrors, internal, parsed, text};
 use crate::host::{LocalHost, NotCrossSite};
+use crate::memory_signals;
 
 /// Most review items one `GET /review-items` returns.
 pub const MAX_ITEMS: i64 = 200;
+/// Most characters in a dismissal's reason.
+pub const MAX_REASON: usize = 1_000;
+
+/// The `POST /review-items/{id}/dismiss` body: `{}`, or `{"reason": "…"}` to say why.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DismissReviewItem {
+    /// Why the result was wrong; trimmed, with a blank one stored as `null`. At most 1000
+    /// characters. Never logged.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
 
 /// Where a review item is.
 #[derive(
@@ -102,22 +116,30 @@ pub async fn list_pending(pool: &PgPool) -> Result<Vec<ReviewItem>, sqlx::Error>
     .await
 }
 
-/// Dismisses `pending` item `id`: marks it `dismissed` with `resolved_at` set and applies
-/// nothing.
-pub async fn dismiss(pool: &PgPool, id: i64) -> Result<ReviewItem, DecisionError> {
+/// Dismisses `pending` item `id`: marks it `dismissed` with `resolved_at` set, applies
+/// nothing, and records a `dismissal` signal with `reason` (trimmed, never blank) in the
+/// same transaction.
+pub async fn dismiss(
+    pool: &PgPool,
+    id: i64,
+    reason: Option<String>,
+) -> Result<ReviewItem, DecisionError> {
+    let mut tx = pool.begin().await?;
     let dismissed: Option<ReviewItem> = sqlx::query_as(&format!(
         "UPDATE review_items SET status = 'dismissed', resolved_at = now() \
          WHERE id = $1 AND status = 'pending' RETURNING {ITEM_COLUMNS}"
     ))
     .bind(id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     if let Some(item) = dismissed {
+        memory_signals::record_dismissal(&mut tx, &item, reason.as_deref()).await?;
+        tx.commit().await?;
         return Ok(item);
     }
     let exists: Option<i32> = sqlx::query_scalar("SELECT 1 FROM review_items WHERE id = $1")
         .bind(id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?;
     match exists {
         Some(_) => Err(DecisionError::Conflict(format!(
@@ -157,22 +179,34 @@ pub async fn list(
     tag = "runs",
     operation_id = "dismiss_review_item",
     params(("id" = i64, Path, description = "The review item's id")),
+    request_body = DismissReviewItem,
     responses(
         (status = 200, description = "The dismissed item, with `resolved_at` set", body = ReviewItem),
+        (status = 400, description = "The body is not valid JSON for this route", body = ValidationErrors),
         (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
         (status = 404, description = "No review item has this id"),
         (status = 409, description = "The item is not `pending`"),
+        (status = 415, description = "The body is not `application/json`"),
+        (status = 422, description = "`reason` is longer than 1000 characters", body = ValidationErrors),
         (status = 500, description = "The dismissal could not be stored"),
     )
 )]
-#[rocket::post("/review-items/<id>/dismiss")]
+#[rocket::post("/review-items/<id>/dismiss", data = "<body>")]
 pub async fn dismiss_route(
     _host: LocalHost,
     _site: NotCrossSite,
+    _json: JsonContent,
     id: i64,
     pool: &State<PgPool>,
+    body: Result<Json<DismissReviewItem>, json::Error<'_>>,
 ) -> Result<Json<ReviewItem>, ApiError> {
-    dismiss(pool, id)
+    let DismissReviewItem { reason } = parsed(body)?;
+    let mut errors = Vec::new();
+    let reason = text(&mut errors, "reason", reason.as_deref(), MAX_REASON);
+    if !errors.is_empty() {
+        return Err(ApiError::Invalid(ValidationErrors { errors }));
+    }
+    dismiss(pool, id, reason)
         .await
         .map(Json)
         .map_err(|err| err.into_api("dismiss a review item"))

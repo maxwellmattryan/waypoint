@@ -1842,6 +1842,77 @@
         }
       }
     },
+    "/memory-signals": {
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "`GET /memory-signals`: the learning signals, newest first, a page at a time.",
+        "operationId": "list_memory_signals",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only signals of this kind; blank means any",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SignalKind"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Most signals to return; default 50, clamped to 1..=200",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only signals with an `id` below this one, for the next page",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signals, `id` descending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemorySignal"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "422": {
+            "description": "`kind` is not a known value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The signals could not be read"
+          }
+        }
+      }
+    },
     "/pending-actions": {
       "get": {
         "tags": [
@@ -2270,6 +2341,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissReviewItem"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "The dismissed item, with `resolved_at` set",
@@ -2277,6 +2358,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReviewItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
                 }
               }
             }
@@ -2289,6 +2380,19 @@
           },
           "409": {
             "description": "The item is not `pending`"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "422": {
+            "description": "`reason` is longer than 1000 characters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
           },
           "500": {
             "description": "The dismissal could not be stored"
@@ -2824,6 +2928,20 @@
           "confirmation": {
             "type": "string",
             "description": "Must be exactly `delete all data`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DismissReviewItem": {
+        "type": "object",
+        "description": "The `POST /review-items/{id}/dismiss` body: `{}`, or `{\"reason\": \"…\"}` to say why.",
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the result was wrong; trimmed, with a blank one stored as `null`. At most 1000\ncharacters. Never logged."
           }
         },
         "additionalProperties": false
@@ -3430,6 +3548,83 @@
           "preference",
           "answer"
         ]
+      },
+      "MemorySignal": {
+        "type": "object",
+        "description": "One `memory_signals` row: the body of `GET /memory-signals`' entries.",
+        "required": [
+          "id",
+          "kind",
+          "run_id",
+          "pending_action_id",
+          "review_item_id",
+          "subject",
+          "drafted",
+          "approved",
+          "changes",
+          "reason",
+          "created_at"
+        ],
+        "properties": {
+          "approved": {
+            "description": "Approvals only: the approved input."
+          },
+          "changes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/SignalChange"
+            },
+            "description": "Approvals only: the diff from `drafted` to `approved`; `[]` when unedited."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "drafted": {
+            "description": "The action's requested input, or the item's payload."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SignalKind"
+          },
+          "pending_action_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The decided pending action, for an approval or a rejection."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Dismissals only: the user's reason, when they gave one."
+          },
+          "review_item_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The dismissed review item, for a dismissal."
+          },
+          "run_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "subject": {
+            "type": "string",
+            "description": "The tool name, or the review item's kind."
+          }
+        }
       },
       "MemoryStatus": {
         "type": "string",
@@ -4060,6 +4255,49 @@
           }
         },
         "additionalProperties": false
+      },
+      "SignalChange": {
+        "type": "object",
+        "description": "One entry of an approval's diff.",
+        "required": [
+          "op",
+          "path",
+          "before",
+          "after"
+        ],
+        "properties": {
+          "after": {
+            "description": "The approved value; `null` for a `remove`."
+          },
+          "before": {
+            "description": "The drafted value; `null` for an `add`."
+          },
+          "op": {
+            "$ref": "#/components/schemas/SignalOp"
+          },
+          "path": {
+            "type": "string",
+            "description": "An RFC 6901 JSON Pointer: `/message`, `/a~1b`, or `\"\"` for the whole input."
+          }
+        }
+      },
+      "SignalKind": {
+        "type": "string",
+        "description": "What decision a signal records.",
+        "enum": [
+          "approval",
+          "rejection",
+          "dismissal"
+        ]
+      },
+      "SignalOp": {
+        "type": "string",
+        "description": "How one value changed between the drafted and the approved input.",
+        "enum": [
+          "add",
+          "remove",
+          "replace"
+        ]
       },
       "SourceKind": {
         "type": "string",

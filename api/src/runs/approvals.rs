@@ -3,7 +3,8 @@
 //! those actions and approves (optionally with an edited input) or rejects them.
 //!
 //! Both decisions lock the pending action, then its run, so they serialize with each other
-//! and with the executor parking the run.
+//! and with the executor parking the run. Each records its learning signal
+//! ([`crate::memory_signals`]) in the same transaction.
 
 use chrono::{DateTime, Utc};
 use rocket::State;
@@ -17,6 +18,7 @@ use crate::applications::{ApiError, FieldError, JsonContent, ValidationErrors, i
 use crate::events::{Event, EventBus};
 use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
+use crate::memory_signals;
 use crate::tools::{Registry, ToolCallError};
 
 /// Most pending actions one `GET /pending-actions` returns.
@@ -209,6 +211,7 @@ pub async fn approve(
     .bind(&approved)
     .fetch_one(&mut *tx)
     .await?;
+    memory_signals::record_approval(&mut tx, &action).await?;
     let others: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM pending_actions WHERE run_id = $1 AND status = 'pending'",
     )
@@ -275,6 +278,8 @@ pub async fn reject(
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
+    // Only the action the user looked at; the run's other rejected actions get no signal.
+    memory_signals::record_rejection(&mut tx, &action).await?;
     tx.commit().await?;
     super::publish(pool, bus, action.run_id).await;
     Ok(action)
