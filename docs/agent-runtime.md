@@ -65,7 +65,7 @@ Turning it **on** (`kill_switch::set_paused(pool, bus, wake, true)`):
 
 - every `queued` run becomes `paused`, in the same transaction as the switch,
 - a `running` run finishes the step it's on, then becomes `paused` before its next step starts. That step stays `pending` and the run's `error` doesn't change. Its job goes back to the queue with its attempt given back (`job.deferred`), without pausing the queue,
-- the worker claims no `agent_run` job. Other job kinds (`test_prompt`, `capture_extract`) still run, because they aren't agents,
+- the worker claims no `agent_run` job. Other job kinds (`test_prompt`, `capture_extract`, `source_board`, and the goals' [`plan_step` ticks](goals.md#execution)) still run, because they aren't agents,
 - `runs::start` and `runs::resume` still store the run and its job, with the run `paused` instead of `queued`. They read the switch `FOR SHARE`, so a concurrent change waits for them and then moves their run too.
 
 A run that is `awaiting_approval` keeps that status while the switch is on, and its pending actions can still be approved or rejected. Rejecting ends it `rejected` as usual. Approving its last pending action stores it `paused` with its job, so the parked step doesn't run until the switch is off.
