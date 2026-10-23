@@ -1,0 +1,12 @@
+From: Eng Weekly <news@engweekly.example>
+To: me@home.example
+Subject: Eng Weekly newsletter #42: async Rust in production
+Date: Mon, 21 Sep 2026 12:00:00 +0000
+Message-ID: <issue-42@engweekly.example>
+List-Id: Eng Weekly <weekly.engweekly.example>
+List-Unsubscribe: <mailto:leave@engweekly.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This week: async Rust in production, a deep dive on Postgres queues, and
+five talks worth watching.

@@ -1,0 +1,31 @@
+Return-Path: <bounces+acme@us.greenhouse-mail.io>
+From: Acme Corp <no-reply@us.greenhouse-mail.io>
+To: Alex Doe <me@home.example>
+Subject: Thank you for applying!
+Date: Tue, 01 Sep 2026 15:04:00 +0000
+Message-ID: <gh-acme-1@us.greenhouse-mail.io>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="gh-acme-boundary"
+
+--gh-acme-boundary
+Content-Type: text/plain; charset=utf-8
+
+Hi Alex,
+
+Thank you for applying to the Senior Backend Engineer role at Acme Corp.
+Our team will review your application and reach out about next steps.
+
+Best,
+The Acme Corp Recruiting Team
+
+--gh-acme-boundary
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<p>Hi Alex,</p>
+<p>Thank you for applying to the Senior Backend Engineer role at Acme Corp.
+Our team will review your application and reach out about next steps.</p>
+<p>Best,<br>The Acme Corp Recruiting Team</p>
+</body></html>
+
+--gh-acme-boundary--

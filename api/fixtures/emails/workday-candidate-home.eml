@@ -1,0 +1,33 @@
+From: Cyberdyne Systems <cyberdyne@workday.com>
+To: me@home.example
+Subject: Your Candidate Home account
+Date: Sat, 12 Sep 2026 09:00:00 +0000
+Message-ID: <wd-cyberdyne-1@workday.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer-cyberdyne"
+
+--outer-cyberdyne
+Content-Type: multipart/alternative; boundary="inner-cyberdyne"
+
+--inner-cyberdyne
+Content-Type: text/plain; charset=utf-8
+
+Hi Alex,
+
+Your Candidate Home account is ready. Sign in to track your application for
+Robotics Software Engineer. A copy of the resume you submitted is attached.
+
+Cyberdyne Systems
+--inner-cyberdyne
+Content-Type: text/html; charset=utf-8
+
+<p>Hi Alex,</p><p>Your Candidate Home account is ready.</p>
+--inner-cyberdyne--
+
+--outer-cyberdyne
+Content-Type: application/pdf; name="resume.pdf"
+Content-Disposition: attachment; filename="resume.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSBzeW50aGV0aWMgcmVzdW1lIHBsYWNlaG9sZGVyCg==
+--outer-cyberdyne--

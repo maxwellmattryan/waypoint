@@ -1,0 +1,185 @@
+{
+  "synthetic": true,
+  "emails": [
+    {
+      "file": "ashby-rejection.eml",
+      "verdict": "candidate",
+      "ats": "ashby",
+      "reasons_include": ["ats_sender:ashby", "recruiting_keywords", "list_unsubscribe"],
+      "body_contains": ["we’ve decided to move forward with other candidates whose experience more closely"],
+      "body_excludes": ["=E2=80=99"],
+      "thread": "ashby-vandelay"
+    },
+    {
+      "file": "auto-reply-ooo.eml",
+      "verdict": "skip",
+      "ats": null,
+      "reasons_include": ["auto_reply"],
+      "body_contains": ["out of the office"],
+      "body_excludes": [],
+      "thread": "ooo"
+    },
+    {
+      "file": "forwarded-thread.eml",
+      "verdict": "candidate",
+      "ats": null,
+      "reasons_include": ["recruiter_title", "recruiting_keywords"],
+      "body_contains": ["Thought you'd like this one", "---------- Forwarded message ---------", "we'd love to set up a phone screen", "Talent Partner, Wonka"],
+      "body_excludes": [],
+      "thread": "wonka-fwd"
+    },
+    {
+      "file": "gmail-reply-quoted.eml",
+      "verdict": "candidate",
+      "ats": null,
+      "reasons_include": ["recruiter_title", "recruiting_keywords"],
+      "body_contains": ["Tuesday at 2pm works"],
+      "body_excludes": ["wrote:", "Would Tuesday afternoon work"],
+      "thread": "pied"
+    },
+    {
+      "file": "greenhouse-application-received.eml",
+      "verdict": "candidate",
+      "ats": "greenhouse",
+      "reasons_include": ["ats_sender:greenhouse", "recruiting_keywords"],
+      "body_contains": ["Thank you for applying to the Senior Backend Engineer role at Acme Corp."],
+      "body_excludes": ["<p>"],
+      "thread": "gh-acme"
+    },
+    {
+      "file": "greenhouse-company-domain.eml",
+      "verdict": "candidate",
+      "ats": "greenhouse",
+      "reasons_include": ["ats_sender:greenhouse", "ats_link:greenhouse", "recruiter_title", "recruiting_keywords"],
+      "body_contains": ["application for Platform Engineer"],
+      "body_excludes": [],
+      "thread": "gh-initech"
+    },
+    {
+      "file": "greenhouse-second-company.eml",
+      "verdict": "candidate",
+      "ats": "greenhouse",
+      "reasons_include": ["ats_sender:greenhouse"],
+      "body_contains": ["Infrastructure Engineer position at Globex"],
+      "body_excludes": [],
+      "thread": "gh-globex"
+    },
+    {
+      "file": "indeed-digest.eml",
+      "verdict": "skip",
+      "ats": null,
+      "reasons_include": ["job_alert_digest"],
+      "body_contains": ["- Senior Rust Engineer <https://www.indeed.com/viewjob?jk=synthetic2>"],
+      "body_excludes": [],
+      "thread": "indeed"
+    },
+    {
+      "file": "interview-invite-ics.eml",
+      "verdict": "candidate",
+      "ats": null,
+      "reasons_include": ["recruiting_keywords"],
+      "body_contains": ["invited to an interview with Stark Industries"],
+      "body_excludes": ["BEGIN:VCALENDAR", "DTSTART"],
+      "thread": "stark"
+    },
+    {
+      "file": "lever-interview-invite.eml",
+      "verdict": "candidate",
+      "ats": "lever",
+      "reasons_include": ["ats_sender:lever", "recruiting_keywords"],
+      "body_contains": ["Let's schedule your interview", "Pick a time <https://hire.lever.co/interviews/schedule/7f3c2a>", "- Format: video call"],
+      "body_excludes": ["font-family", "Hooli\nLet's"],
+      "thread": "lever-hooli"
+    },
+    {
+      "file": "linkedin-job-alert.eml",
+      "verdict": "skip",
+      "ats": null,
+      "reasons_include": ["job_alert_digest"],
+      "body_contains": ["Your job alert for backend engineer"],
+      "body_excludes": [],
+      "thread": "linkedin"
+    },
+    {
+      "file": "newsletter.eml",
+      "verdict": "skip",
+      "ats": null,
+      "reasons_include": ["newsletter", "list_unsubscribe", "list_id"],
+      "body_contains": ["async Rust in production"],
+      "body_excludes": [],
+      "thread": "newsletter"
+    },
+    {
+      "file": "personal-email.eml",
+      "verdict": "skip",
+      "ats": null,
+      "reasons_include": ["no_signal"],
+      "body_contains": ["dinner on Saturday"],
+      "body_excludes": [],
+      "thread": "personal"
+    },
+    {
+      "file": "recruiter-bulk-tool.eml",
+      "verdict": "candidate",
+      "ats": null,
+      "reasons_include": ["recruiter_title", "recruiting_keywords", "list_unsubscribe", "precedence_bulk"],
+      "body_contains": ["walk you through next steps"],
+      "body_excludes": [],
+      "thread": "massive"
+    },
+    {
+      "file": "recruiter-outlook-reply.eml",
+      "verdict": "candidate",
+      "ats": null,
+      "reasons_include": ["recruiting_keywords"],
+      "body_contains": ["Following up on my note below about the role."],
+      "body_excludes": ["Sent: Thursday", "We're building a new data", "________"],
+      "thread": "soylent"
+    },
+    {
+      "file": "recruiter-outreach.eml",
+      "verdict": "candidate",
+      "ats": null,
+      "reasons_include": ["recruiter_title", "recruiting_keywords"],
+      "body_contains": ["Would you have availability for a 30-minute call next week?"],
+      "body_excludes": ["Senior Technical Recruiter"],
+      "thread": "soylent"
+    },
+    {
+      "file": "recruiter-reply-subject-only.eml",
+      "verdict": "candidate",
+      "ats": null,
+      "reasons_include": ["recruiting_keywords"],
+      "body_contains": ["Tuesday afternoon works for a phone screen."],
+      "body_excludes": ["Sent from my iPhone"],
+      "thread": "soylent"
+    },
+    {
+      "file": "rfc2047-latin1.eml",
+      "verdict": "candidate",
+      "ats": null,
+      "reasons_include": ["recruiting_keywords"],
+      "body_contains": ["Me gustaría coordinar una entrevista", "Ingeniería de plataforma. ¿Cuál es tu availability"],
+      "body_excludes": ["=ED"],
+      "thread": "tyrell"
+    },
+    {
+      "file": "workday-application-update.eml",
+      "verdict": "candidate",
+      "ats": "workday",
+      "reasons_include": ["ats_sender:workday", "recruiter_title", "recruiting_keywords"],
+      "body_contains": ["We’ve received your application for Senior Platform Engineer", "a stipend of €2,000. We’ll be in touch"],
+      "body_excludes": ["<p>"],
+      "thread": "wd-umbrella"
+    },
+    {
+      "file": "workday-candidate-home.eml",
+      "verdict": "candidate",
+      "ats": "workday",
+      "reasons_include": ["ats_sender:workday"],
+      "body_contains": ["Your Candidate Home account is ready."],
+      "body_excludes": ["JVBERi0", "%PDF", "synthetic resume placeholder"],
+      "thread": "wd-cyberdyne"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+From: Sam Park <sam@piedpiper.example>
+To: Alex Doe <me@home.example>
+Subject: Re: Interview scheduling
+Date: Mon, 14 Sep 2026 17:40:00 +0000
+Message-ID: <CAgmail-sam-2@mail.gmail.com>
+In-Reply-To: <alex-sched-1@home.example>
+References: <alex-sched-1@home.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="gmail-sam"
+
+--gmail-sam
+Content-Type: text/plain; charset=utf-8
+
+Great, Tuesday at 2pm works. I'll send a calendar invite for the
+interview with our hiring manager.
+
+Sam
+
+On Mon, Sep 14, 2026 at 9:12 AM Alex Doe <me@home.example> wrote:
+> Hi Sam,
+> Would Tuesday afternoon work for the onsite?
+> Thanks, Alex
+
+--gmail-sam
+Content-Type: text/html; charset=utf-8
+
+<div dir="ltr">Great, Tuesday at 2pm works. I'll send a calendar invite for the interview with our hiring manager.<div><br></div><div>Sam</div></div><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">On Mon, Sep 14, 2026 at 9:12 AM Alex Doe &lt;<a href="mailto:me@home.example">me@home.example</a>&gt; wrote:<br></div><blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex">Hi Sam,<br>Would Tuesday afternoon work for the onsite?<br>Thanks, Alex</blockquote></div>
+
+--gmail-sam--

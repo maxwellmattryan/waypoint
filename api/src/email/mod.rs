@@ -7,9 +7,12 @@ pub mod html;
 pub mod mime;
 pub mod normalize;
 pub mod quote;
+pub mod store;
 pub mod thread;
 
 use std::fmt;
+
+pub use store::{EmailSummary, IngestError, Ingested, NewEmail, ingest, known_companies, list};
 
 /// Where a message came from: `emails.source`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

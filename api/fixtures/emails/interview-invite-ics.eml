@@ -1,0 +1,28 @@
+From: Stark Scheduling <calendar@stark.example>
+To: me@home.example
+Subject: Invitation: Interview with Stark Industries
+Date: Fri, 18 Sep 2026 12:00:00 +0000
+Message-ID: <invite-stark-1@stark.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="stark-invite"
+
+--stark-invite
+Content-Type: text/plain; charset=utf-8
+
+You have been invited to an interview with Stark Industries on
+Tuesday, September 22, 2026 at 3:00 PM UTC.
+
+--stark-invite
+Content-Type: text/calendar; charset=utf-8; method=REQUEST
+
+BEGIN:VCALENDAR
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:invite-stark-1@stark.example
+DTSTART:20260922T150000Z
+DTEND:20260922T160000Z
+SUMMARY:Interview with Stark Industries
+END:VEVENT
+END:VCALENDAR
+--stark-invite--
