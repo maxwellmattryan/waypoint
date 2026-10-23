@@ -346,12 +346,20 @@ mod tests {
         (name.into(), value.into())
     }
 
+    /// (case, input, verdict, ats, reasons)
+    type Case = (
+        &'static str,
+        HeuristicInput,
+        VerdictKind,
+        Option<Ats>,
+        &'static [&'static str],
+    );
+
     #[test]
     fn score() {
         let known = KnownCompanies::new(["Acme Corp", "Initech", "AB", "Q.A"]);
         let friend = || from("Pat <pat@friends.example>");
-        // (case, input, verdict, ats, reasons)
-        let cases: Vec<(&str, HeuristicInput, VerdictKind, Option<Ats>, &[&str])> = vec![
+        let cases: Vec<Case> = vec![
             // Rule 1: ats_sender, through each sender field.
             (
                 "ats sender in From (subdomain)",
