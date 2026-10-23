@@ -13,6 +13,7 @@ mod health;
 pub mod host;
 pub mod jobs;
 pub mod kill_switch;
+pub mod mcp;
 pub mod openapi;
 pub mod resumes;
 pub mod runs;

@@ -10,6 +10,7 @@ pub mod schema;
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::Path;
 use std::time::Instant;
 
 use serde::de::DeserializeOwned;
@@ -120,6 +121,33 @@ impl Meter {
         self.record(&response);
         Ok((typed, response))
     }
+
+    pub async fn call_with_mcp(
+        &mut self,
+        pool: &PgPool,
+        runner: &ClaudeRunner,
+        req: &ClaudeRequest,
+        mcp_config: &Path,
+    ) -> Result<ClaudeResponse, ClaudeError> {
+        let response = runner.call_with_mcp(pool, req, mcp_config).await?;
+        self.record(&response);
+        Ok(response)
+    }
+
+    pub async fn call_structured_with_mcp<T: DeserializeOwned>(
+        &mut self,
+        pool: &PgPool,
+        runner: &ClaudeRunner,
+        req: &ClaudeRequest,
+        schema: &Value,
+        mcp_config: &Path,
+    ) -> Result<(T, ClaudeResponse), ClaudeError> {
+        let (typed, response) = runner
+            .call_structured_with_mcp(pool, req, schema, mcp_config)
+            .await?;
+        self.record(&response);
+        Ok((typed, response))
+    }
 }
 
 /// What a tool's handler gets: the pool and metered model calls, whose spend is recorded
@@ -188,7 +216,7 @@ pub trait Tool: Send + Sync + 'static {
     ) -> Result<Self::Output, ToolError>;
 }
 
-/// A registered tool as the later MCP server will list it.
+/// A registered tool, as the MCP server lists it (name, description and input schema).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ToolInfo {
     pub name: &'static str,
@@ -320,6 +348,11 @@ impl Registry {
             .collect()
     }
 
+    /// The permission level of tool `name`, or `None` when no tool has the name.
+    pub fn permission(&self, name: &str) -> Option<Permission> {
+        self.tools.get(name).map(|entry| entry.info.permission)
+    }
+
     /// Invokes tool `name` for run step `step_id` and records it in `tool_calls`.
     /// `claude_call_id` is the model call that asked for the tool, if any. Returns the
     /// output and what the handler's model calls spent.
@@ -332,14 +365,15 @@ impl Registry {
         name: &str,
         input: Value,
     ) -> Result<(Value, Spend), ToolCallError> {
-        let (spend, result) = self
+        let (spend, _, result) = self
             .invoke_metered(pool, runner, step_id, claude_call_id, name, input)
             .await;
         result.map(|output| (output, spend))
     }
 
     /// [`Registry::invoke`], returning the spend on failure too, so a step counts a failed
-    /// tool's model calls.
+    /// tool's model calls, and the `tool_calls.id` (`None` when the row couldn't be
+    /// inserted).
     pub(crate) async fn invoke_metered(
         &self,
         pool: &PgPool,
@@ -348,7 +382,7 @@ impl Registry {
         claude_call_id: Option<i64>,
         name: &str,
         input: Value,
-    ) -> (Spend, Result<Value, ToolCallError>) {
+    ) -> (Spend, Option<i64>, Result<Value, ToolCallError>) {
         let entry = self.tools.get(name);
         let inserted = sqlx::query_scalar(
             "INSERT INTO tool_calls (run_step_id, tool, permission, status, input, claude_call_id) \
@@ -363,7 +397,7 @@ impl Registry {
         .await;
         let id: i64 = match inserted {
             Ok(id) => id,
-            Err(err) => return (Spend::default(), Err(ToolCallError::Database(err))),
+            Err(err) => return (Spend::default(), None, Err(ToolCallError::Database(err))),
         };
 
         let started = Instant::now();
@@ -404,8 +438,8 @@ impl Registry {
         .execute(pool)
         .await;
         match written {
-            Ok(_) => (spend, finished.result),
-            Err(err) => (spend, Err(ToolCallError::Database(err))),
+            Ok(_) => (spend, Some(id), finished.result),
+            Err(err) => (spend, Some(id), Err(ToolCallError::Database(err))),
         }
     }
 }

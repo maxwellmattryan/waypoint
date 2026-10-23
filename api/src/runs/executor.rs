@@ -20,6 +20,7 @@ use crate::claude::{
 };
 use crate::events::EventBus;
 use crate::jobs::Job;
+use crate::mcp::{Server, Session};
 use crate::tools::{Meter, Registry, Spend, ToolCallError};
 
 /// A named, fixed sequence of steps.
@@ -168,7 +169,7 @@ impl Runtime {
 pub struct StepContext<'a> {
     pool: &'a PgPool,
     runner: &'a ClaudeRunner,
-    tools: &'a Registry,
+    tools: Arc<Registry>,
     bus: &'a EventBus,
     run_id: i64,
     step_id: i64,
@@ -201,10 +202,80 @@ impl StepContext<'_> {
             .await
     }
 
+    /// [`StepContext::call`] with every registered tool available to the model through
+    /// Waypoint's MCP server, and no other tools. Each tool call is recorded on this step
+    /// and its model calls count against it, even when the outer call fails.
+    pub async fn call_with_tools(
+        &mut self,
+        req: &ClaudeRequest,
+    ) -> Result<ClaudeResponse, ClaudeError> {
+        let session = self.mcp_session()?;
+        let result = self
+            .meter
+            .call_with_mcp(self.pool, self.runner, req, session.config())
+            .await;
+        let log_id = result.as_ref().ok().and_then(|response| response.log_id);
+        self.close_mcp_session(session, log_id).await;
+        result
+    }
+
+    /// [`StepContext::call_structured`] with the registered tools, as
+    /// [`StepContext::call_with_tools`].
+    pub async fn call_structured_with_tools<T: DeserializeOwned>(
+        &mut self,
+        req: &ClaudeRequest,
+        schema: &Value,
+    ) -> Result<(T, ClaudeResponse), ClaudeError> {
+        let session = self.mcp_session()?;
+        let result = self
+            .meter
+            .call_structured_with_mcp(self.pool, self.runner, req, schema, session.config())
+            .await;
+        let log_id = result
+            .as_ref()
+            .ok()
+            .and_then(|(_, response)| response.log_id);
+        self.close_mcp_session(session, log_id).await;
+        result
+    }
+
+    fn mcp_session(&self) -> Result<Session, ClaudeError> {
+        let server = Server::new(
+            self.pool.clone(),
+            self.runner.clone(),
+            self.tools.clone(),
+            self.step_id,
+        );
+        Session::start(server, self.runner.mcp_bin())
+    }
+
+    /// Stops the session, adds its tools' spend to the step and, when the outer call
+    /// succeeded, links its tool calls to that call.
+    async fn close_mcp_session(&mut self, session: Session, log_id: Option<i64>) {
+        let (tool_call_ids, spend) = session.finish().await;
+        self.meter.spend.add(spend);
+        if let Some(log_id) = log_id
+            && !tool_call_ids.is_empty()
+        {
+            let linked =
+                sqlx::query("UPDATE tool_calls SET claude_call_id = $1 WHERE id = ANY($2)")
+                    .bind(log_id)
+                    .bind(&tool_call_ids)
+                    .execute(self.pool)
+                    .await;
+            if let Err(err) = linked {
+                rocket::warn!(
+                    "runs: cannot link step {}'s tool calls to call {log_id}: {err}",
+                    self.step_id
+                );
+            }
+        }
+    }
+
     /// Invokes tool `name`, recording it in `tool_calls`. Its model calls count against
     /// this step even when it fails.
     pub async fn tool(&mut self, name: &str, input: Value) -> Result<Value, ToolCallError> {
-        let (spend, result) = self
+        let (spend, _, result) = self
             .tools
             .invoke_metered(self.pool, self.runner, self.step_id, None, name, input)
             .await;
@@ -327,7 +398,7 @@ async fn run(
         let mut ctx = StepContext {
             pool,
             runner,
-            tools: runtime.tools(),
+            tools: runtime.tools.clone(),
             bus,
             run_id,
             step_id: step.id,

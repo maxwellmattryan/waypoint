@@ -9,12 +9,31 @@
 #   exit1         write to stderr and exit 1 without a result
 #   garbage       print a line that is not JSON
 #   flood         print 17 MiB with no newline (more than the runner reads)
+#   mcp           with `--mcp-config <path>`: copy the config to <record_dir>/mcp_config,
+#                 write the socket dir's mode to <record_dir>/mcp_dir_mode, run the
+#                 config's relay command with mcp_requests.jsonl on stdin (its stdout goes
+#                 to <record_dir>/mcp), then play success.jsonl. Without it (a tool's own
+#                 model call during that relay), record into <record_dir>/inner and play
+#                 success.jsonl.
 set -eu
 
 mode=$1
 record=$2
 shift 2
 fixtures=$(cd "$(dirname "$0")" && pwd)
+
+mcp_config=""
+prev=""
+for arg in "$@"; do
+	if [ "$prev" = "--mcp-config" ]; then
+		mcp_config=$arg
+	fi
+	prev=$arg
+done
+if [ "$mode" = mcp ] && [ -z "$mcp_config" ]; then
+	record="$record/inner"
+	mkdir -p "$record"
+fi
 
 : >"$record/argv"
 for arg in "$@"; do
@@ -47,5 +66,17 @@ exit1)
 	;;
 garbage) echo "not json" ;;
 flood) exec head -c 17825792 /dev/zero ;;
+mcp)
+	if [ -n "$mcp_config" ]; then
+		cp "$mcp_config" "$record/mcp_config"
+		cmd=$(sed -n 's/.*"command":"\([^"]*\)".*/\1/p' "$mcp_config")
+		sock=$(sed -n 's/.*"args":\["--socket","\([^"]*\)"\].*/\1/p' "$mcp_config")
+		sock_dir=$(dirname "$sock")
+		stat -c %a "$sock_dir" >"$record/mcp_dir_mode" 2>/dev/null ||
+			stat -f %Lp "$sock_dir" >"$record/mcp_dir_mode"
+		"$cmd" --socket "$sock" <"$fixtures/mcp_requests.jsonl" >"$record/mcp"
+	fi
+	cat "$fixtures/success.jsonl"
+	;;
 *) cat "$fixtures/$mode.jsonl" ;;
 esac
