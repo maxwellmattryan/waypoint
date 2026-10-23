@@ -14,16 +14,20 @@
 //! stored rows. [`crate::email::ingest`] queues the runs.
 
 use std::fmt;
+use std::path::{Component, Path};
 use std::time::Duration;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, SecondsFormat, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::claude::ClaudeRequest;
+use crate::email::heuristics::KnownCompanies;
+use crate::email::{self, NewEmail, Source};
+use crate::evals::Suite;
 use crate::events::EventBus;
 use crate::runs::{self, Run, StepContext, StepError, Workflow};
 
@@ -947,10 +951,117 @@ impl Workflow for ClassifyEmail {
     }
 }
 
+/// Where eval setups' email paths are relative to: `api/fixtures/`.
+const EVAL_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures");
+
+/// A `classify_email` eval case's `setup`: the files to ingest, in order, relative to
+/// `api/fixtures/`. The last one is the email the case classifies.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalSetup {
+    emails: Vec<String>,
+}
+
+/// The eval suite for `classify_email` (dataset `api/evals/classify_email.json`). Setup
+/// deletes every classification, email and thread, ingests the case's files in order
+/// (`source = fixture`, the file stem as the provider id, no known companies) without
+/// queuing a run, and returns `email_id`: the last file's id.
+pub struct ClassifyEmailEval;
+
+#[rocket::async_trait]
+impl Suite for ClassifyEmailEval {
+    fn workflow(&self) -> &'static str {
+        WORKFLOW
+    }
+
+    async fn setup(&self, pool: &PgPool, setup: &Value) -> Result<Map<String, Value>, String> {
+        let setup = EvalSetup::deserialize(setup).map_err(|err| format!("invalid setup: {err}"))?;
+        if setup.emails.is_empty() {
+            return Err("the setup lists no emails".into());
+        }
+        for path in &setup.emails {
+            let relative = Path::new(path)
+                .components()
+                .all(|part| matches!(part, Component::Normal(_)));
+            if path.is_empty() || path.starts_with('/') || path.contains("..") || !relative {
+                return Err(format!("{path:?} is not a path relative to api/fixtures/"));
+            }
+        }
+        for table in ["email_classifications", "emails", "email_threads"] {
+            sqlx::query(&format!("DELETE FROM {table}"))
+                .execute(pool)
+                .await
+                .map_err(|err| format!("cannot clear {table}: {err}"))?;
+        }
+        let known = KnownCompanies::default();
+        let mut last = None;
+        for path in &setup.emails {
+            let file = Path::new(EVAL_FIXTURES).join(path);
+            let raw = std::fs::read(&file).map_err(|err| format!("cannot read {path}: {err}"))?;
+            let stem = file
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let new = NewEmail {
+                source: Source::Fixture,
+                provider_message_id: stem,
+                provider_thread_id: None,
+                labels: Vec::new(),
+                raw,
+            };
+            let ingested = email::store::ingest_unqueued(pool, new, &known)
+                .await
+                .map_err(|err| format!("cannot ingest {path}: {err}"))?;
+            last = Some(ingested.id);
+        }
+        let mut vars = Map::new();
+        vars.insert("email_id".into(), json!(last));
+        Ok(vars)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::evals;
+
+    #[test]
+    fn classify_email_dataset_parses() {
+        let dataset = evals::load(&evals::default_path(WORKFLOW), WORKFLOW)
+            .expect("the shipped dataset loads");
+        assert_eq!(dataset.cases.len(), 17);
+        let mut classes = std::collections::BTreeSet::new();
+        for case in &dataset.cases {
+            let setup = EvalSetup::deserialize(&case.setup)
+                .unwrap_or_else(|err| panic!("{}: invalid setup: {err}", case.name));
+            for path in &setup.emails {
+                assert!(
+                    Path::new(EVAL_FIXTURES).join(path).is_file(),
+                    "{}: {path} is missing",
+                    case.name
+                );
+            }
+            let class = case
+                .expect
+                .output
+                .as_ref()
+                .and_then(|output| output["class"].as_str())
+                .unwrap_or_else(|| panic!("{}: no class label", case.name));
+            assert!(EmailClass::parse(class).is_some(), "{}: {class}", case.name);
+            classes.insert(class.to_owned());
+            assert_eq!(
+                case.input,
+                json!({"email_id": "${email_id}"}),
+                "{}",
+                case.name
+            );
+        }
+        assert_eq!(
+            classes.len(),
+            EmailClass::ALL.len(),
+            "every class has a case"
+        );
+    }
 
     fn base() -> Value {
         json!({

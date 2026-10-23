@@ -259,7 +259,7 @@ Tool calls made during an agent call are recorded on the calling step. When the 
 
 ## Sample workflow: `tidy_application`
 
-The production runtime (`workflows::runtime()`) registers two workflows: `tidy_application`, below, and the [`memory_writer`](memory-writer.md), which has one step, `write`, and no tools. `tidy_application` exercises every guardrail without calling a model. Its run input is `{"application_id", "note", "message", "confidence"}`, and each step passes its input through and adds to it:
+The production runtime (`workflows::runtime()`) registers three workflows: `tidy_application`, below; the [`memory_writer`](memory-writer.md), which has one step, `write`, and no tools; and [`classify_email`](email.md#classify-and-extract), which has one step, `classify`, and no tools, and which `email::ingest` queues for each candidate email. `tidy_application` exercises every guardrail without calling a model. Its run input is `{"application_id", "note", "message", "confidence"}`, and each step passes its input through and adds to it:
 
 | Step | Tool (permission) | What it does |
 |---|---|---|

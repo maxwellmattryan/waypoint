@@ -13,7 +13,7 @@ use waypoint_api::claude::ClaudeRequest;
 use waypoint_api::evals::{self, CaseResult, Options, Report, ScratchDb, Suite};
 use waypoint_api::runs::{RunStatus, Runtime, StepContext, StepError, Workflow};
 use waypoint_api::tools::Registry;
-use waypoint_api::workflows::{self, memory_writer, tidy};
+use waypoint_api::workflows::{self, classify_email, memory_writer, tidy};
 
 /// The runner's own timeout; longer than any case timeout used here.
 const RUNNER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -255,6 +255,115 @@ async fn memory_writer_suite_seeds_and_runs(pool: PgPool) {
     assert!(report.passed(), "{text}");
     assert_eq!(report.totals.cases, 1, "{text}");
     assert_eq!(report.cases[0].usage.calls, 0, "{text}");
+}
+
+async fn count(pool: &PgPool, table: &str) -> i64 {
+    sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|err| panic!("count {table}: {err}"))
+}
+
+#[sqlx::test]
+async fn classify_email_suite_seeds_without_queuing(pool: PgPool) {
+    let suite = classify_email::ClassifyEmailEval;
+
+    // The files are ingested in order into one thread, and no run is queued.
+    let setup =
+        json!({"emails": ["emails/recruiter-outreach.eml", "emails/recruiter-outlook-reply.eml"]});
+    let vars = suite.setup(&pool, &setup).await.expect("setup");
+    let reply: i64 = sqlx::query_scalar(
+        "SELECT id FROM emails WHERE provider_message_id = 'recruiter-outlook-reply'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the reply is stored");
+    assert_eq!(Value::Object(vars), json!({"email_id": reply}));
+    let threads: i64 = sqlx::query_scalar("SELECT count(DISTINCT thread_id) FROM emails")
+        .fetch_one(&pool)
+        .await
+        .expect("count threads");
+    assert_eq!((count(&pool, "emails").await, threads), (2, 1));
+    for table in ["agent_runs", "jobs", "email_classifications"] {
+        assert_eq!(count(&pool, table).await, 0, "{table}");
+    }
+
+    // A later setup starts from its own emails only.
+    sqlx::query(
+        "INSERT INTO email_classifications (email_id, input_key, classifier_version) \
+         VALUES ($1, 'k', 1)",
+    )
+    .bind(reply)
+    .execute(&pool)
+    .await
+    .expect("seed a classification");
+    suite
+        .setup(&pool, &json!({"emails": ["classify/offer.eml"]}))
+        .await
+        .expect("setup");
+    assert_eq!(count(&pool, "emails").await, 1);
+    assert_eq!(count(&pool, "email_threads").await, 1);
+    assert_eq!(count(&pool, "email_classifications").await, 0);
+
+    for bad in [
+        json!(null),
+        json!({}),
+        json!({"emails": []}),
+        json!({"emails": ["emails/ashby-rejection.eml"], "extra": 1}),
+        json!({"emails": ["../Cargo.toml"]}),
+        json!({"emails": ["emails/../../Cargo.toml"]}),
+        json!({"emails": ["/etc/hosts"]}),
+        json!({"emails": ["emails/missing.eml"]}),
+        json!({"emails": ["emails"]}),
+    ] {
+        assert!(suite.setup(&pool, &bad).await.is_err(), "{bad}");
+    }
+
+    // A case run through the harness scores the fake's answer against its labels.
+    let fake = common::fake("classify_email", RUNNER_TIMEOUT);
+    let path = evals::default_path(classify_email::WORKFLOW);
+    let dataset = evals::load(&path, classify_email::WORKFLOW).expect("the shipped dataset loads");
+    let report = evals::run(
+        &pool,
+        fake.runner.clone(),
+        workflows::runtime(),
+        &suite,
+        common::fast_config(),
+        &dataset,
+        "classify_email.json",
+        &Options {
+            cases: vec!["recruiter-outreach".into(), "ashby-rejection".into()],
+            case_timeout: Duration::from_secs(30),
+        },
+    )
+    .await
+    .expect("the eval runs");
+    let text = report.text();
+    let results: Vec<(&str, CaseResult)> = report
+        .cases
+        .iter()
+        .map(|case| (case.name.as_str(), case.result))
+        .collect();
+    assert_eq!(
+        results,
+        [
+            ("ashby-rejection", CaseResult::Fail),
+            ("recruiter-outreach", CaseResult::Pass)
+        ],
+        "{text}"
+    );
+    assert_eq!(
+        report.cases[0].failures,
+        [
+            "output.class: expected \"rejection\", got \"availability_request\"",
+            "output.company: expected \"Vandelay Industries\", got \"Soylent\""
+        ],
+        "{text}"
+    );
+    for case in &report.cases {
+        assert_eq!(case.usage.calls, 1, "{text}");
+    }
+    assert_eq!(count(&pool, "agent_runs").await, 2, "one run per case");
 }
 
 #[sqlx::test]
