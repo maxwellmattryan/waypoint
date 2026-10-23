@@ -1,0 +1,16 @@
+From: Indeed <alert@indeed.com>
+To: me@home.example
+Subject: Jobs you may be interested in
+Date: Sun, 20 Sep 2026 06:30:00 +0000
+Message-ID: <digest-1@indeed.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<h1>New jobs for you</h1>
+<ul>
+<li><a href="https://www.indeed.com/viewjob?jk=synthetic1">Software Engineer, Payments</a></li>
+<li><a href="https://www.indeed.com/viewjob?jk=synthetic2">Senior Rust Engineer</a></li>
+</ul>
+<p>Thanks for applying through Indeed. Next steps are in each posting.</p>
+</body></html>

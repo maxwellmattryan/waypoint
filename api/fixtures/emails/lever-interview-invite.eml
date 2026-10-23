@@ -1,0 +1,30 @@
+From: Hooli Talent <no-reply@hire.lever.co>
+To: me@home.example
+Subject: Schedule your interview with Hooli
+Date: Mon, 07 Sep 2026 13:00:00 +0000
+Message-ID: <lever-hooli-1@hire.lever.co>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<!DOCTYPE html>
+<html>
+<head>
+<title>Hooli</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; }
+  .button { background: #0a66c2; color: #fff; }
+</style>
+</head>
+<body>
+<div>
+  <h2>Let's schedule your interview</h2>
+  <p>Hi Alex, the Hooli team would like to meet you for a 45-minute technical interview.</p>
+  <p><a class="button" href="https://hire.lever.co/interviews/schedule/7f3c2a">Pick a time</a></p>
+  <ul>
+    <li>Format:&nbsp;video call</li>
+    <li>Length: 45 minutes</li>
+  </ul>
+  <p>Thanks,<br>Hooli Talent</p>
+</div>
+</body>
+</html>
