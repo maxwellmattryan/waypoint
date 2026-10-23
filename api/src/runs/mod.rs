@@ -44,6 +44,8 @@ pub enum RunStatus {
     /// Waiting for its job to run, including between retries and after a usage limit.
     Queued,
     Running,
+    /// Waiting for the kill switch to be turned off; `queued` again once it is.
+    Paused,
     Succeeded,
     /// Stopped for good; `runs::resume` can queue it again.
     Failed,
@@ -206,7 +208,7 @@ pub struct RunDetail {
     pub steps: Vec<RunStepDetail>,
 }
 
-const RUN_COLUMNS: &str = "id, workflow, status, input, output, error, input_tokens, \
+pub(crate) const RUN_COLUMNS: &str = "id, workflow, status, input, output, error, input_tokens, \
                            output_tokens, cost_usd, job_id, created_at, updated_at, \
                            started_at, finished_at";
 const STEP_COLUMNS: &str = "id, run_id, ordinal, name, status, attempts, input, output, error, \
@@ -241,8 +243,9 @@ impl From<sqlx::Error> for StartError {
     }
 }
 
-/// Starts a run of `workflow` with `input`: stores the run (`queued`), one `pending` step
-/// per workflow step and its `agent_run` job in one transaction, then wakes the worker.
+/// Starts a run of `workflow` with `input`: stores the run (`queued`, or `paused` while the
+/// kill switch is on), one `pending` step per workflow step and its `agent_run` job in one
+/// transaction, then wakes the worker.
 pub async fn start(
     pool: &PgPool,
     bus: &EventBus,
@@ -257,12 +260,15 @@ pub async fn start(
     let steps: Vec<&str> = found.steps().to_vec();
 
     let mut tx = pool.begin().await?;
-    let run_id: i64 =
-        sqlx::query_scalar("INSERT INTO agent_runs (workflow, input) VALUES ($1, $2) RETURNING id")
-            .bind(found.name())
-            .bind(&input)
-            .fetch_one(&mut *tx)
-            .await?;
+    let status = initial_status(&mut tx).await?;
+    let run_id: i64 = sqlx::query_scalar(
+        "INSERT INTO agent_runs (workflow, input, status) VALUES ($1, $2, $3) RETURNING id",
+    )
+    .bind(found.name())
+    .bind(&input)
+    .bind(status)
+    .fetch_one(&mut *tx)
+    .await?;
     sqlx::query(
         "INSERT INTO run_steps (run_id, ordinal, name) \
          SELECT $1, (step.ordinal - 1)::int, step.name \
@@ -279,7 +285,8 @@ pub async fn start(
     Ok(run)
 }
 
-/// Queues a `failed` run again; its job skips the steps that already succeeded. Returns
+/// Queues a `failed` run again (`paused` instead while the kill switch is on); its job
+/// skips the steps that already succeeded. Returns
 /// `None`, and queues nothing, for any other status or an unknown id, so a run never has
 /// two jobs in flight.
 pub async fn resume(
@@ -289,11 +296,13 @@ pub async fn resume(
     run_id: i64,
 ) -> Result<Option<Run>, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    let status = initial_status(&mut tx).await?;
     let reopened: Option<i64> = sqlx::query_scalar(
-        "UPDATE agent_runs SET status = 'queued', finished_at = NULL, updated_at = now() \
+        "UPDATE agent_runs SET status = $2, finished_at = NULL, updated_at = now() \
          WHERE id = $1 AND status = 'failed' RETURNING id",
     )
     .bind(run_id)
+    .bind(status)
     .fetch_optional(&mut *tx)
     .await?;
     if reopened.is_none() {
@@ -304,6 +313,22 @@ pub async fn resume(
     bus.publish(Event::RunUpdated { run: run.clone() });
     wake.0.notify_one();
     Ok(Some(run))
+}
+
+/// The status a started or resumed run gets: `paused` while the kill switch is on,
+/// otherwise `queued`. The `FOR SHARE` lock holds until `tx` ends, so a concurrent
+/// `kill_switch::set_paused` waits for it and then moves this run too.
+async fn initial_status(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<RunStatus, sqlx::Error> {
+    let paused: bool = sqlx::query_scalar("SELECT paused FROM kill_switch WHERE id FOR SHARE")
+        .fetch_one(&mut **tx)
+        .await?;
+    Ok(if paused {
+        RunStatus::Paused
+    } else {
+        RunStatus::Queued
+    })
 }
 
 /// Publishes `run.updated` with run `run_id`'s current row. Best effort: a read error is

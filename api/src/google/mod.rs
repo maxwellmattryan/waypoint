@@ -595,19 +595,7 @@ pub async fn disconnect(
     let Some((sealed,)) = deleted else {
         return Err(Status::NotFound);
     };
-    let token = google
-        .config
-        .token_key
-        .as_ref()
-        .and_then(|key| crypto::open(key, REFRESH_TOKEN_AAD, &sealed).ok())
-        .and_then(|bytes| String::from_utf8(bytes).ok());
-    let revoked = match token {
-        Some(token) => revoke(google, &token).await,
-        None => {
-            rocket::warn!("google: the stored refresh token does not decrypt; not revoked");
-            false
-        }
-    };
+    let revoked = revoke_sealed(google, &sealed).await;
     if !revoked {
         rocket::warn!(
             "google: disconnected without revoking; remove the grant at \
@@ -615,6 +603,56 @@ pub async fn disconnect(
         );
     }
     Ok(Json(GoogleDisconnect { revoked }))
+}
+
+/// What happened to the Google grant when all data was deleted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GoogleRevocation {
+    /// Google confirmed the revocation.
+    Revoked,
+    /// Google didn't confirm it, the stored token didn't decrypt or Google isn't
+    /// configured. Remove the grant by hand at <https://myaccount.google.com/permissions>.
+    NotRevoked,
+    /// No Google account was connected.
+    NotConnected,
+}
+
+/// Revokes the stored grant at Google, best-effort, and leaves the row in place. The
+/// caller deletes it.
+pub async fn revoke_stored(
+    pool: &PgPool,
+    google: &Google,
+) -> Result<GoogleRevocation, sqlx::Error> {
+    let stored: Option<(Vec<u8>,)> =
+        sqlx::query_as("SELECT refresh_token FROM google_accounts WHERE id")
+            .fetch_optional(pool)
+            .await?;
+    let Some((sealed,)) = stored else {
+        return Ok(GoogleRevocation::NotConnected);
+    };
+    Ok(if revoke_sealed(google, &sealed).await {
+        GoogleRevocation::Revoked
+    } else {
+        GoogleRevocation::NotRevoked
+    })
+}
+
+/// Decrypts a sealed refresh token and revokes it at Google. True when Google answered
+/// 2xx; false (logged) when the token doesn't decrypt or Google refused.
+async fn revoke_sealed(google: &Google, sealed: &[u8]) -> bool {
+    let token = google
+        .config
+        .token_key
+        .as_ref()
+        .and_then(|key| open_token(key, REFRESH_TOKEN_AAD, sealed));
+    match token {
+        Some(token) => revoke(google, &token).await,
+        None => {
+            rocket::warn!("google: the stored refresh token does not decrypt; not revoked");
+            false
+        }
+    }
 }
 
 fn open_token(key: &TokenKey, aad: &[u8], sealed: &[u8]) -> Option<String> {

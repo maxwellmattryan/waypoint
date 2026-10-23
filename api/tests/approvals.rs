@@ -293,6 +293,66 @@ async fn edit_then_approve_uses_the_edited_input(pool: PgPool) {
     assert_eq!(detail["output"], json!({"draft": "edited (to Acme)"}));
 }
 
+async fn set_kill_switch(client: &Client, paused: bool) {
+    let response = client
+        .put("/kill-switch")
+        .header(host())
+        .header(ContentType::JSON)
+        .body(json!({"paused": paused}).to_string())
+        .dispatch()
+        .await;
+    assert_eq!(response.status(), Status::Ok, "PUT /kill-switch {paused}");
+}
+
+#[sqlx::test]
+async fn approve_while_paused_waits_for_unpause(pool: PgPool) {
+    let (client, mut subscriber) = app(&pool).await;
+    let application = create_application(&client).await;
+    let (run, action) = parked(&client, &mut subscriber, application, 1.0).await;
+
+    // The kill switch leaves a parked run parked.
+    set_kill_switch(&client, true).await;
+    let detail = get(&client, &format!("/runs/{run}")).await;
+    assert_eq!(detail["status"], "awaiting_approval");
+
+    // Approving stores the run `paused` with its job, and the parked step doesn't run.
+    let (status, approved) = post(
+        &client,
+        &format!("/pending-actions/{action}/approve"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, Status::Ok, "{approved}");
+    until(&mut subscriber, run, RunStatus::Paused).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let detail = get(&client, &format!("/runs/{run}")).await;
+    assert_eq!(detail["status"], "paused");
+    assert_eq!(detail["steps"][2]["status"], "awaiting_approval");
+    assert_eq!(
+        draft_calls(&pool, run).await,
+        [("awaiting_approval".into(), 1)],
+        "the handler hasn't run"
+    );
+    let job: String = sqlx::query_scalar(
+        "SELECT j.status FROM jobs AS j JOIN agent_runs AS r ON r.job_id = j.id WHERE r.id = $1",
+    )
+    .bind(run)
+    .fetch_one(&pool)
+    .await
+    .expect("the run's job");
+    assert_eq!(job, "queued");
+
+    // Unpausing runs the approved action.
+    set_kill_switch(&client, false).await;
+    until(&mut subscriber, run, RunStatus::Succeeded).await;
+    let detail = get(&client, &format!("/runs/{run}")).await;
+    assert_eq!(detail["output"], json!({"draft": "Thanks (to Acme)"}));
+    assert_eq!(
+        draft_calls(&pool, run).await,
+        [("awaiting_approval".into(), 1), ("succeeded".into(), 1)]
+    );
+}
+
 #[sqlx::test]
 async fn reject_ends_the_run(pool: PgPool) {
     let (client, mut subscriber) = app(&pool).await;

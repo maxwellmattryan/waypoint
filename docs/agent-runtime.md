@@ -6,7 +6,7 @@ Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps ex
 
 | Table | One row per | Holds |
 |---|---|---|
-| `agent_runs` | run of a workflow | `workflow`, `status` (`queued`, `running`, `succeeded`, `failed`, `awaiting_approval`, `rejected`), `input`, `output`, `error`, token and cost totals, `job_id` (the latest `agent_run` job), `started_at`, `finished_at` |
+| `agent_runs` | run of a workflow | `workflow`, `status` (`queued`, `running`, `paused`, `succeeded`, `failed`, `awaiting_approval`, `rejected`), `input`, `output`, `error`, token and cost totals, `job_id` (the latest `agent_run` job), `started_at`, `finished_at` |
 | `run_steps` | step of a run | `run_id`, `ordinal` (0, 1, …; unique per run), `name`, `status` (`pending`, `running`, `succeeded`, `failed`, `awaiting_approval`), `attempts`, `input`, `output`, `error`, token and cost totals, `claude_call_id` |
 | `tool_calls` | tool invocation in a step | `run_step_id`, `tool`, `permission`, `status` (`running`, `succeeded`, `failed`, `invalid_input`, `invalid_output`, `unknown_tool`, `awaiting_approval`), `input`, `output`, `error`, tokens, cost, `claude_call_id`, `duration_ms` |
 | `pending_actions` | distinct `external` request in a step | `run_id`, `run_step_id`, `tool_call_id` (the call that asked), `tool`, `input` (as requested), `approved_input`, `status` (`pending`, `approved`, `rejected`, `executed`), `output`, `executed_tool_call_id`, `created_at`, `decided_at`, `executed_at`. Unique on (`run_step_id`, `tool`, `md5(input::text)`) |
@@ -17,7 +17,7 @@ Deleting a run deletes its steps, their tool calls, and its pending actions, act
 
 ## Starting and running
 
-`runs::start(pool, bus, wake, runtime, workflow, input)` stores the run (`queued`), one `pending` step per workflow step in order, and one `agent_run` queue job with the payload `{"run_id": <id>}`, all in one transaction. An unknown workflow name is an error and writes nothing.
+`runs::start(pool, bus, wake, runtime, workflow, input)` stores the run (`queued`, or `paused` while the [kill switch](#kill-switch) is on), one `pending` step per workflow step in order, and one `agent_run` queue job with the payload `{"run_id": <id>}`, all in one transaction. An unknown workflow name is an error and writes nothing.
 
 The worker runs the steps in order. The first step gets the run's input, each later step gets the previous step's output, and the run's output is the last step's output. One job runs the whole run, so the queue's concurrency limit counts runs, not steps.
 
@@ -30,7 +30,8 @@ When a run's job runs again, steps that already `succeeded` are skipped and thei
 - a queue retry,
 - a usage-limit deferral,
 - a requeue of jobs left `running` when the API stopped,
-- `runs::resume(pool, bus, wake, run_id)`, which queues a new job for a `failed` run. It returns `None` and queues nothing for any other status or an unknown id, so a run never has two jobs in flight.
+- the kill switch turning off, for a run it paused,
+- `runs::resume(pool, bus, wake, run_id)`, which queues a new job for a `failed` run (the run is `paused` instead of `queued` while the kill switch is on). It returns `None` and queues nothing for any other status or an unknown id, so a run never has two jobs in flight.
 
 > **Steps are at-least-once.** A step that dies after its side effects but before its `succeeded` write runs again. Step handlers, and the tools they call, must be idempotent. Nothing enforces this.
 
@@ -42,6 +43,8 @@ When a run's job runs again, steps that already `succeeded` are skipped and thei
 | retryable error, attempts left | retry | `queued` | step error | unchanged |
 | retryable error, no attempts left | fail | `failed` | step error | set |
 | usage limit | defer (the queue pauses) | `queued` | step error | unchanged |
+| kill switch on before the run or a step starts | defer with no delay (the queue runs on) | `paused` | unchanged | unchanged |
+| kill switch turned off | — (the job is claimed again) | `queued` | unchanged | unchanged |
 | permanent error, or the workflow isn't registered | fail | `failed` | error | set |
 | a tool call waits for approval ([parked](#parking)) | done | `awaiting_approval` | cleared | unchanged |
 | the user rejects a pending action (not a job) | — | `rejected` | `the user rejected pending action <id>` | set |
@@ -49,6 +52,25 @@ When a run's job runs again, steps that already `succeeded` are skipped and thei
 | run row missing | fail | — | — | — |
 
 A step returns `StepError::Retry`, `UsageLimit` or `Fail`. Model-call errors convert with `?`: a usage limit gives `UsageLimit` and any other runner error gives `Retry`, the same mapping the other job kinds use. Tool errors convert too: an unknown tool, an invalid input or output, or a rejected action gives `Fail`, and a failed handler, a database error or a call awaiting approval gives `Retry` (a step with a call awaiting approval parks whatever it returns, so that one is only a fallback). A database error inside the executor gives `Retry`.
+
+## Kill switch
+
+One global switch, stored in the single `kill_switch` row, stops every agent at once. It survives a restart, and a fresh database starts with it off. The dashboard's Agents card flips it; the API is `GET /kill-switch` (`{"paused": bool, "updated_at": …}`) and `PUT /kill-switch` with `{"paused": true|false}`. `PUT` takes the same local-`Host` and cross-site guards as every other write.
+
+Turning it **on** (`kill_switch::set_paused(pool, bus, wake, true)`):
+
+- every `queued` run becomes `paused`, in the same transaction as the switch,
+- a `running` run finishes the step it's on, then becomes `paused` before its next step starts. That step stays `pending` and the run's `error` doesn't change. Its job goes back to the queue with its attempt given back (`job.deferred`), without pausing the queue,
+- the worker claims no `agent_run` job. Other job kinds (`test_prompt`, `capture_extract`) still run, because they aren't agents,
+- `runs::start` and `runs::resume` still store the run and its job, with the run `paused` instead of `queued`. They read the switch `FOR SHARE`, so a concurrent change waits for them and then moves their run too.
+
+A run that is `awaiting_approval` keeps that status while the switch is on, and its pending actions can still be approved or rejected. Rejecting ends it `rejected` as usual. Approving its last pending action stores it `paused` with its job, so the parked step doesn't run until the switch is off.
+
+Turning it **off** makes every `paused` run `queued` again and wakes the worker. Runs carry on from their first unfinished step; steps that already succeeded don't run again.
+
+Setting the value it already has changes nothing and publishes nothing. Each change publishes, after the commit, `run.updated` for every run it moved and then `kill_switch.updated` with the new state. A step that is already running isn't interrupted: there is no way to cancel a step mid-flight.
+
+[`DELETE /data`](google-oauth.md#delete-all-data) turns the switch on first and leaves it on, so nothing starts on the emptied database until you resume agents.
 
 ## Tokens and cost
 
@@ -123,7 +145,7 @@ When a step made at least one call that is awaiting approval, it parks whatever 
 
 ### Deciding
 
-- `POST /pending-actions/{id}/approve` with `{}` approves the requested input; `{"input": {…}}` approves an edited one, checked against the tool's input schema and typed input (422 `{"errors":[{"field":"input","message":"<path>: <expected>"}]}` otherwise, never quoting values). The action becomes `approved` with `approved_input` and `decided_at`. When the run has no other `pending` action, it becomes `queued` with a new `agent_run` job in the same transaction and the worker is woken; the parked step then runs again (the steps before it are skipped as usual). While other actions are still pending, the run stays `awaiting_approval`.
+- `POST /pending-actions/{id}/approve` with `{}` approves the requested input; `{"input": {…}}` approves an edited one, checked against the tool's input schema and typed input (422 `{"errors":[{"field":"input","message":"<path>: <expected>"}]}` otherwise, never quoting values). The action becomes `approved` with `approved_input` and `decided_at`. When the run has no other `pending` action, it becomes `queued` (`paused` while the [kill switch](#kill-switch) is on, read `FOR SHARE` like `runs::start`) with a new `agent_run` job in the same transaction and the worker is woken; the parked step then runs again (the steps before it are skipped as usual). While other actions are still pending, the run stays `awaiting_approval`.
 - `POST /pending-actions/{id}/reject` rejects the action and every other `pending` action of the run, fails the run's `awaiting_approval` steps, and ends the run `rejected` with the error `the user rejected pending action <id>` and `finished_at`, in one transaction. The handler never runs. `runs::resume` only queues `failed` runs, so a rejected run is final.
 
 Both answer 409 with nothing changed unless the action is `pending` and its run `awaiting_approval`; that includes a run that is still `running` because its step hasn't parked yet. Approve is also 409 when the tool is no longer registered. Both lock the pending action, then its run, so they serialize with each other and with parking. `runs::approvals::{approve, reject}` are the same operations as library functions.
@@ -241,7 +263,9 @@ There are no generic routes to start, resume or cancel runs.
 
 It fires after each of these commits, never inside a transaction:
 
-- `runs::start` and `runs::resume` (the run is `queued`; this one carries the row they return, with no extra read),
+- `runs::start` and `runs::resume` (the run is `queued`, or `paused` while the kill switch is on; this one carries the row they return, with no extra read),
+- the kill switch turning on or off, for each run it moved,
+- the executor marking the run `paused` because the kill switch is on,
 - the executor marking the run `running`,
 - a step going `running`,
 - each `StepContext::tool` call returning, whether the tool succeeded or failed,

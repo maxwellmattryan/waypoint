@@ -15,9 +15,10 @@ use crate::capture::{
     CaptureRequest, CapturedFields,
 };
 use crate::events::{self, Event};
-use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleStatus};
+use crate::google::{self, ConnectionState, GoogleDisconnect, GoogleRevocation, GoogleStatus};
 use crate::health::{self, Health};
 use crate::jobs::{self, Job};
+use crate::kill_switch::{self, DataDeletion, DeleteAllData, KillSwitch, SetKillSwitch};
 use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
 use crate::runs::actions::{self, AgentAction};
 use crate::runs::approvals::{self, ApproveAction, PendingAction, PendingActionStatus};
@@ -68,6 +69,9 @@ use crate::workflows::tidy::{self, TidyRequest};
         actions::undo_route,
         review::list,
         tidy::start_tidy,
+        kill_switch::show,
+        kill_switch::update,
+        kill_switch::delete_all,
     ),
     components(schemas(
         Health,
@@ -117,6 +121,11 @@ use crate::workflows::tidy::{self, TidyRequest};
         ReviewItem,
         ReviewItemStatus,
         TidyRequest,
+        KillSwitch,
+        SetKillSwitch,
+        DeleteAllData,
+        DataDeletion,
+        GoogleRevocation,
     ))
 )]
 struct ApiDoc;

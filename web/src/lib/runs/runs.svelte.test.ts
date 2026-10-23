@@ -176,6 +176,23 @@ describe('RunsStore', () => {
 			expect(ids(store).slice(-3)).toEqual([10, 9, 8]);
 		}
 	);
+
+	it('drops every page and refetches on data.deleted', async () => {
+		const { store, list } = setupList(
+			{ kind: 'ok', data: page(60, PAGE_SIZE) },
+			{ kind: 'ok', data: page(10, 3) },
+			{ kind: 'ok', data: [] }
+		);
+		await store.load();
+		await store.loadMore();
+		store.handle({ type: 'data.deleted' });
+		await settle();
+		expect(list).toHaveBeenCalledTimes(3);
+		expect(list).toHaveBeenLastCalledWith(client, { limit: PAGE_SIZE });
+		expect(ids(store)).toEqual([]);
+		expect(store.hasMore).toBe(false);
+		expect(store.state).toEqual({ kind: 'loaded' });
+	});
 });
 
 type GetResult = Result<RunDetail>;
@@ -256,5 +273,14 @@ describe('RunDetailStore', () => {
 		expect(get).toHaveBeenCalledTimes(2);
 		expect(store.state.kind).toBe('loaded');
 		expect(store.run?.id).toBe(1);
+	});
+
+	it('shows not found once data.deleted removed the run', async () => {
+		const { store, get } = setupDetail(1, { kind: 'ok', data: detail(1) }, { kind: 'not-found' });
+		await store.load();
+		store.handle({ type: 'data.deleted' });
+		await settle();
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.state).toEqual({ kind: 'not-found' });
 	});
 });

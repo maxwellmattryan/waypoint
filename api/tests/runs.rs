@@ -223,7 +223,7 @@ async fn run_tables_enforce_constraints(pool: PgPool) {
     let refused = [
         (
             "a bad run status",
-            "INSERT INTO agent_runs (workflow, input, status) VALUES ('w', '{}', 'paused')"
+            "INSERT INTO agent_runs (workflow, input, status) VALUES ('w', '{}', 'cancelled')"
                 .to_string(),
         ),
         (

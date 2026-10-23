@@ -66,6 +66,12 @@ export type ToolCallStatus = components['schemas']['ToolCallStatus'];
 export type Permission = components['schemas']['Permission'];
 /** Why a page couldn't be read. */
 export type CaptureFailureReason = components['schemas']['CaptureFailureReason'];
+/** The kill switch, from `GET /kill-switch`. */
+export type KillSwitch = components['schemas']['KillSwitch'];
+/** The `DELETE /data` body. */
+export type DataDeletion = components['schemas']['DataDeletion'];
+/** What happened to the Google grant when all data was deleted. */
+export type GoogleRevocation = components['schemas']['GoogleRevocation'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 

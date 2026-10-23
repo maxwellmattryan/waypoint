@@ -47,6 +47,8 @@ enum JobOutcome {
     UsageLimit(String),
     /// Failed for good; no retry.
     Fail(String),
+    /// The kill switch stopped the run; the job waits in the queue with its attempt back.
+    Paused,
 }
 
 /// What a running job's task needs; cheap to clone.
@@ -203,10 +205,24 @@ async fn run_job(ctx: Context, job: Job, _permit: OwnedSemaphorePermit) {
                     .await
                     .map(|job| Event::JobDeferred { job })
             }
+            // `claim` skips it until the kill switch is off; the queue itself runs on.
+            JobOutcome::Paused => {
+                super::defer(&ctx.pool, job.id, "agents are paused", Duration::ZERO)
+                    .await
+                    .map(|job| Event::JobDeferred { job })
+            }
         };
         match written {
             Ok(event) => {
                 ctx.bus.publish(event);
+                break;
+            }
+            Err(sqlx::Error::RowNotFound) => {
+                // Deleted under it, by `DELETE /data`; retrying would loop forever.
+                rocket::warn!(
+                    "jobs: job {} no longer exists; dropping its outcome",
+                    job.id
+                );
                 break;
             }
             Err(err) => {
@@ -281,6 +297,7 @@ impl From<runs::Outcome> for JobOutcome {
             runs::Outcome::Retry(error) => Self::Retry(error),
             runs::Outcome::UsageLimit(error) => Self::UsageLimit(error),
             runs::Outcome::Fail(error) => Self::Fail(error),
+            runs::Outcome::Paused => Self::Paused,
         }
     }
 }

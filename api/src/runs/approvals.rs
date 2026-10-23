@@ -167,8 +167,8 @@ async fn lock(
 }
 
 /// Approves pending action `id`, with `input` replacing the requested input when given.
-/// When it was the run's last `pending` action, the run is queued again in the same
-/// transaction, the worker is woken and `run.updated` is published after commit.
+/// When it was the run's last `pending` action, the run is queued again (`paused` while
+/// the kill switch is on) with a new job in the same transaction, the worker is woken and `run.updated` is published after commit.
 pub async fn approve(
     pool: &PgPool,
     bus: &EventBus,
@@ -212,8 +212,11 @@ pub async fn approve(
     .fetch_one(&mut *tx)
     .await?;
     let requeued: Option<Run> = if others == 0 {
-        sqlx::query("UPDATE agent_runs SET status = 'queued', updated_at = now() WHERE id = $1")
+        // `paused` while the kill switch is on, so the parked step waits until it's off.
+        let status = super::initial_status(&mut tx).await?;
+        sqlx::query("UPDATE agent_runs SET status = $2, updated_at = now() WHERE id = $1")
             .bind(action.run_id)
+            .bind(status)
             .execute(&mut *tx)
             .await?;
         Some(super::enqueue(&mut tx, bus, action.run_id).await?)

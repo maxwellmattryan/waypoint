@@ -2,11 +2,12 @@
 -- `pending_actions` for the user's decision, and its step and run park as
 -- `awaiting_approval`; a rejected action ends the run `rejected`. Every succeeded `write`
 -- tool call is logged in `agent_actions` with what its undo needs. Low-confidence results
--- go to `review_items` instead of being applied.
+-- go to `review_items` instead of being applied. `paused` is the kill switch's
+-- (20261022000008_kill_switch.sql).
 ALTER TABLE agent_runs
     DROP CONSTRAINT agent_runs_status_check,
     ADD CONSTRAINT agent_runs_status_check
-        CHECK (status IN ('queued','running','succeeded','failed','awaiting_approval','rejected'));
+        CHECK (status IN ('queued','running','paused','succeeded','failed','awaiting_approval','rejected'));
 ALTER TABLE run_steps
     DROP CONSTRAINT run_steps_status_check,
     ADD CONSTRAINT run_steps_status_check
