@@ -130,6 +130,34 @@ pub async fn events(
     seen
 }
 
+/// Like [`events`], but panics unless `done` held for the last event before `timeout`.
+/// `what` names the awaited condition in the panic message.
+pub async fn events_until(
+    subscriber: &mut Subscriber,
+    timeout: Duration,
+    what: &str,
+    mut done: impl FnMut(&Event) -> bool,
+) -> Vec<Event> {
+    let mut seen = Vec::new();
+    let mut finished = false;
+    let _ = tokio::time::timeout(timeout, async {
+        while let Some(event) = subscriber.next().await {
+            finished = done(&event);
+            seen.push(event);
+            if finished {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(
+        finished,
+        "timed out after {timeout:?} waiting for {what}; saw {} event(s): {seen:#?}",
+        seen.len()
+    );
+    seen
+}
+
 /// The next SSE message as `(event, data)`, skipping heartbeat comments.
 pub async fn next_message(reader: &mut (impl AsyncBufRead + Unpin)) -> (String, Value) {
     let mut event = None;
