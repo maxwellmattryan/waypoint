@@ -1,0 +1,10 @@
+# The `classify_by_email` mode of fake-claude.sh: <needle>TAB<fixture>[TAB<seconds>]. The
+# first needle found (grep -F) in the recorded stdin picks the answer, played after
+# <seconds> when given; without one the fake plays classify_email_other.jsonl. Needles are
+# unique to one email of api/fixtures/emails/ or one email a test seeds.
+no-reply@ashbyhq.com	classify_email_vandelay.jsonl
+no-reply@hire.lever.co	classify_email_hooli.jsonl
+calendar@stark.example	classify_email_stark.jsonl
+position at Globex	classify_email_globex.jsonl
+invalid-answer@test.example	classify_email_invalid.jsonl
+slow-answer@test.example	classify_email_other.jsonl	1

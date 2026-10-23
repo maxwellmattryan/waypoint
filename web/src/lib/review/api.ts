@@ -54,6 +54,14 @@ export function dismissReviewItem(
 	return run(200, () => client.POST('/review-items/{id}/dismiss', { ...path(id), body }));
 }
 
+/**
+ * Applies an `email.match` or `email.new_application` item as the user's own change. A 409 (the
+ * item was decided, its kind can't be applied, or its application changed) is `conflict`.
+ */
+export function acceptReviewItem(client: ApiClient, id: number): Promise<Result<ReviewItem>> {
+	return run(200, () => client.POST('/review-items/{id}/accept', { ...path(id), body: {} }));
+}
+
 export interface ListActionsOptions {
 	limit?: number;
 	/** Only actions with an id below this one: the next page. */

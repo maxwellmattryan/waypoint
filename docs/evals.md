@@ -19,7 +19,7 @@ cargo run --bin eval -- <workflow> [--case <name>]... [--json] [--keep-db] [--da
 
 | Argument | Meaning |
 |---|---|
-| `<workflow>` | A registered eval suite: `tidy_application`, `memory_writer` or `classify_email`. |
+| `<workflow>` | A registered eval suite: `tidy_application`, `memory_writer`, `classify_email` or `match_email`. |
 | `--case <name>` | Runs only the named case. Repeat it for several. A name the dataset doesn't have is a usage error. |
 | `--json` | Prints the report as JSON on stdout instead of the text table. |
 | `--keep-db` | Keeps the scratch database and prints its name on stderr, so you can inspect the runs. |
@@ -182,6 +182,52 @@ A case whose run fails has a `status` failure but no `output.class` one, so chec
 | 17/17 (100%) | 17/17 (100%) | 5,172 | 447 | $0.0010 |
 
 These files were written to exercise each class, so the numbers say how the prompt does on them, not how often it is right on real mail. Real-inbox numbers need your own labelled emails.
+
+## The `match_email` eval set
+
+`api/evals/match_email.json` covers [match and act](email.md#match-and-act): 15 cases. Matching is deterministic Rust, so the set makes **no model call** and runs the same anywhere. Setup takes:
+
+```json
+{"applications": [{"name", "company", "title", "status", "stages"?}],
+ "emails": [{"file", "classification": {"class", "confidence", "company"?, "role"?, "stage"?}, "matched_to"?}]}
+```
+
+with unknown fields refused. It clears matches, classifications, emails, threads, application events, stages and applications; inserts the applications with their stages and a `created` event; then ingests each file in order like the `classify_email` set (**without queuing a run**), stores a `classified` row for it with the given answer, and, for `matched_to`, an `applied` match row to that application. Variables: `application_<name>` per application, and `email_id` and `classification_id` of the last email. Each case's input is `{"classification_id": "${classification_id}"}`. An empty email list, a bad path, an unknown class, a confidence outside 0..=1, a blank or repeated application name, or a `matched_to` naming no application is a setup error.
+
+Every case labels `status: succeeded`, `output.status` and `output.application_id`, and `actions` and `review_items` where they matter:
+
+| Case | Fixture | Outcome |
+|---|---|---|
+| `rejection-company-and-role` | `ashby-rejection` | applied |
+| `ats-sender-name-and-role` | `lever-interview-invite` (company null) | applied |
+| `company-only-is-unsure` | `greenhouse-application-received` | review, `email.match` |
+| `role-mismatch-proposes-new` | `greenhouse-second-company` | review, `email.new_application` |
+| `ambiguous-same-company` | `lever-interview-invite`, two Hooli applications | review, `ambiguous` |
+| `invite-adds-stage` | `lever-interview-invite` | applied, 2 actions |
+| `existing-stage-no-action` | `lever-interview-invite`, already interviewing with that stage | no_action |
+| `sender-domain-and-company` | `recruiter-outreach` | applied |
+| `thread-history` | `recruiter-outreach` matched, then `recruiter-outlook-reply` (company and role null) | applied |
+| `offer` | `classify/offer` | applied |
+| `invite-on-rejected-is-unexpected` | `interview-invite-ics` | review, `unexpected_status` |
+| `low-classification-confidence` | `ashby-rejection` at 0.6 | review, `low_confidence` |
+| `new-application-from-ats` | `greenhouse-second-company`, no applications | review, `email.new_application` (`applied`) |
+| `no-company-unmatched` | `forwarded-thread` (company null) | unmatched |
+| `confident-other-links` | `greenhouse-company-domain` | no_action with the application |
+
+**Match accuracy** is the share of cases with no failure starting `output.status` or `output.application_id`:
+
+```sh
+cargo run --bin eval -- match_email --json \
+  | jq '([.cases[] | select(all(.failures[]; (startswith("output.status") or startswith("output.application_id")) | not))] | length) / .totals.cases'
+```
+
+**Fixture results (synthetic corpus, not your inbox)**, recorded on 2026-10-23:
+
+| Pass rate | Match accuracy | Model calls | Cost |
+|---|---|---|---|
+| 15/15 (100%) | 15/15 (100%) | 0 | $0.0000 |
+
+The cases and their classifications were written to exercise each signal and outcome, so these numbers check the rules, not how often matching is right on real mail. Real-inbox numbers need your own labelled emails.
 
 ## Adding a suite
 

@@ -5,7 +5,9 @@
 use utoipa::OpenApi;
 
 use crate::applications::stages::{self, NewStage, Stage, StageChange, StageOrder};
-use crate::applications::timeline::{self, ApplicationEvent, EntryKind, EventKind, NewEntry};
+use crate::applications::timeline::{
+    self, ApplicationEvent, EntryKind, EventKind, NewEntry, SourceEmail,
+};
 use crate::applications::{
     self, Application, ApplicationInput, ApplicationStatus, FieldError, NewApplication,
     StatusChange, ValidationErrors,
@@ -30,7 +32,9 @@ use crate::profile::resume::{self as resume_profile, ProfileImportQueued};
 use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
 use crate::runs::actions::{self, AgentAction};
 use crate::runs::approvals::{self, ApproveAction, PendingAction, PendingActionStatus};
-use crate::runs::review::{self, DismissReviewItem, ReviewItem, ReviewItemStatus};
+use crate::runs::review::{
+    self, AcceptReviewItem, DismissReviewItem, ReviewItem, ReviewItemStatus,
+};
 use crate::runs::{
     self, Run, RunDetail, RunMemory, RunStatus, RunStep, RunStepDetail, StepStatus, ToolCall,
     ToolCallStatus,
@@ -92,6 +96,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         actions::undo_route,
         review::list,
         review::dismiss_route,
+        review::accept_route,
         tidy::start_tidy,
         kill_switch::show,
         kill_switch::update,
@@ -119,6 +124,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         StageChange,
         StageOrder,
         ApplicationEvent,
+        SourceEmail,
         EventKind,
         NewEntry,
         EntryKind,
@@ -164,6 +170,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         ReviewItem,
         ReviewItemStatus,
         DismissReviewItem,
+        AcceptReviewItem,
         TidyRequest,
         KillSwitch,
         SetKillSwitch,

@@ -12,6 +12,7 @@ import { toast } from '#lib/components/ui';
 import type { KillSwitchState } from '#lib/dashboard/dashboard.svelte.js';
 import { PAGE_SIZE } from '#lib/runs/api.js';
 import {
+	acceptReviewItem,
 	approveAction,
 	dismissReviewItem,
 	listActions,
@@ -22,6 +23,7 @@ import {
 	undoAction,
 	type Result
 } from './api';
+import { describeEmailReview } from './email';
 
 /** Whether the list has loaded. `loading` shows the skeleton; a silent refresh never does. */
 export type ListState = { kind: 'loading' } | { kind: 'error' } | { kind: 'loaded' };
@@ -97,6 +99,12 @@ const SAVE_FAILED = {
 	title: "Couldn't save your decision",
 	description: 'Check that the API is running, then try again.'
 };
+const APPLY_CONFLICT = {
+	title: "Couldn't apply",
+	description: 'The application changed or is gone since. Nothing was changed.'
+};
+
+type Notice = { title: string; description: string };
 
 export interface QueueDeps {
 	client: ApiClient;
@@ -105,6 +113,7 @@ export interface QueueDeps {
 	approve: typeof approveAction;
 	reject: typeof rejectAction;
 	dismiss: typeof dismissReviewItem;
+	accept: typeof acceptReviewItem;
 	/** Whether agents are paused, for the approve toast's wording. */
 	paused: () => boolean;
 }
@@ -131,6 +140,7 @@ export class QueueStore {
 			approve: deps.approve ?? approveAction,
 			reject: deps.reject ?? rejectAction,
 			dismiss: deps.dismiss ?? dismissReviewItem,
+			accept: deps.accept ?? acceptReviewItem,
 			paused: deps.paused ?? (() => false)
 		};
 	}
@@ -171,7 +181,8 @@ export class QueueStore {
 	async #decide<T>(
 		key: string,
 		send: () => Promise<Result<T>>,
-		onOk: () => void
+		onOk: () => void,
+		conflict: Notice = ALREADY_DECIDED
 	): Promise<Result<T>> {
 		if (this.busy.has(key)) return { kind: 'failed' };
 		this.busy.add(key);
@@ -187,6 +198,9 @@ export class QueueStore {
 				onOk();
 				break;
 			case 'conflict':
+				toast.error(conflict.title, { description: conflict.description });
+				void this.refresh();
+				break;
 			case 'not-found':
 				toast.error(ALREADY_DECIDED.title, { description: ALREADY_DECIDED.description });
 				void this.refresh();
@@ -242,6 +256,27 @@ export class QueueStore {
 			`review:${id}`,
 			() => dismiss(client, id, reason),
 			() => toast.success('Dismissed')
+		);
+	}
+
+	/**
+	 * Applies an email review item (`email.match` or `email.new_application`) as the user's own
+	 * change. A conflict (its application changed or is gone) keeps the item and says so.
+	 */
+	accept(id: number): Promise<Result<ReviewItem>> {
+		const key = `review:${id}`;
+		const entry = this.items.find((held) => queueKey(held) === key);
+		const summary = entry?.kind === 'review' ? describeEmailReview(entry.item) : null;
+		const { client, accept } = this.#deps;
+		return this.#decide(
+			key,
+			() => accept(client, id),
+			() => {
+				if (!summary) toast.success('Applied');
+				else if (summary.kind === 'new_application') toast.success(`Added ${summary.company}`);
+				else toast.success(`Applied to ${summary.company}`);
+			},
+			APPLY_CONFLICT
 		);
 	}
 

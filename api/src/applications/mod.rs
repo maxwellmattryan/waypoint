@@ -139,7 +139,7 @@ pub struct Application {
     pub resume_version_id: Option<i64>,
 }
 
-const COLUMNS: &str = "id, company, title, url, location, comp, source, notes, status, \
+pub(crate) const COLUMNS: &str = "id, company, title, url, location, comp, source, notes, status, \
                        status_changed_at, created_at, updated_at, resume_version_id";
 
 /// The SQLSTATE Postgres reports for a foreign-key violation, on insert or update (the

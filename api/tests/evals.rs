@@ -13,7 +13,7 @@ use waypoint_api::claude::ClaudeRequest;
 use waypoint_api::evals::{self, CaseResult, Options, Report, ScratchDb, Suite};
 use waypoint_api::runs::{RunStatus, Runtime, StepContext, StepError, Workflow};
 use waypoint_api::tools::Registry;
-use waypoint_api::workflows::{self, classify_email, memory_writer, tidy};
+use waypoint_api::workflows::{self, classify_email, match_email, memory_writer, tidy};
 
 /// The runner's own timeout; longer than any case timeout used here.
 const RUNNER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -364,6 +364,159 @@ async fn classify_email_suite_seeds_without_queuing(pool: PgPool) {
         assert_eq!(case.usage.calls, 1, "{text}");
     }
     assert_eq!(count(&pool, "agent_runs").await, 2, "one run per case");
+}
+
+#[sqlx::test]
+async fn match_email_suite_seeds_and_passes(pool: PgPool) {
+    let suite = match_email::MatchEmailEval;
+
+    // Applications with stages and `created` events, then each email with its stored
+    // classification, without a model call or a queued run.
+    let setup = json!({
+        "applications": [
+            {"name": "soylent", "company": "Soylent", "title": "Staff Engineer",
+             "status": "interviewing", "stages": ["Recruiter call", "Onsite"]},
+            {"name": "acme", "company": "Acme Corp", "title": "Backend Engineer", "status": "applied"}
+        ],
+        "emails": [
+            {"file": "emails/recruiter-outreach.eml", "matched_to": "soylent",
+             "classification": {"class": "availability_request", "confidence": 0.86, "company": "Soylent"}},
+            {"file": "emails/recruiter-outlook-reply.eml",
+             "classification": {"class": "interview_invite", "confidence": 0.9, "stage": "Onsite"}}
+        ]
+    });
+    let vars = suite.setup(&pool, &setup).await.expect("setup");
+    let reply: i64 = sqlx::query_scalar(
+        "SELECT id FROM emails WHERE provider_message_id = 'recruiter-outlook-reply'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the reply is stored");
+    let soylent: i64 = sqlx::query_scalar("SELECT id FROM applications WHERE company = 'Soylent'")
+        .fetch_one(&pool)
+        .await
+        .expect("the application is stored");
+    let names: Vec<&String> = vars.keys().collect();
+    assert_eq!(
+        names,
+        [
+            "application_acme",
+            "application_soylent",
+            "classification_id",
+            "email_id"
+        ]
+    );
+    assert_eq!(vars["email_id"], json!(reply));
+    assert_eq!(vars["application_soylent"], json!(soylent));
+    let classified: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT id, status, class FROM email_classifications ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("read the classifications");
+    assert_eq!(classified.len(), 2);
+    assert_eq!(vars["classification_id"], json!(classified[1].0));
+    assert!(
+        classified
+            .iter()
+            .all(|(_, status, _)| status == "classified")
+    );
+    let matched: Vec<(i64, String, Option<i64>)> =
+        sqlx::query_as("SELECT classification_id, status, application_id FROM email_matches")
+            .fetch_all(&pool)
+            .await
+            .expect("read the matches");
+    assert_eq!(
+        matched,
+        [(classified[0].0, "applied".into(), Some(soylent))]
+    );
+    let stages: Vec<(String, i32)> = sqlx::query_as(
+        "SELECT name, position FROM application_stages WHERE application_id = $1 ORDER BY position",
+    )
+    .bind(soylent)
+    .fetch_all(&pool)
+    .await
+    .expect("read the stages");
+    assert_eq!(stages, [("Recruiter call".into(), 0), ("Onsite".into(), 1)]);
+    assert_eq!(
+        count(&pool, "application_events").await,
+        2,
+        "two created events"
+    );
+    let threads: i64 = sqlx::query_scalar("SELECT count(DISTINCT thread_id) FROM emails")
+        .fetch_one(&pool)
+        .await
+        .expect("count threads");
+    assert_eq!(threads, 1, "the reply joins the outreach's thread");
+    for table in ["agent_runs", "jobs", "claude_calls"] {
+        assert_eq!(count(&pool, table).await, 0, "{table}");
+    }
+
+    // A later setup starts from its own rows only.
+    suite
+        .setup(
+            &pool,
+            &json!({"emails": [{"file": "classify/offer.eml",
+                                "classification": {"class": "offer", "confidence": 0.9}}]}),
+        )
+        .await
+        .expect("setup");
+    for (table, rows) in [
+        ("applications", 0),
+        ("application_stages", 0),
+        ("application_events", 0),
+        ("emails", 1),
+        ("email_classifications", 1),
+        ("email_matches", 0),
+    ] {
+        assert_eq!(count(&pool, table).await, rows, "{table}");
+    }
+
+    let email = |extra: Value| {
+        let mut email = json!({"file": "emails/ashby-rejection.eml", "classification": {"class": "rejection", "confidence": 0.9}});
+        for (key, value) in extra.as_object().expect("an object") {
+            email[key] = value.clone();
+        }
+        email
+    };
+    let app = json!({"name": "a", "company": "A Co", "title": "T", "status": "applied"});
+    for bad in [
+        json!(null),
+        json!({}),
+        json!({"emails": []}),
+        json!({"emails": [email(json!({}))], "extra": 1}),
+        json!({"emails": [email(json!({"file": "../Cargo.toml"}))]}),
+        json!({"emails": [email(json!({"file": "/etc/hosts"}))]}),
+        json!({"emails": [email(json!({"file": "emails/missing.eml"}))]}),
+        json!({"emails": [email(json!({"classification": {"class": "maybe", "confidence": 0.9}}))]}),
+        json!({"emails": [email(json!({"classification": {"class": "offer", "confidence": 1.5}}))]}),
+        json!({"emails": [email(json!({"matched_to": "nobody"}))]}),
+        json!({"applications": [app.clone(), app.clone()], "emails": [email(json!({}))]}),
+        json!({"applications": [{"name": "a", "company": "A", "title": "T", "status": "archived"}],
+               "emails": [email(json!({}))]}),
+    ] {
+        assert!(suite.setup(&pool, &bad).await.is_err(), "{bad}");
+    }
+
+    // The shipped dataset passes through the real worker, without a model call.
+    let fake = common::fake("hang", RUNNER_TIMEOUT);
+    let path = evals::default_path(match_email::WORKFLOW);
+    let dataset = evals::load(&path, match_email::WORKFLOW).expect("the shipped dataset loads");
+    let report = evals::run(
+        &pool,
+        fake.runner.clone(),
+        workflows::runtime(),
+        &suite,
+        common::fast_config(),
+        &dataset,
+        "match_email.json",
+        &options(Duration::from_secs(30)),
+    )
+    .await
+    .expect("the eval runs");
+    let text = report.text();
+    assert!(report.passed(), "{text}");
+    assert_eq!(report.totals.cases, dataset.cases.len(), "{text}");
+    assert_eq!(report.totals.usage.calls, 0, "{text}");
 }
 
 #[sqlx::test]

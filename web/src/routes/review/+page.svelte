@@ -162,7 +162,12 @@
 									/>
 								{:else}
 									{@const item = entry.item}
-									<ReviewItemCard {item} {busy} ondismiss={() => confirmDismiss(item)} />
+									<ReviewItemCard
+									{item}
+									{busy}
+									ondismiss={() => confirmDismiss(item)}
+									onaccept={() => queue.accept(item.id)}
+								/>
 								{/if}
 							</li>
 						{/each}

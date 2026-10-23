@@ -11,5 +11,5 @@ async fn baseline_applies(pool: PgPool) {
         .fetch_one(&pool)
         .await
         .expect("count migrations");
-    assert_eq!(count, 18);
+    assert_eq!(count, 19);
 }
