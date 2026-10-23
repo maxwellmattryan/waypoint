@@ -35,15 +35,57 @@ Two read-only routes serve `job_postings`. Both accept only a local `Host` (403 
 | `limit` | The most postings to return: 50 by default, clamped to 1–200. |
 | `before` | Only postings with an `id` below this one. Pass the smallest `id` of a page to get the next one. |
 
-Every failing parameter is listed in one 422 body. Each item is a `JobPosting`: every `job_postings` column except `description`, so a page stays small.
+Every failing parameter is listed in one 422 body. Each item is a `JobPosting`: every `job_postings` column except `description`, so a page stays small, plus the posting's [fit](#fit-scores): `fit_score` (its latest applied score, `null` when it was never scored), `fit_band` (`strong`, `partial` or `weak`, `null` with the score) and `fit_in_review` (`true` when a newer score waits in the review queue).
 
-`GET /postings/{id}` returns one posting with every column, `description` included (plain text, possibly `""`). A removed posting is still returned. An unknown id is 404.
+`GET /postings/{id}` returns one posting with every column, `description` included (plain text, possibly `""`), and the same `fit_*` fields. A removed posting is still returned. An unknown id is 404.
 
 ## Postings page
 
 The web app's **Postings** page (`/postings`) lists the postings with filters for company, location, source, remote and removed postings, 50 at a time with **Load more**. The text filters reload 300 ms after the last keystroke. Each posting links to its own page (`/postings/<id>`), which shows its details, links to the posting and its apply page when they're http(s) URLs, and the description as plain text.
 
 **Source company** opens a dialog that takes a board and a slug, checks them the way the route does, and queues the fetch. When a fetch the page started finishes, it shows a toast with the counts (`example-labs: 3 new, 1 updated, 0 removed`) or the failure. The list refreshes after any `source_board` job succeeds.
+
+Each posting with an applied fit score shows a fit badge beside its source badges, for example `82 · Strong fit`, and a `Needs review` badge when a newer score waits in review. A posting that was never scored shows neither. The list refreshes silently when a `score_fit` run succeeds.
+
+## Fit scores
+
+The `score_fit` workflow (`api/src/workflows/score_fit.rs`) scores how well one posting fits you, from 0 to 100, against what Waypoint knows about you, and cites its evidence. There's no separate profile: the [profile import](profile-import.md) stores positions, skills and education as `fact` memories, so the user model is your **confirmed memories**. A run sees every confirmed `preference` memory (up to 30, newest first, whatever words the posting uses, so a deal-breaker always reaches the prompt) and up to 20 confirmed `fact` or `answer` memories [retrieved](agent-runtime.md#retrieval) on the posting's title, department, employment type, location and description. Both sets are recorded in `run_memories`, so the run inspector shows them under "Memories used". Proposed memories are never used. With no confirmed memories at all the run fails before any model call: `Waypoint knows nothing about you yet: add or confirm memories first`.
+
+The run has one step, `score`, and makes one tool-less `claude -p --json-schema` call (model `sonnet`, purpose `posting.score_fit`). The prompt says the posting is data to assess, not instructions. The posting is shown as a block (`Title:`, `Company:`, `Location:`, `Remote:`, `Department:`, `Employment type:`, then the description cut to 12,000 characters), fenced so its text can't close the block. The answer is a score, a confidence from 0 to 1, a one-line summary and 1 to 8 reasons, each `for` or `against` the fit and citing 1 to 4 sources: a memory shown in the prompt, by id, or a verbatim excerpt of the posting block (at most 300 characters).
+
+Rust checks the answer:
+
+- **Invalid** (the run fails, nothing is stored): a score outside 0–100, a confidence that isn't a number from 0 to 1, a summary that is blank or over 300 characters, or no reason left with a valid citation. The error names each broken rule.
+- **Dropped:** reasons past 8, a reason with an unknown stance or a blank or over-500-character text, citations past 4, a memory citation whose id wasn't shown, a posting excerpt that is blank, too long or not in the posting block (matched ignoring case and runs of whitespace), and a reason left with no citation.
+- **Applied:** confidence of at least 0.8 and nothing dropped. The score becomes the posting's current score.
+- **In review:** confidence below 0.8, or anything dropped. A `score_fit.score` [review item](agent-runtime.md#review-items) is stored and the score isn't applied.
+
+The band comes from the score in Rust: `strong` from 70, `partial` from 40, `weak` below. Each valid score is a `posting_fit_scores` row with its `status` (`applied`, `in_review` or `dismissed`), score, band, confidence, summary, reasons, run, model call and the call's cost. A stored reason's citations keep a snapshot: a memory citation has the memory's topic and its content cut to 300 characters, and a posting citation the trimmed excerpt. A rerun of the step returns the row its run already stored without a second call. The run's output is `{posting_id, fit_score_id, score, band, confidence, status, review_item_id, dropped: {reasons, citations}}`.
+
+On the Review page a `score_fit.score` item shows the posting (company and title, linking to its page), the score and band, the summary and the reasons, with **Apply** and **Dismiss**. **Apply** makes it the posting's current score. **Dismiss** marks it `dismissed` and records the usual dismissal [learning signal](agent-runtime.md#learning-signals); the posting keeps its previous applied score.
+
+### Fit routes
+
+Both accept only a local `Host` (403 otherwise), and a database error is 500.
+
+`GET /postings/{id}/fit` returns `{posting_id, current, in_review, run}`. `current` is the latest applied score (the most recently applied one, so an accepted older score replaces a newer one), `in_review` the latest `in_review` score newer than `current` whose review item is still pending, and `run` the latest `score_fit` run for the posting as `{id, status, error}`. Each is `null` when there is none. A score is `{id, run_id, status, score, band, confidence, summary, reasons, cost_usd, created_at}`, each reason `{stance, text, citations}` and each citation `{source, memory_id, topic, text}`. An unknown posting is 404.
+
+`POST /postings/{id}/fit` with `{}` queues a `score_fit` run with input `{"posting_id": id}` and answers **202** `{"run": Run, "reused": false}`. If a `score_fit` run for the posting is already waiting (`queued` or `paused`) or `running`, it comes back with `reused: true` and nothing is queued. The posting row is locked while the check and the insert run, so two requests can't both queue a run. While the kill switch is on the run is `paused`, like any run. Removed postings can be scored. An unknown posting is 404, a body that isn't `application/json` 415, and unknown keys 400. It refuses cross-site and form-encoded requests with 403.
+
+### Posting page
+
+A **Fit** section sits above the posting's details:
+
+- **Never scored:** "Not scored yet" and **Score fit**.
+- **Scoring:** while the latest run is `queued`, `running` or `paused`, "Scoring…" with a skeleton and a disabled button; for `paused`, "Paused: agents are paused".
+- **Failed:** when the latest run failed and no score is newer, "Scoring failed" with the run's error, a link to the run and **Try again**.
+- **Applied:** the score, its band, "NN% confident", the summary and the reasons grouped "For" and "Against". Each citation is a quoted posting excerpt, or the memory's topic and snapshot with **View memory** (or "Deleted memory" once it's gone). Below: "Scored <date> · $<cost>" with a link to the run, and **Rescore**.
+- **In review, nothing applied:** the provisional score in the same layout, muted, with a `Needs review` badge and a link to the Review page.
+- **In review with an applied score:** the applied score, plus "A newer score is waiting in review" with a link to the Review page.
+
+The section reloads when a `run.updated` event arrives for a `score_fit` run of this posting, and after the event stream reconnects or lags. If it can't load, it says "Couldn't load the fit score" with **Try again**, and the rest of the page still shows.
+
+The [`score_fit` eval set](evals.md#the-score_fit-eval-set) measures the scores.
 
 ## The job
 
