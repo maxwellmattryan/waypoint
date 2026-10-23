@@ -92,6 +92,10 @@ export type MemoryTopic = components['schemas']['MemoryTopic'];
 export type MemoryStatus = components['schemas']['MemoryStatus'];
 /** Where a memory came from. */
 export type SourceKind = components['schemas']['SourceKind'];
+/** What a profile import did: the LinkedIn import's body and the resume import job's `result`. */
+export type ProfileImportSummary = components['schemas']['ProfileImportSummary'];
+/** The `POST /resumes/{id}/profile` body: the import job, new or reused. */
+export type ProfileImportQueued = components['schemas']['ProfileImportQueued'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 
