@@ -22,6 +22,7 @@ use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
 use crate::memory_signals;
 use crate::tools::{Registry, ToolCallError};
+use crate::workflows::propose_interview;
 
 /// Most pending actions one `GET /pending-actions` returns.
 pub const MAX_PENDING: i64 = 200;
@@ -244,7 +245,8 @@ pub async fn approve(
 }
 
 /// Rejects pending action `id` and every other `pending` action of its run, fails the run's
-/// parked steps and ends the run `rejected`, in one transaction. The handler never runs.
+/// parked steps, ends the run `rejected` and marks its `proposed` interview proposals
+/// `rejected`, in one transaction. The handler never runs.
 /// Publishes `run.updated` after commit.
 pub async fn reject(
     pool: &PgPool,
@@ -285,6 +287,7 @@ pub async fn reject(
     .await?;
     // Only the action the user looked at; the run's other rejected actions get no signal.
     let writer = memory_signals::record_rejection(&mut tx, bus, &action).await?;
+    propose_interview::mark_rejected(&mut tx, action.run_id).await?;
     tx.commit().await?;
     if let Some(run) = writer {
         bus.publish(Event::RunUpdated { run });

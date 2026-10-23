@@ -241,6 +241,27 @@ pub(crate) async fn record_sourced(
     .await
 }
 
+/// Records an `interview_scheduled` event: `body` names the event, and `source_email_id`
+/// the email that proposed it (no email when that one no longer exists).
+pub(crate) async fn record_interview(
+    conn: &mut PgConnection,
+    application_id: i64,
+    body: &str,
+    source_email_id: Option<i64>,
+) -> Result<ApplicationEvent, sqlx::Error> {
+    insert(
+        conn,
+        application_id,
+        EventKind::InterviewScheduled,
+        None,
+        None,
+        None,
+        Some(body),
+        source_email_id,
+    )
+    .await
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn insert(
     conn: &mut PgConnection,

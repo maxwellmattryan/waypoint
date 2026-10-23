@@ -63,6 +63,23 @@ pub fn app(pool: PgPool, runner: ClaudeRunner, config: jobs::Config) -> Rocket<B
     )
 }
 
+/// The API with Rocket's default test config and the given Google settings.
+pub fn app_with_google(
+    pool: PgPool,
+    runner: ClaudeRunner,
+    config: jobs::Config,
+    google: waypoint_api::google::Config,
+) -> Rocket<Build> {
+    waypoint_api::rocket(
+        rocket::Config::figment(),
+        pool,
+        runner,
+        config,
+        google,
+        waypoint_api::capture::Config::default(),
+    )
+}
+
 /// The API with Rocket's default test config and the given capture settings.
 pub fn app_with_capture(
     pool: PgPool,
