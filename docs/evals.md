@@ -85,8 +85,9 @@ A dataset lives at `api/evals/<workflow>.json`. It is read at run time, so editi
   - `pending_actions`: one `{tool, status, input}` per pending action.
   - `review_items`: one `{kind, confidence, payload}` per review item.
   - `actions`: one `{tool, undone}` per logged `write` action (`undone` is a bool).
+  - `memories`: one `{step, memory_id}` per memory the run's steps [retrieved](agent-runtime.md#retrieval) (`run_memories` rows), so the count and order check recall and rank, e.g. `memories[0].memory_id: expected 3, got 4`.
 
-  For the three arrays, the count must equal the observed count, and the i-th expected entry is subset-matched against the i-th observed entry, ordered by `id`.
+  For the four arrays, the count must equal the observed count, and the i-th expected entry is subset-matched against the i-th observed entry, ordered by `id`.
 
 An invalid file exits 2 with a message that names the file and, where it can, the case.
 
@@ -131,7 +132,11 @@ cargo run --bin eval -- tidy_application --json | jq .totals.pass_rate
 
 ## The `tidy_application` eval set
 
-`api/evals/tidy_application.json` covers the sample workflow. It makes no model call, so `calls` is 0 in every case. Setup takes `{"application": {"company", "title", "status"?}}`, inserts the application and returns `{"application_id": <id>}`; with `{}` or no setup it inserts nothing. The cases check that a confident note (0.9, and exactly 0.8) is applied as an `add_note` action, that a note below the threshold (0.79, 0.2) goes to the review queue instead, that every run parks with its `draft_follow_up` pending, and that an unknown application or a missing `confidence` fails the run. The unknown-application case retries the way the app does (3 attempts with the queue's backoff), so it takes about half a minute with the default settings.
+`api/evals/tidy_application.json` covers the sample workflow. It makes no model call, so `calls` is 0 in every case. Setup takes `{"application": {"company", "title", "status"?}, "memories": [...]}`, both optional. It first deletes every memory, so each case starts with exactly its own, then inserts the application (returning `{"application_id": <id>}`) and each memory, `{"name", "kind", "topic", "content", "tags"?, "status"?}`, validated like `POST /memories`, `confirmed` unless `status` says `proposed`, returning its id as `memory_<name>`. A blank or repeated `name`, or a memory that fails validation, is a setup error. With `{}` or no setup it inserts nothing.
+
+The guardrail cases check that a confident note (0.9, and exactly 0.8) is applied as an `add_note` action, that a note below the threshold (0.79, 0.2) goes to the review queue instead, that every run parks with its `draft_follow_up` pending, that an unknown application or a missing `confidence` fails the run, and that none of them retrieves a memory. The unknown-application case retries the way the app does (3 attempts with the queue's backoff), so it takes about half a minute with the default settings.
+
+The `recall:` cases check the `draft` step's retrieval: a relevant memory is retrieved and an unrelated one isn't, a proposed memory with matching words isn't, the memory sharing more terms with the query ranks first, a memory whose only match is a tag equal to the company is retrieved, no shared term retrieves nothing, and seven matching memories give exactly five rows.
 
 ## Adding a suite
 

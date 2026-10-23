@@ -2592,7 +2592,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The run, its steps by `ordinal` and each step's tool calls by `id`",
+            "description": "The run, its steps by `ordinal`, each step's tool calls by `id`, and the memories its steps retrieved by step `ordinal`, then `id`",
             "content": {
               "application/json": {
                 "schema": {
@@ -4259,9 +4259,17 @@
           {
             "type": "object",
             "required": [
-              "steps"
+              "steps",
+              "memories"
             ],
             "properties": {
+              "memories": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RunMemory"
+                },
+                "description": "Every memory the run's steps retrieved, by step `ordinal`, then `id`."
+              },
               "steps": {
                 "type": "array",
                 "items": {
@@ -4271,7 +4279,70 @@
             }
           }
         ],
-        "description": "The `GET /runs/{id}` body: the run with its steps in order."
+        "description": "The `GET /runs/{id}` body: the run with its steps in order and the memories they used."
+      },
+      "RunMemory": {
+        "type": "object",
+        "description": "One `run_memories` row: a memory a step retrieved, with a snapshot of it at retrieval\ntime.",
+        "required": [
+          "id",
+          "run_id",
+          "run_step_id",
+          "step",
+          "memory_id",
+          "kind",
+          "topic",
+          "content",
+          "score",
+          "created_at"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The memory's content when it was retrieved."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MemoryKind",
+            "description": "The memory's kind when it was retrieved."
+          },
+          "memory_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The memory; `null` once it has been deleted."
+          },
+          "run_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_step_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "score": {
+            "type": "number",
+            "format": "double",
+            "description": "Its full-text rank for the step's query; 0 for a tag-only query."
+          },
+          "step": {
+            "type": "string",
+            "description": "The name of the step that retrieved it."
+          },
+          "topic": {
+            "$ref": "#/components/schemas/MemoryTopic",
+            "description": "The memory's topic when it was retrieved."
+          }
+        }
       },
       "RunStatus": {
         "type": "string",

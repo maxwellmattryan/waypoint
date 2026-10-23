@@ -124,13 +124,13 @@ async fn tidy_dataset_passes_without_approving(pool: PgPool) {
 
     let text = report.text();
     assert!(report.passed(), "{text}");
-    assert_eq!(report.totals.cases, 6, "{text}");
+    assert_eq!(report.totals.cases, 12, "{text}");
     assert_eq!(report.totals.pass_rate, 1.0);
     assert!(
         text.lines()
             .last()
             .unwrap()
-            .starts_with("pass rate: 6/6 (100.0%)")
+            .starts_with("pass rate: 12/12 (100.0%)")
     );
     assert!(
         report.cases.iter().all(|case| case.usage.calls == 0),
@@ -143,7 +143,7 @@ async fn tidy_dataset_passes_without_approving(pool: PgPool) {
     .fetch_all(&pool)
     .await
     .expect("read pending actions");
-    assert_eq!(statuses, ["pending"; 4]);
+    assert_eq!(statuses, ["pending"; 10]);
     let ran: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM tool_calls WHERE tool = 'draft_follow_up' AND status = 'succeeded'",
     )

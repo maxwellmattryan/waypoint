@@ -4,6 +4,11 @@
 //! `draft` drafts a follow-up message (`external`), which waits for the user's approval.
 //! The draft is only returned, never sent: agents draft, the user sends.
 //!
+//! Before drafting, `draft` retrieves the confirmed memories matching the application's
+//! company and title and the message, and records them on the step, so the run inspector
+//! and the evals show retrieval provenance end to end. It makes no model call, so it
+//! doesn't render them into a prompt ([`crate::retrieval::context`] is for steps that do).
+//!
 //! `POST /applications/{id}/tidy` starts it.
 
 use rocket::State;
@@ -21,6 +26,10 @@ use crate::evals::Suite;
 use crate::events::EventBus;
 use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
+use crate::memories::{
+    self, MemoryInput, MemoryKind, MemorySource, MemoryStatus, MemoryTopic, NewMemory,
+};
+use crate::retrieval;
 use crate::runs::{self, Run, Runtime, StepContext, StepError, Workflow};
 use crate::tools::{Permission, Tool, ToolContext, ToolError, UndoError};
 
@@ -366,6 +375,19 @@ impl Workflow for TidyApplication {
             }
             "draft" => {
                 let message = string_field(&input, "message")?;
+                let application = &input["application"];
+                let text = [&application["company"], &application["title"]]
+                    .into_iter()
+                    .filter_map(Value::as_str)
+                    .chain([message])
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                ctx.memories(&retrieval::Query {
+                    text,
+                    ..Default::default()
+                })
+                .await
+                .map_err(|err| StepError::Retry(format!("cannot retrieve memories: {err}")))?;
                 return Ok(ctx
                     .tool(
                         DraftFollowUp::NAME,
@@ -380,12 +402,30 @@ impl Workflow for TidyApplication {
 }
 
 /// A `tidy_application` eval case's `setup`: `{"application": {...}}` inserts one, and
-/// `{}` or `null` inserts nothing.
+/// `{}` or `null` inserts nothing. `memories` are inserted after every existing memory
+/// is deleted, so each case starts with exactly its own.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EvalSetup {
     #[serde(default)]
     application: Option<EvalApplication>,
+    #[serde(default)]
+    memories: Vec<EvalMemory>,
+}
+
+/// A memory a case seeds. Its id is the variable `memory_<name>`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalMemory {
+    name: String,
+    kind: MemoryKind,
+    topic: MemoryTopic,
+    content: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    /// `confirmed` when absent.
+    #[serde(default)]
+    status: Option<MemoryStatus>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -399,8 +439,9 @@ struct EvalApplication {
 }
 
 /// The eval suite for `tidy_application` (dataset `api/evals/tidy_application.json`).
-/// Setup inserts the case's application and returns `{"application_id": <id>}`; without
-/// one it returns no variables.
+/// Setup deletes every memory, inserts the case's application and memories, and returns
+/// `{"application_id": <id>}` (without an application, no such variable) plus
+/// `memory_<name>` for each memory.
 pub struct TidyEval;
 
 #[rocket::async_trait]
@@ -428,6 +469,45 @@ impl Suite for TidyEval {
             .await
             .map_err(|err| format!("cannot insert the application: {err}"))?;
             vars.insert("application_id".into(), json!(id));
+        }
+        sqlx::query("DELETE FROM memories")
+            .execute(pool)
+            .await
+            .map_err(|err| format!("cannot clear the memories: {err}"))?;
+        for memory in setup.memories {
+            let name = memory.name.trim();
+            if name.is_empty() {
+                return Err("a memory has a blank name".into());
+            }
+            let var = format!("memory_{name}");
+            if vars.contains_key(&var) {
+                return Err(format!("two memories are named {name:?}"));
+            }
+            let fields = memories::validate(&MemoryInput {
+                kind: memory.kind,
+                topic: memory.topic,
+                content: memory.content,
+                tags: memory.tags,
+            })
+            .map_err(|err| {
+                let fields: Vec<String> = err
+                    .errors
+                    .iter()
+                    .map(|e| format!("{}: {}", e.field, e.message))
+                    .collect();
+                format!("memory {name:?} is invalid: {}", fields.join("; "))
+            })?;
+            let stored = memories::insert(
+                pool,
+                &NewMemory {
+                    fields,
+                    status: memory.status.unwrap_or(MemoryStatus::Confirmed),
+                    source: MemorySource::manual(),
+                },
+            )
+            .await
+            .map_err(|err| format!("cannot insert memory {name:?}: {err}"))?;
+            vars.insert(var, json!(stored.id));
         }
         Ok(vars)
     }

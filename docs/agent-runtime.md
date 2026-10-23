@@ -13,8 +13,9 @@ Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps ex
 | `agent_actions` | succeeded `write` tool call | `run_id`, `run_step_id`, `tool_call_id` (unique), `tool`, `undo_data`, `created_at`, `undone_at` |
 | `review_items` | result a step wasn't sure enough to apply | `run_id`, `run_step_id`, `kind`, `confidence` (0..=1), `payload`, `status` (`pending`, `accepted`, `dismissed`), `created_at`, `resolved_at`. Unique on (`run_step_id`, `kind`, `md5(payload::text)`) |
 | `memory_signals` | user decision on something an agent drafted ([learning signals](#learning-signals)) | `kind` (`approval`, `rejection`, `dismissal`), `run_id`, `pending_action_id` (unique; approvals and rejections), `review_item_id` (unique; dismissals), `subject` (the tool or the item's kind), `drafted`, `approved` and `changes` (approvals only), `reason` (dismissals only, 1..=1000 characters or `NULL`), `created_at`. No foreign keys |
+| `run_memories` | memory a step [retrieved](#retrieval) | `run_id`, `run_step_id`, `memory_id` (cleared when the memory is deleted), a snapshot of the memory's `kind`, `topic` and `content` at retrieval time, `score`, `created_at`. Unique on (`run_step_id`, `memory_id`) |
 
-Deleting a run deletes its steps, their tool calls, and its pending actions, actions and review items, but not its learning signals. The `claude_call_id` columns point at `claude_calls`; runs reach their model calls through their steps.
+Deleting a run deletes its steps, their tool calls, and its pending actions, actions, review items and run memories, but not its learning signals. The `claude_call_id` columns point at `claude_calls`; runs reach their model calls through their steps.
 
 ## Starting and running
 
@@ -183,6 +184,23 @@ An approval's `changes` is the diff from `drafted` (the requested input) to `app
 
 `GET /memory-signals` lists them read-only; nothing over HTTP writes, edits or deletes one, and no model is called.
 
+## Retrieval
+
+A step pulls what Waypoint knows about the user with `ctx.memories(&retrieval::Query { text, tags, kinds, limit })` (`api/src/retrieval.rs`). It searches the `memories` table and records what it found on the step. There is no HTTP route for it.
+
+- **Confirmed only.** `proposed` memories are never returned, whatever they match.
+- **OR over words.** The text is split into runs of letters and digits, lowercased, deduplicated (at most 64 words, `or` dropped) and joined with `or` for `websearch_to_tsquery('english', …)`, so no search operator from the text reaches Postgres. A memory matches when it shares at least one stemmed, non-stop-word term with the text, in its content, topic or tags (the same `search` column the memories page uses). AND over every word, `websearch_to_tsquery`'s default, would almost never match a sentence.
+- **Order.** Best match first (`ts_rank`, returned as `score`), then newest `updated_at`, then `id` descending.
+- **Filters.** `tags` (normalised like stored tags) keeps memories carrying at least one of them; `kinds` keeps memories of one of those kinds. Filters only narrow what the text matched.
+- **No usable terms.** Text that is blank, punctuation or stop words only returns the confirmed memories carrying any of the tags, newest `updated_at` first, with score 0. With no tags either it returns nothing, and blank text with no tags runs no query.
+- **Limit.** 5 by default, clamped to 1..=20.
+
+**Recording.** `ctx.memories` stores one `run_memories` row per returned memory, in rank order, with a snapshot of its kind, topic and content and its score, so the run inspector shows what the step actually saw after the memory is edited or deleted. Steps are at-least-once, so the rows are a union across attempts: a rerun (retry, resume, after approval) that retrieves the same memory adds no second row, and a memory first retrieved on a later attempt is added. When it adds a row it publishes `run.updated` (best effort). Deleting the memory keeps the row with `memory_id` cleared; deleting the run deletes the rows.
+
+**Prompt block.** `retrieval::context(&found)` renders retrieved memories as the text a model-calling step puts in its `ClaudeRequest` prompt: a heading line, then `- [memory <id> · <kind> · <topic>] <content>` per memory (newlines in content become spaces), or `""` for none. `tidy_application` makes no model call, so its `draft` step retrieves and records but renders nothing; the first model-calling workflow uses it.
+
+Embeddings (pgvector) are deferred until the recall cases in the [`tidy_application` eval set](evals.md#the-tidy_application-eval-set) show full-text search missing relevant memories, for example through synonyms.
+
 ### Supported schema subset
 
 Tool schemas are checked by a small in-repo checker (`api/src/tools/schema.rs`), not a JSON Schema crate. Supported keywords:
@@ -247,7 +265,7 @@ The production runtime (`workflows::runtime()`) registers one workflow, which ex
 |---|---|---|
 | `inspect` | `get_application` (`read`) | Reads `{id, company, title, status}` of the application and adds it as `application`. An unknown id fails the tool (`application <id> doesn't exist`), which retries and then fails the run. |
 | `note` | `add_note` (`write`) | `review_if_unsure("tidy.note", confidence, {application_id, note})`: below 0.8 it adds `review_item_id` and writes nothing. Otherwise `add_note` adds a `note` to the application's timeline, adds `note_event_id`, and logs an action whose undo deletes that note (a conflict when it is gone). |
-| `draft` | `draft_follow_up` (`external`) | Always runs, so every run reaches the gate. After approval it returns `{"draft": "<message> (to <company>)"}`, which is the run's output. It sends and stores nothing: agents draft, the user sends. |
+| `draft` | `draft_follow_up` (`external`) | First [retrieves](#retrieval) the confirmed memories matching `"<company> <title> <message>"` (company and title from `application`) with the default limit, and records them on the step. Then always runs the tool, so every run reaches the gate. After approval it returns `{"draft": "<message> (to <company>)"}`, which is the run's output. It sends and stores nothing: agents draft, the user sends. |
 
 The three tools are also in the MCP server's `tools/list`. The README's "Try the sample workflow" walks through it with curl.
 
@@ -258,7 +276,7 @@ Its labelled eval set is `api/evals/tidy_application.json`, run with `cargo run 
 Every route answers only a local `Host` (403 otherwise) and answers 500 on a database error. The `POST` routes also refuse a cross-site request (`Sec-Fetch-Site: cross-site`) and an HTML form body with 403, and the ones with a JSON body answer 415 to any other content type and 400 to a body that doesn't parse or has unknown fields.
 
 - `GET /runs?limit=&before=`: runs newest first (`id` descending). `limit` defaults to 50 and is clamped to 1..=200. `before` returns only runs with `id < before`, so the next page is `?before=<last id>`. With no runs the body is `[]`.
-- `GET /runs/{id}`: the run with `steps` ordered by `ordinal`, each with its `tool_calls` ordered by `id`. An unknown id is 404.
+- `GET /runs/{id}`: the run with `steps` ordered by `ordinal`, each with its `tool_calls` ordered by `id`, and `memories`: every `run_memories` row of the run, by step `ordinal`, then `id`, each with `id`, `run_id`, `run_step_id`, `step` (the step's name), `memory_id` (`null` once deleted), `kind`, `topic`, `content` (the snapshot), `score` and `created_at`; `[]` when the run used none. The run inspector lists them under "Memories used", each linking to `/memories?memory=<id>`. An unknown id is 404.
 - `GET /pending-actions`: up to 200 `pending` actions, oldest first.
 - `POST /pending-actions/{id}/approve` (`{}` or `{"input": {…}}`) and `POST /pending-actions/{id}/reject` (no body): see [Deciding](#deciding). 200 with the `PendingAction`; 404 for an unknown id.
 - `GET /actions?run_id=&limit=&before=`: the action log newest first, optionally for one run; `limit` and `before` work as on `GET /runs`.
@@ -289,6 +307,7 @@ It fires after each of these commits, never inside a transaction:
 - a step going `running`,
 - each `StepContext::tool` call returning, whether the tool succeeded or failed,
 - each MCP `tools/call` that reached the registry returning (a row was written or attempted; a call without a usable `name` publishes nothing),
+- a step recording retrieved memories (`StepContext::memories` added at least one `run_memories` row),
 - a step parking (the run is `awaiting_approval`),
 - an approve that queues the run again, and a reject (the run is `rejected`),
 - a step succeeding or failing (a failed step's event already has the run's settled status: `queued` for a retry or a usage-limit deferral, `failed` otherwise),

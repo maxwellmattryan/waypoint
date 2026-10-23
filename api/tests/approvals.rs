@@ -16,6 +16,9 @@ use sqlx::PgPool;
 use tokio::sync::Notify;
 use waypoint_api::claude::ClaudeRunner;
 use waypoint_api::events::{Event, EventBus, Subscriber};
+use waypoint_api::memories::{
+    self, MemoryInput, MemoryKind, MemorySource, MemoryStatus, MemoryTopic, NewMemory,
+};
 use waypoint_api::runs::RunStatus;
 use waypoint_api::tools::{Permission, Registry, Tool, ToolCallError, ToolContext, ToolError};
 
@@ -355,6 +358,67 @@ async fn edit_then_approve_uses_the_edited_input(pool: PgPool) {
     until(&mut subscriber, run, RunStatus::Succeeded).await;
     let detail = get(&client, &format!("/runs/{run}")).await;
     assert_eq!(detail["output"], json!({"draft": "edited (to Acme)"}));
+}
+
+#[sqlx::test]
+async fn draft_step_records_the_memories_it_used(pool: PgPool) {
+    let (client, mut subscriber) = app(&pool).await;
+    let application = create_application(&client).await;
+    let memory = |content: &str| json!({"kind": "fact", "topic": "other", "content": content});
+    let (status, used) = post(
+        &client,
+        "/memories",
+        Some(memory("Acme's hiring manager prefers short notes")),
+    )
+    .await;
+    assert_eq!(status, Status::Created, "{used}");
+    let (status, _) = post(&client, "/memories", Some(memory("Enjoys cooking"))).await;
+    assert_eq!(status, Status::Created);
+    let fields = memories::validate(&MemoryInput {
+        kind: MemoryKind::Fact,
+        topic: MemoryTopic::Other,
+        content: "Acme engineer, thanks".into(),
+        tags: Vec::new(),
+    })
+    .expect("valid");
+    memories::insert(
+        &pool,
+        &NewMemory {
+            fields,
+            status: MemoryStatus::Proposed,
+            source: MemorySource::manual(),
+        },
+    )
+    .await
+    .expect("insert a proposed memory");
+
+    let (run, action) = parked(&client, &mut subscriber, application, 0.9).await;
+    let check = |detail: &Value| {
+        let memories = detail["memories"].as_array().expect("memories");
+        assert_eq!(memories.len(), 1, "{detail}");
+        assert_eq!(memories[0]["step"], "draft");
+        assert_eq!(memories[0]["memory_id"], used["id"]);
+        assert_eq!(memories[0]["run_id"], json!(run));
+        assert_eq!(memories[0]["run_step_id"], detail["steps"][2]["id"]);
+        assert_eq!(memories[0]["kind"], "fact");
+        assert_eq!(memories[0]["topic"], "other");
+        assert_eq!(memories[0]["content"], used["content"]);
+        assert!(memories[0]["score"].as_f64().unwrap_or_default() > 0.0);
+        memories[0]["id"].clone()
+    };
+    let parked_row = check(&get(&client, &format!("/runs/{run}")).await);
+
+    let (status, _) = post(
+        &client,
+        &format!("/pending-actions/{action}/approve"),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, Status::Ok);
+    until(&mut subscriber, run, RunStatus::Succeeded).await;
+    let detail = get(&client, &format!("/runs/{run}")).await;
+    assert_eq!(check(&detail), parked_row, "the rerun adds no second row");
+    assert_eq!(detail["output"], json!({"draft": "Thanks (to Acme)"}));
 }
 
 async fn set_kill_switch(client: &Client, paused: bool) {

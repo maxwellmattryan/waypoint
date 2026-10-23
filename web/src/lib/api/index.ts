@@ -41,6 +41,7 @@ export type {
 	ReviewItem,
 	Run,
 	RunDetail,
+	RunMemory,
 	RunStatus,
 	RunStepDetail,
 	SignalChange,

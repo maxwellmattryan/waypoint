@@ -67,6 +67,27 @@ test('memories: add, find, filter by tag, edit and delete', async ({ page }) => 
 		await expect(item.getByText('Proposed')).toHaveCount(0);
 		await page.screenshot({ path: `${screenshots}/memories-list.png`, fullPage: true });
 
+		// A link to it (as the run inspector makes) scrolls to, focuses and highlights it.
+		const found = await page.request.get('/api/memories', { params: { q: stamp } });
+		const [{ id }] = (await found.json()) as { id: number }[];
+		await page.goto(`/memories?memory=${id}`);
+		const card = page.locator(`#memory-${id}`);
+		await expect(card).toBeFocused();
+		await expect(card).toHaveAttribute('data-highlighted', 'true');
+		await expect(card).toBeInViewport();
+		await page.screenshot({ path: `${screenshots}/memories-highlight.png`, fullPage: true });
+		await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+		await page.screenshot({ path: `${screenshots}/memories-highlight-dark.png`, fullPage: true });
+		await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+
+		// An id that isn't listed says so; a non-numeric value is ignored.
+		await page.goto('/memories?memory=999999999999');
+		await expect(page.getByText('That memory no longer exists')).toBeVisible();
+		await page.goto('/memories?memory=abc');
+		await expect(item).toHaveCount(1);
+		await expect(page.locator('[data-highlighted]')).toHaveCount(0);
+		await expect(page.getByText('That memory no longer exists')).toHaveCount(0);
+
 		// Search finds it.
 		const search = page.getByRole('searchbox', { name: 'Search memories' });
 		await search.fill(stamp);

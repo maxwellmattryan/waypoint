@@ -1274,9 +1274,43 @@ export interface components {
             /** @description The registered workflow's name. */
             workflow: string;
         };
-        /** @description The `GET /runs/{id}` body: the run with its steps in order. */
+        /** @description The `GET /runs/{id}` body: the run with its steps in order and the memories they used. */
         RunDetail: components["schemas"]["Run"] & {
+            /** @description Every memory the run's steps retrieved, by step `ordinal`, then `id`. */
+            memories: components["schemas"]["RunMemory"][];
             steps: components["schemas"]["RunStepDetail"][];
+        };
+        /**
+         * @description One `run_memories` row: a memory a step retrieved, with a snapshot of it at retrieval
+         *     time.
+         */
+        RunMemory: {
+            /** @description The memory's content when it was retrieved. */
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            /** @description The memory's kind when it was retrieved. */
+            kind: components["schemas"]["MemoryKind"];
+            /**
+             * Format: int64
+             * @description The memory; `null` once it has been deleted.
+             */
+            memory_id: number | null;
+            /** Format: int64 */
+            run_id: number;
+            /** Format: int64 */
+            run_step_id: number;
+            /**
+             * Format: double
+             * @description Its full-text rank for the step's query; 0 for a tag-only query.
+             */
+            score: number;
+            /** @description The name of the step that retrieved it. */
+            step: string;
+            /** @description The memory's topic when it was retrieved. */
+            topic: components["schemas"]["MemoryTopic"];
         };
         /**
          * @description Where a run is.
@@ -4023,7 +4057,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The run, its steps by `ordinal` and each step's tool calls by `id` */
+            /** @description The run, its steps by `ordinal`, each step's tool calls by `id`, and the memories its steps retrieved by step `ordinal`, then `id` */
             200: {
                 headers: {
                     [name: string]: unknown;

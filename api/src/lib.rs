@@ -20,6 +20,7 @@ pub mod memory_signals;
 pub mod openapi;
 pub mod profile;
 pub mod resumes;
+pub mod retrieval;
 pub mod runs;
 pub mod tools;
 pub mod workflows;
