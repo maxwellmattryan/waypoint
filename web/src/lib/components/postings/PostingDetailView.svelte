@@ -6,8 +6,15 @@
 	import { SOURCE_LABELS } from '#lib/postings/api.js';
 	import PostingBadges from './PostingBadges.svelte';
 
-	/** `fit` renders between the header and the details: the posting's Fit section. */
-	let { posting, fit }: { posting: JobPostingDetail; fit?: Snippet } = $props();
+	/**
+	 * `fit` renders between the header and the details: the posting's Fit section. `packets`
+	 * renders after it: the posting's Packets section.
+	 */
+	let {
+		posting,
+		fit,
+		packets
+	}: { posting: JobPostingDetail; fit?: Snippet; packets?: Snippet } = $props();
 
 	const NONE = '—';
 	const text = (value: string | null) => value || NONE;
@@ -57,6 +64,8 @@
 	</header>
 
 	{@render fit?.()}
+
+	{@render packets?.()}
 
 	<Card>
 		<KeyValue items={details} />

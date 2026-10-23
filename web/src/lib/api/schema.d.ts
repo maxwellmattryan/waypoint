@@ -511,6 +511,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/packets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /packets/{id}`: one application packet. */
+        get: operations["get_packet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pending-actions": {
         parameters: {
             query?: never;
@@ -614,6 +631,43 @@ export interface paths {
          *     already waiting or running.
          */
         post: operations["score_posting_fit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/postings/{id}/packet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * `POST /postings/{id}/packet`: queues a `prep_packet` run for the posting, or returns the
+         *     one already waiting or running.
+         */
+        post: operations["prepare_posting_packet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/postings/{id}/packets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /postings/{id}/packets`: the posting's application packets and latest prep run. */
+        get: operations["list_posting_packets"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -739,7 +793,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** `POST /review-items/{id}/accept`: applies an email or fit-score review item's result. */
+        /**
+         * `POST /review-items/{id}/accept`: applies an email, fit-score or packet review item's
+         *     result.
+         */
         post: operations["accept_review_item"];
         delete?: never;
         options?: never;
@@ -904,6 +961,65 @@ export interface components {
             /** @description Required; a missing or blank value is a 422. */
             title: string;
             url?: string | null;
+        };
+        /** @description One `application_packets` row, with its posting's company and title. */
+        ApplicationPacket: {
+            /** @description The five answers, in question order. */
+            answers: components["schemas"]["PacketAnswer"][];
+            /** @description The posting's company. */
+            company: string;
+            /**
+             * Format: double
+             * @description The model's confidence, 0 to 1.
+             */
+            confidence: number;
+            /**
+             * Format: double
+             * @description The model call's reported cost in US dollars.
+             */
+            cost_usd: number;
+            /** Format: date-time */
+            created_at: string;
+            fit_band: null | components["schemas"]["FitBand"];
+            /**
+             * Format: int32
+             * @description That score, 0 to 100; `null` when the posting wasn't scored.
+             */
+            fit_score: number | null;
+            /**
+             * Format: int64
+             * @description The posting's applied fit score when the packet was prepared; `null` when there was
+             *     none or it has been deleted.
+             */
+            fit_score_id: number | null;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            posting_id: number;
+            /** @description The chosen resume's name when the packet was prepared. */
+            resume_name: string;
+            /** @description Why that resume, one to four reasons. */
+            resume_reasons: components["schemas"]["PacketReason"][];
+            /**
+             * Format: int64
+             * @description The chosen resume version; `null` once it has been deleted.
+             */
+            resume_version_id: number | null;
+            /**
+             * Format: int64
+             * @description The `prep_packet.packet` review item, if the packet went to review.
+             */
+            review_item_id: number | null;
+            /**
+             * Format: int64
+             * @description The `prep_packet` run that prepared it.
+             */
+            run_id: number;
+            status: components["schemas"]["PacketStatus"];
+            /** @description The posting's title. */
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         /**
          * @description Where an application is in the process.
@@ -1438,6 +1554,39 @@ export interface components {
             /** @description Required; trimmed, at most 200 characters. */
             name: string;
         };
+        /** @description One answer, as stored. */
+        PacketAnswer: {
+            /** @description The drafted answer; `null` when it is missing (nothing grounded it). */
+            answer: string | null;
+            /** @description Up to four citations; none for a missing answer. */
+            citations: components["schemas"]["FitCitation"][];
+            key: components["schemas"]["PacketQuestion"];
+            /** @description The question's text. */
+            question: string;
+        };
+        /**
+         * @description One of the fixed application questions a packet answers.
+         * @enum {string}
+         */
+        PacketQuestion: "work_authorization" | "notice_period" | "salary_expectation" | "why_leaving" | "why_company";
+        /** @description The `POST /postings/{id}/packet` answer, and what [`queue`] returns. */
+        PacketQueued: {
+            /** @description Whether this run was already waiting or running rather than a new one. */
+            reused: boolean;
+            /** @description The `prep_packet` run that will prepare the packet. */
+            run: components["schemas"]["Run"];
+        };
+        /** @description One checked resume reason, as stored. */
+        PacketReason: {
+            /** @description One to four citations. */
+            citations: components["schemas"]["FitCitation"][];
+            text: string;
+        };
+        /**
+         * @description Where a packet is.
+         * @enum {string}
+         */
+        PacketStatus: "ready" | "in_review" | "dismissed";
         /**
          * @description One `pending_actions` row: an `external` tool call waiting for, or past, the user's
          *     decision.
@@ -1492,6 +1641,18 @@ export interface components {
             posting_id: number;
             run: null | components["schemas"]["FitRun"];
         };
+        /** @description The `GET /postings/{id}/packets` body. */
+        PostingPackets: {
+            /** @description Up to 20 packets, newest first. */
+            packets: components["schemas"]["ApplicationPacket"][];
+            /** Format: int64 */
+            posting_id: number;
+            run: null | components["schemas"]["FitRun"];
+            /** @description Whether the posting has an applied fit score, so a packet can be prepared. */
+            scored: boolean;
+        };
+        /** @description The `POST /postings/{id}/packet` body: `{}`. */
+        PreparePacketRequest: Record<string, never>;
         /** @description The `POST /resumes/{id}/profile` body. */
         ProfileImportQueued: {
             /**
@@ -3959,6 +4120,50 @@ export interface operations {
             };
         };
     };
+    get_packet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The packet's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The packet with its posting's company and title. A citation's `memory_id` is `null` once its memory is deleted, and `resume_version_id` once the resume is */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationPacket"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No packet has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The packet could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_pending_actions: {
         parameters: {
             query?: never;
@@ -4326,6 +4531,121 @@ export interface operations {
                 content?: never;
             };
             /** @description The run could not be queued */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    prepare_posting_packet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The posting's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreparePacketRequest"];
+            };
+        };
+        responses: {
+            /** @description The `prep_packet` run: the one already waiting (`queued` or `paused`) or `running` with `reused: true`, or a new one (`paused` while the kill switch is on) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PacketQueued"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No posting has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The posting has no applied fit score yet; nothing was queued */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run could not be queued */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_posting_packets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The posting's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether the posting has an applied fit score, up to 20 packets (`id` descending) and the latest `prep_packet` run. A citation's `memory_id` is `null` once its memory is deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostingPackets"];
+                };
+            };
+            /** @description The `Host` header is not a local address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No posting has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The packets could not be read */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -4740,7 +5060,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created; a `score_fit.score` item's score became its posting's current score */
+            /** @description The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created; a `score_fit.score` item's score became its posting's current score; a `prep_packet.packet` item's packet became `ready` as it is */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4772,7 +5092,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, its score is no longer waiting for review, or its payload doesn't parse */
+            /** @description Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, its score or packet is no longer waiting for review, or its payload doesn't parse */
             409: {
                 headers: {
                     [name: string]: unknown;

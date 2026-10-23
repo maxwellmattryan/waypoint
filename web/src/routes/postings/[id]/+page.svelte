@@ -7,7 +7,9 @@
 	import PostingFitPanel from '#lib/components/postings/PostingFitPanel.svelte';
 	import { Button, EmptyState, Link, Skeleton } from '#lib/components/ui';
 	import { getDashboard } from '#lib/dashboard/dashboard.svelte.js';
+	import PostingPacketsPanel from '#lib/components/packets/PostingPacketsPanel.svelte';
 	import { motionDuration } from '#lib/motion.js';
+	import { PostingPacketsStore } from '#lib/packets/packets.svelte.js';
 	import { PostingDetailStore, PostingFitStore } from '#lib/postings/postings.svelte.js';
 
 	const client = createApiClient();
@@ -23,11 +25,13 @@
 
 	let store = $state<PostingDetailStore | null>(null);
 	let fitStore = $state<PostingFitStore | null>(null);
+	let packetsStore = $state<PostingPacketsStore | null>(null);
 
 	$effect(() => {
 		if (id === null) {
 			store = null;
 			fitStore = null;
+			packetsStore = null;
 			return;
 		}
 		const next = new PostingDetailStore(id, { client });
@@ -36,10 +40,17 @@
 		const nextFit = new PostingFitStore(id, { client });
 		fitStore = nextFit;
 		void nextFit.load();
-		const unsubscribe = dashboard.subscribe((event) => nextFit.handle(event));
+		const nextPackets = new PostingPacketsStore(id, { client });
+		packetsStore = nextPackets;
+		void nextPackets.load();
+		const unsubscribe = dashboard.subscribe((event) => {
+			nextFit.handle(event);
+			nextPackets.handle(event);
+		});
 		return () => {
 			unsubscribe();
 			nextFit.destroy();
+			nextPackets.destroy();
 		};
 	});
 
@@ -88,6 +99,16 @@
 							starting={fitStore.starting}
 							onscore={() => fitStore?.score()}
 							onreload={() => fitStore?.load()}
+						/>
+					{/if}
+				{/snippet}
+				{#snippet packets()}
+					{#if packetsStore}
+						<PostingPacketsPanel
+							state={packetsStore.state}
+							starting={packetsStore.starting}
+							onprepare={() => packetsStore?.prepare()}
+							onreload={() => packetsStore?.load()}
 						/>
 					{/if}
 				{/snippet}

@@ -1,6 +1,8 @@
 //! The `job_postings` routes: `GET /postings` (filtered, newest first, paged on `id`),
 //! `GET /postings/{id}`, and a posting's fit scores, `GET /postings/{id}/fit` and
-//! `POST /postings/{id}/fit` ([`crate::workflows::score_fit`]). The list leaves out
+//! `POST /postings/{id}/fit` ([`crate::workflows::score_fit`]), and its application
+//! packets, `GET /postings/{id}/packets`, `GET /packets/{id}` and
+//! `POST /postings/{id}/packet` ([`crate::workflows::prep_packet`]). The list leaves out
 //! `description`, which can run to 100,000 characters, so a page stays small; each
 //! posting carries its current fit score. See `docs/sourcing.md`.
 
@@ -21,6 +23,9 @@ use crate::host::{LocalHost, NotCrossSite};
 use crate::jobs::Wake;
 use crate::memories::{filter, present};
 use crate::runs;
+use crate::workflows::prep_packet::{
+    self, ApplicationPacket, PacketQueued, PostingPackets, PreparePacketRequest, QueueError,
+};
 use crate::workflows::score_fit::{self, FitBand, PostingFit, ScoreFitQueued, ScoreFitRequest};
 
 const BAD_FLAG: &str = "Must be true or false";
@@ -377,4 +382,116 @@ pub async fn score(
         Status::Accepted,
         Json(ScoreFitQueued { run, reused: false }),
     ))
+}
+
+/// `GET /postings/{id}/packets`: the posting's application packets and latest prep run.
+#[utoipa::path(
+    get,
+    path = "/postings/{id}/packets",
+    tag = "sourcing",
+    operation_id = "list_posting_packets",
+    params(("id" = i64, Path, description = "The posting's id")),
+    responses(
+        (status = 200, description = "Whether the posting has an applied fit score, up to 20 packets (`id` descending) and the latest `prep_packet` run. A citation's `memory_id` is `null` once its memory is deleted", body = PostingPackets),
+        (status = 403, description = "The `Host` header is not a local address"),
+        (status = 404, description = "No posting has this id"),
+        (status = 500, description = "The packets could not be read"),
+    )
+)]
+#[rocket::get("/postings/<id>/packets")]
+pub async fn packets(
+    _host: LocalHost,
+    id: i64,
+    pool: &State<PgPool>,
+) -> Result<Json<PostingPackets>, ApiError> {
+    let failed = |err: sqlx::Error| internal("read a posting's packets")(err);
+    let exists: Option<i32> = sqlx::query_scalar("SELECT 1 FROM job_postings WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool.inner())
+        .await
+        .map_err(failed)?;
+    if exists.is_none() {
+        return Err(ApiError::NotFound);
+    }
+    prep_packet::posting_packets(pool, id)
+        .await
+        .map(Json)
+        .map_err(failed)
+}
+
+/// `GET /packets/{id}`: one application packet.
+#[utoipa::path(
+    get,
+    path = "/packets/{id}",
+    tag = "sourcing",
+    operation_id = "get_packet",
+    params(("id" = i64, Path, description = "The packet's id")),
+    responses(
+        (status = 200, description = "The packet with its posting's company and title. A citation's `memory_id` is `null` once its memory is deleted, and `resume_version_id` once the resume is", body = ApplicationPacket),
+        (status = 403, description = "The `Host` header is not a local address"),
+        (status = 404, description = "No packet has this id"),
+        (status = 500, description = "The packet could not be read"),
+    )
+)]
+#[rocket::get("/packets/<id>")]
+pub async fn show_packet(
+    _host: LocalHost,
+    id: i64,
+    pool: &State<PgPool>,
+) -> Result<Json<ApplicationPacket>, ApiError> {
+    prep_packet::get_packet(pool, id)
+        .await
+        .map_err(internal("read a packet"))?
+        .map(Json)
+        .ok_or(ApiError::NotFound)
+}
+
+/// `POST /postings/{id}/packet`: queues a `prep_packet` run for the posting, or returns the
+/// one already waiting or running.
+#[utoipa::path(
+    post,
+    path = "/postings/{id}/packet",
+    tag = "sourcing",
+    operation_id = "prepare_posting_packet",
+    params(("id" = i64, Path, description = "The posting's id")),
+    request_body = PreparePacketRequest,
+    responses(
+        (status = 202, description = "The `prep_packet` run: the one already waiting (`queued` or `paused`) or `running` with `reused: true`, or a new one (`paused` while the kill switch is on)", body = PacketQueued),
+        (status = 400, description = "The body is not valid JSON for this route", body = ValidationErrors),
+        (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
+        (status = 404, description = "No posting has this id"),
+        (status = 409, description = "The posting has no applied fit score yet; nothing was queued"),
+        (status = 415, description = "The body is not `application/json`"),
+        (status = 500, description = "The run could not be queued"),
+    )
+)]
+#[allow(clippy::too_many_arguments)]
+#[rocket::post("/postings/<id>/packet", data = "<body>")]
+pub async fn prepare_packet(
+    _host: LocalHost,
+    _site: NotCrossSite,
+    _json: JsonContent,
+    id: i64,
+    pool: &State<PgPool>,
+    bus: &State<EventBus>,
+    wake: &State<Wake>,
+    body: Result<Json<PreparePacketRequest>, json::Error<'_>>,
+) -> Result<(Status, Json<PacketQueued>), ApiError> {
+    let PreparePacketRequest {} = parsed(body)?;
+    let failed = |err: sqlx::Error| internal("queue a packet")(err);
+    let mut tx = pool.begin().await.map_err(failed)?;
+    let queued = match prep_packet::queue(&mut tx, bus, id).await {
+        Ok(queued) => queued,
+        Err(QueueError::NotFound) => return Err(ApiError::NotFound),
+        Err(QueueError::NotScored) => return Err(ApiError::Conflict),
+        Err(QueueError::Database(err)) => return Err(failed(err)),
+    };
+    tx.commit().await.map_err(failed)?;
+    if !queued.reused {
+        bus.publish(Event::RunUpdated {
+            run: queued.run.clone(),
+        });
+        wake.0.notify_one();
+    }
+    Ok((Status::Accepted, Json(queued)))
 }

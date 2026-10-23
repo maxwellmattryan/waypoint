@@ -43,6 +43,10 @@ use crate::sourcing::postings::{self, JobPosting, JobPostingDetail};
 use crate::sourcing::{self, Source, SourceBoardQueued, SourceBoardRequest};
 use crate::tools::Permission;
 use crate::workflows::memory_writer::{self, MemoryWriterQueued};
+use crate::workflows::prep_packet::{
+    ApplicationPacket, PacketAnswer, PacketQuestion, PacketQueued, PacketReason, PacketStatus,
+    PostingPackets, PreparePacketRequest,
+};
 use crate::workflows::score_fit::{
     CitationSource, FitBand, FitCitation, FitReason, FitRun, FitScore, FitStance, FitStatus,
     PostingFit, ScoreFitQueued, ScoreFitRequest,
@@ -98,6 +102,9 @@ use crate::workflows::tidy::{self, TidyRequest};
         postings::show,
         postings::fit,
         postings::score,
+        postings::packets,
+        postings::show_packet,
+        postings::prepare_packet,
         runs::list,
         runs::show,
         approvals::list,
@@ -162,6 +169,14 @@ use crate::workflows::tidy::{self, TidyRequest};
         PostingFit,
         ScoreFitRequest,
         ScoreFitQueued,
+        PacketQuestion,
+        PacketStatus,
+        PacketReason,
+        PacketAnswer,
+        ApplicationPacket,
+        PostingPackets,
+        PreparePacketRequest,
+        PacketQueued,
         ValidationErrors,
         FieldError,
         ResumeVersion,
