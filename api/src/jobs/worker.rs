@@ -11,11 +11,12 @@ use sqlx::PgPool;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
-use super::{AGENT_RUN, CAPTURE_EXTRACT, Config, Job, TEST_PROMPT};
+use super::{AGENT_RUN, CAPTURE_EXTRACT, Config, Job, RESUME_PROFILE, TEST_PROMPT};
 use crate::capture::{self, llm::LlmError};
 use crate::claude::{ClaudeError, ClaudeRequest, ClaudeRunner};
 use crate::events::{Event, EventBus};
-use crate::runs;
+use crate::profile::resume::ImportError;
+use crate::{profile, runs};
 
 /// The delay before retry number `attempt` (1-based): `base * 2^(attempt-1)`, capped at
 /// `cap`. It saturates instead of overflowing.
@@ -241,6 +242,7 @@ async fn dispatch(ctx: &Context, job: &Job) -> JobOutcome {
     match job.kind.as_str() {
         TEST_PROMPT => test_prompt(ctx, &job.payload).await,
         CAPTURE_EXTRACT => capture_extract(ctx, &job.payload).await,
+        RESUME_PROFILE => resume_profile(ctx, &job.payload).await,
         AGENT_RUN => runs::execute(&ctx.pool, &ctx.runner, &ctx.runtime, &ctx.bus, job)
             .await
             .into(),
@@ -287,6 +289,18 @@ async fn capture_extract(ctx: &Context, payload: &Value) -> JobOutcome {
             JobOutcome::Fail(format!("invalid {CAPTURE_EXTRACT} payload: {err}"))
         }
         Err(LlmError::Claude(err)) => claude_failure(&err),
+    }
+}
+
+/// `resume_profile`: Claude reads a resume version; the result is a `ProfileImportSummary`.
+async fn resume_profile(ctx: &Context, payload: &Value) -> JobOutcome {
+    match profile::resume::import(&ctx.runner, &ctx.pool, payload).await {
+        Ok(result) => JobOutcome::Done(result),
+        Err(ImportError::Fail(err)) => JobOutcome::Fail(err),
+        Err(ImportError::Claude(err)) => claude_failure(&err),
+        Err(ImportError::Database(err)) => {
+            JobOutcome::Retry(format!("cannot store the resume import: {err}"))
+        }
     }
 }
 

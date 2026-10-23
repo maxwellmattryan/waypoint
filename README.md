@@ -136,6 +136,8 @@ curl -s 'http://127.0.0.1:8000/memories?kind=preference&q=remote'
 curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://127.0.0.1:8000/memories/1   # 204
 ```
 
+**Import LinkedIn** on the Memory page reads the positions, skills and education in a LinkedIn data export into confirmed facts, and **Add to profile** on a resume's page has Claude read that version into proposed ones. Re-importing adds no duplicates and never changes a memory you edited. [docs/profile-import.md](docs/profile-import.md) covers both routes, the limits, the content format and the dedupe rules.
+
 ## Model calls
 
 Waypoint calls Claude through your Claude subscription, not the API. Every call spawns the [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI (`claude -p`) in an empty temp directory with no tools and no saved session, and logs the model, tokens, duration and reported cost to the `claude_calls` table. Install the CLI and log in once with `claude` before using any model-backed feature.
