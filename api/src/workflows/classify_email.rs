@@ -10,8 +10,12 @@
 //! 5. stores a valid answer as `classified`, with time zones normalized;
 //! 6. stores an answer that breaks V1 or V2 as `invalid` and fails the run.
 //!
-//! Nothing here changes an application or creates a review item: later workflows read the
-//! stored rows. [`crate::email::ingest`] queues the runs.
+//! Nothing here changes an application or creates a review item. [`crate::email::ingest`]
+//! queues the runs. A run ingest queued (its input has `input_key`) that stores a
+//! `classified` row, or finds one already stored, also queues the classification's one
+//! `match_email` run ([`queue_match`]) in the same transaction, which matches it to an
+//! application and acts on it ([`super::match_email`]). Eval and manual runs (no
+//! `input_key`) queue nothing.
 
 use std::fmt;
 use std::path::{Component, Path};
@@ -28,8 +32,9 @@ use crate::claude::ClaudeRequest;
 use crate::email::heuristics::KnownCompanies;
 use crate::email::{self, NewEmail, Source};
 use crate::evals::Suite;
-use crate::events::EventBus;
+use crate::events::{Event, EventBus};
 use crate::runs::{self, Run, StepContext, StepError, Workflow};
+use crate::workflows::match_email;
 
 /// The workflow's name.
 pub const WORKFLOW: &str = "classify_email";
@@ -206,6 +211,60 @@ pub(crate) async fn queue(
         .execute(&mut **tx)
         .await?;
     Ok(Some(run))
+}
+
+/// Inside `tx`: stores classification `classification_id`'s `pending` match row and queues
+/// its `match_email` run, unless the row already exists, so each classification is matched
+/// once. Returns the queued run; the caller publishes it after the commit, and the worker
+/// picks it up on its next poll.
+pub(crate) async fn queue_match(
+    tx: &mut Transaction<'_, Postgres>,
+    bus: &EventBus,
+    classification_id: i64,
+    email_id: i64,
+) -> sqlx::Result<Option<Run>> {
+    let inserted: Option<i64> = sqlx::query_scalar(
+        "INSERT INTO email_matches (classification_id, email_id) VALUES ($1, $2) \
+         ON CONFLICT (classification_id) DO NOTHING RETURNING id",
+    )
+    .bind(classification_id)
+    .bind(email_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = inserted else {
+        return Ok(None);
+    };
+    let run = runs::insert_run(
+        tx,
+        bus,
+        match_email::WORKFLOW,
+        &[match_email::STEP],
+        json!({"classification_id": classification_id}),
+        Duration::ZERO,
+    )
+    .await?;
+    sqlx::query("UPDATE email_matches SET run_id = $2, updated_at = now() WHERE id = $1")
+        .bind(row)
+        .bind(run.id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(Some(run))
+}
+
+/// [`queue_match`] in a transaction of its own, publishing the queued run.
+async fn queue_match_now(
+    pool: &PgPool,
+    bus: &EventBus,
+    classification_id: i64,
+    email_id: i64,
+) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
+    let queued = queue_match(&mut tx, bus, classification_id, email_id).await?;
+    tx.commit().await?;
+    if let Some(run) = queued {
+        bus.publish(Event::RunUpdated { run });
+    }
+    Ok(())
 }
 
 /// The `--json-schema`: every key required, nothing else, at every level.
@@ -860,7 +919,15 @@ async fn classify(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, Step
     .fetch_one(&pool)
     .await
     .map_err(db("store the classification"))?;
+    let bus = ctx.bus().clone();
+    // Only runs ingest queued go on to matching.
+    let queues_match = input.input_key.is_some();
     if row.status == "classified" {
+        if queues_match {
+            queue_match_now(&pool, &bus, row.id, row.email_id)
+                .await
+                .map_err(db("queue the match"))?;
+        }
         return Ok(row.output());
     }
 
@@ -876,6 +943,8 @@ async fn classify(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, Step
 
     match validate(&response, email.sent_at) {
         Ok(classified) => {
+            let store = db("store the classification");
+            let mut tx = pool.begin().await.map_err(store)?;
             let stored: Option<Row> = sqlx::query_as(&format!(
                 "UPDATE email_classifications SET status = 'classified', class = $2, \
                  confidence = $3, company = $4, role = $5, stage = $6, interviewer = $7, \
@@ -894,9 +963,19 @@ async fn classify(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, Step
             .bind(json!(classified.issues))
             .bind(run_id)
             .bind(call.log_id)
-            .fetch_optional(&pool)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(db("store the classification"))?;
+            let mut queued = None;
+            if queues_match && let Some(row) = &stored {
+                queued = queue_match(&mut tx, &bus, row.id, row.email_id)
+                    .await
+                    .map_err(db("queue the match"))?;
+            }
+            tx.commit().await.map_err(db("store the classification"))?;
+            if let Some(run) = queued {
+                bus.publish(Event::RunUpdated { run });
+            }
             Ok(stored.map_or_else(|| superseded(email.id), |row| row.output()))
         }
         Err(reasons) => {

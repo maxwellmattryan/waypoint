@@ -18,6 +18,11 @@
 #                 model call during that relay), record into <record_dir>/inner and play
 #                 success.jsonl.
 #   mcp_<name>    like mcp, relaying mcp_<name>_requests.jsonl instead
+#   classify_by_email  answer per email: play the fixture of the first line of
+#                 classify_by_email.tsv (`<needle>TAB<file>.jsonl[TAB<seconds>]`, `#` lines
+#                 are comments) whose needle `grep -F` finds in this call's stdin, after
+#                 sleeping <seconds> when given, else classify_email_other.jsonl.
+#                 Concurrent calls each read their own stdin.
 set -eu
 
 mode=$1
@@ -53,10 +58,33 @@ if [ -n "${ANTHROPIC_API_KEY+x}" ] || [ -n "${ANTHROPIC_AUTH_TOKEN+x}" ]; then
 else
 	echo unset >"$record/env_api_key"
 fi
-# Reads to EOF, so the runner must close stdin for the fake to go on.
-cat >"$record/stdin"
+# Reads to EOF, so the runner must close stdin for the fake to go on. This call's copy
+# stays its own; `stdin` is the latest call's.
+own_stdin="$record/stdin.$$"
+cat >"$own_stdin"
+cp "$own_stdin" "$record/stdin"
+if [ "$mode" != classify_by_email ]; then
+	rm -f "$own_stdin"
+fi
 
 case $mode in
+classify_by_email)
+	answer=classify_email_other.jsonl
+	delay=""
+	while IFS="	" read -r needle file wait; do
+		case $needle in '' | '#'*) continue ;; esac
+		if grep -qF -- "$needle" "$own_stdin"; then
+			answer=$file
+			delay=$wait
+			break
+		fi
+	done <"$fixtures/classify_by_email.tsv"
+	if [ -n "$delay" ]; then
+		sleep "$delay"
+	fi
+	rm -f "$own_stdin"
+	cat "$fixtures/$answer"
+	;;
 slow)
 	sleep 1
 	cat "$fixtures/success.jsonl"

@@ -14,7 +14,7 @@ use sqlx::PgPool;
 use waypoint_api::events::EventBus;
 use waypoint_api::jobs::Wake;
 use waypoint_api::runs;
-use waypoint_api::workflows::{self, match_email};
+use waypoint_api::workflows::{self, classify_email, match_email};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 /// Every seeded email's `sent_at`.
@@ -1020,4 +1020,280 @@ async fn accept_refuses_cross_site_and_form_posts(pool: PgPool) {
     assert_eq!(item_state(&pool, item).await, ("pending".into(), false));
     assert_eq!(status_of(&pool, stark).await, "applied");
     assert_eq!(counts(&pool).await, (0, 0));
+}
+
+/// Stores an email from `from_address` (no classification) and returns its id and current
+/// input key.
+async fn seed_unclassified(pool: &PgPool, provider_id: &str, from_address: &str) -> (i64, String) {
+    let thread: i64 = sqlx::query_scalar(
+        "INSERT INTO email_threads (subject, subject_key) VALUES ('Hello', 'hello') RETURNING id",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("insert a thread");
+    let sent_at = instant(SENT_AT);
+    let headers = json!([{"name": "Date", "value": sent_at.to_rfc2822()}]);
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO emails (source, provider_message_id, thread_id, from_address, subject, \
+         sent_at, headers, raw, body_text, body_source, verdict, verdict_reasons, \
+         normalizer_version, heuristics_version) \
+         VALUES ('fixture', $1, $2, $3, 'Hello', $4, $5, '\\x00', 'Hi', 'plain', 'candidate', \
+         '[]', 1, 1) RETURNING id",
+    )
+    .bind(provider_id)
+    .bind(thread)
+    .bind(from_address)
+    .bind(sent_at)
+    .bind(headers)
+    .fetch_one(pool)
+    .await
+    .expect("insert an email");
+    let key = classify_email::input_key(&classify_email::KeyInput {
+        subject: "Hello",
+        from_address: Some(from_address),
+        from_name: None,
+        sent_at: Some(sent_at),
+        body_text: "Hi",
+        signature: None,
+        ats: None,
+    });
+    (id, key)
+}
+
+/// Starts a `classify_email` run with `input` and returns its id.
+async fn start_classify(pool: &PgPool, input: Value) -> i64 {
+    runs::start(
+        pool,
+        &EventBus::default(),
+        &Wake::default(),
+        &workflows::runtime(),
+        classify_email::WORKFLOW,
+        input,
+    )
+    .await
+    .expect("start a run")
+    .id
+}
+
+/// `(id, status, input)` of every `match_email` run, oldest first.
+async fn match_runs(pool: &PgPool) -> Vec<(i64, String, Value)> {
+    sqlx::query_as(
+        "SELECT id, status, input FROM agent_runs WHERE workflow = 'match_email' ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read the match runs")
+}
+
+/// `(classification_id, run_id)` of every match row, oldest first.
+async fn match_rows(pool: &PgPool) -> Vec<(i64, Option<i64>)> {
+    sqlx::query_as("SELECT classification_id, run_id FROM email_matches ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .expect("read the match rows")
+}
+
+#[sqlx::test]
+async fn classification_queues_one_match_run(pool: PgPool) {
+    let (_client, _fake) = app_with(&pool, "classify_by_email").await;
+
+    // A run ingest queued (with its key) queues one match run for its classification.
+    let (email, key) = seed_unclassified(&pool, "dana", "dana@soylent.example").await;
+    let input = json!({"email_id": email, "input_key": key});
+    let classified = until(
+        &pool,
+        start_classify(&pool, input.clone()).await,
+        "succeeded",
+    )
+    .await;
+    let classification = classified["classification_id"]
+        .as_i64()
+        .expect("a classification");
+    let runs = match_runs(&pool).await;
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert_eq!(runs[0].2, json!({"classification_id": classification}));
+    assert_eq!(match_rows(&pool).await, [(classification, Some(runs[0].0))]);
+    // That run matches it: no company, so nothing to do.
+    let output = until(&pool, runs[0].0, "succeeded").await;
+    assert_eq!(output["status"], "unmatched", "{output}");
+
+    // Rerunning the classify run (the "already classified" path) queues no second one.
+    until(&pool, start_classify(&pool, input).await, "succeeded").await;
+    assert_eq!(match_runs(&pool).await.len(), 1);
+
+    // A run without a key (an eval case or a manual start) queues none.
+    let (manual, _) = seed_unclassified(&pool, "manual", "jo@initech.example").await;
+    until(
+        &pool,
+        start_classify(&pool, json!({"email_id": manual})).await,
+        "succeeded",
+    )
+    .await;
+    assert_eq!(match_runs(&pool).await.len(), 1);
+
+    // Nor does an invalid answer.
+    let (invalid, key) = seed_unclassified(&pool, "invalid", "invalid-answer@test.example").await;
+    let run = start_classify(&pool, json!({"email_id": invalid, "input_key": key})).await;
+    until(&pool, run, "failed").await;
+    assert_eq!(match_runs(&pool).await.len(), 1);
+    assert_eq!(match_rows(&pool).await.len(), 1);
+
+    // With the kill switch turned on during the model call, the match run is stored paused.
+    let (slow, key) = seed_unclassified(&pool, "slow", "slow-answer@test.example").await;
+    let run = start_classify(&pool, json!({"email_id": slow, "input_key": key})).await;
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        let running: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM run_steps WHERE run_id = $1 AND status = 'running')",
+        )
+        .bind(run)
+        .fetch_one(&pool)
+        .await
+        .expect("read the step");
+        if running {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "the step never ran");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    sqlx::query("UPDATE kill_switch SET paused = true, updated_at = now() WHERE id")
+        .execute(&pool)
+        .await
+        .expect("turn the kill switch on");
+    until(&pool, run, "succeeded").await;
+    let runs = match_runs(&pool).await;
+    assert_eq!(runs.len(), 2, "{runs:?}");
+    assert_eq!(runs[1].1, "paused");
+}
+
+/// Waits until no run is queued or running.
+async fn settled(pool: &PgPool) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let busy = count(
+            pool,
+            "SELECT count(*) FROM agent_runs WHERE status IN ('queued', 'running')",
+        )
+        .await;
+        if busy == 0 {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{busy} run(s) never settled"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn create_application(client: &Client, company: &str, title: &str) -> i64 {
+    let (status, body) = post(
+        client,
+        "/applications",
+        Some(json!({"company": company, "title": title, "status": "applied"})),
+    )
+    .await;
+    assert_eq!(status, Status::Created, "{body}");
+    body["id"].as_i64().expect("an id")
+}
+
+#[sqlx::test]
+async fn fixture_import_flows_to_application_updates(pool: PgPool) {
+    let (client, _fake) = app_with(&pool, "classify_by_email").await;
+    let vandelay = create_application(&client, "Vandelay Industries", "Senior Engineer").await;
+    let hooli = create_application(&client, "Hooli", "Backend Engineer").await;
+    let stark = create_application(&client, "Stark Industries", "Software Engineer").await;
+
+    let response = client
+        .post("/dev/emails/import-fixtures")
+        .header(host())
+        .header(Header::new("X-Waypoint-Dev", "1"))
+        .dispatch()
+        .await;
+    assert_eq!(response.status(), Status::Ok);
+    settled(&pool).await;
+
+    let unsettled = count(
+        &pool,
+        "SELECT count(*) FROM agent_runs WHERE status <> 'succeeded'",
+    )
+    .await;
+    assert_eq!(unsettled, 0, "every classify and match run succeeded");
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM agent_runs WHERE workflow = 'match_email'"
+        )
+        .await,
+        count(
+            &pool,
+            "SELECT count(*) FROM agent_runs WHERE workflow = 'classify_email'"
+        )
+        .await,
+        "one match run per classification"
+    );
+
+    assert_eq!(status_of(&pool, vandelay).await, "rejected");
+    assert_eq!(status_of(&pool, hooli).await, "interviewing");
+    assert_eq!(
+        stages_of(&client, hooli).await,
+        [("Technical interview".into(), 0)]
+    );
+    assert_eq!(status_of(&pool, stark).await, "applied");
+
+    let logged = actions(&pool).await;
+    assert_eq!(logged.len(), 3, "{logged:?}");
+    assert!(logged.iter().all(|(_, _, undo)| *undo), "{logged:?}");
+    let items: Vec<(String, Value)> = sqlx::query_as(
+        "SELECT kind, payload FROM review_items WHERE status = 'pending' ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read the review items");
+    let mut kinds: Vec<&str> = items.iter().map(|(kind, _)| kind.as_str()).collect();
+    kinds.sort_unstable();
+    assert_eq!(kinds, ["email.match", "email.new_application"]);
+    for (kind, payload) in &items {
+        if kind == "email.match" {
+            assert_eq!(payload["application_id"], json!(stark), "{payload}");
+            assert_eq!(payload["review_reasons"], json!(["low_confidence"]));
+        } else {
+            assert_eq!(
+                payload["application"],
+                json!({"company": "Globex", "title": "Data Engineer", "status": "applied"})
+            );
+        }
+    }
+
+    let events = get(&client, &format!("/applications/{vandelay}/events")).await;
+    let changed = events
+        .as_array()
+        .expect("an array")
+        .iter()
+        .find(|event| event["kind"] == "status_changed")
+        .expect("a status change");
+    let email: i64 =
+        sqlx::query_scalar("SELECT id FROM emails WHERE provider_message_id = 'ashby-rejection'")
+            .fetch_one(&pool)
+            .await
+            .expect("the rejection email");
+    assert_eq!(
+        changed["source_email"],
+        json!({"id": email, "subject": "Update on your application to Vandelay Industries",
+               "from_name": "Vandelay Industries", "from_address": "no-reply@ashbyhq.com",
+               "sent_at": "2026-09-10T21:45:00Z"})
+    );
+
+    // Undoing the rejection over HTTP restores the application.
+    let action: i64 = sqlx::query_scalar(
+        "SELECT id FROM agent_actions WHERE tool = 'set_application_status' \
+         AND (undo_data ->> 'application_id')::bigint = $1",
+    )
+    .bind(vandelay)
+    .fetch_one(&pool)
+    .await
+    .expect("the rejection's action");
+    let (status, body) = post(&client, &format!("/actions/{action}/undo"), None).await;
+    assert_eq!(status, Status::Ok, "{body}");
+    assert_eq!(status_of(&pool, vandelay).await, "applied");
 }
