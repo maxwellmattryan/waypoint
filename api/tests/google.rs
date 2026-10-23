@@ -44,6 +44,9 @@ fn config(server: &MockServer) -> google::Config {
             base_url: server.uri(),
             ..Default::default()
         },
+        calendar: waypoint_api::calendar::Config {
+            base_url: server.uri(),
+        },
     }
 }
 

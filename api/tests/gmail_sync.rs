@@ -196,6 +196,9 @@ fn google_config(server: &MockServer, gmail: gmail::Config) -> google::Config {
         revoke_url: format!("{}/revoke", server.uri()),
         redirect_uri: google::config::redirect_uri(8000),
         gmail,
+        calendar: waypoint_api::calendar::Config {
+            base_url: server.uri(),
+        },
     }
 }
 

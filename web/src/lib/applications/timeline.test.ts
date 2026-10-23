@@ -31,7 +31,14 @@ const cases: [Partial<ApplicationEvent>, string][] = [
 	[{ kind: 'stage_reopened', stage_name: 'Onsite' }, 'Stage reopened: Onsite'],
 	[{ kind: 'stage_removed', stage_name: 'Recruiter screen' }, 'Stage removed: Recruiter screen'],
 	[{ kind: 'note', body: 'Called back' }, 'Note'],
-	[{ kind: 'rejection_feedback', body: 'Too junior' }, 'Rejection feedback']
+	[{ kind: 'rejection_feedback', body: 'Too junior' }, 'Rejection feedback'],
+	[
+		{
+			kind: 'interview_scheduled',
+			body: 'Interview: Hooli — Onsite · 2030-11-03 14:00–14:45 America/New_York'
+		},
+		'Interview added to Google Calendar'
+	]
 ];
 
 describe('describeEvent', () => {

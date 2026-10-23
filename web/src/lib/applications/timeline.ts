@@ -24,6 +24,8 @@ export function describeEvent(event: ApplicationEvent): string {
 			return 'Note';
 		case 'rejection_feedback':
 			return 'Rejection feedback';
+		case 'interview_scheduled':
+			return 'Interview added to Google Calendar';
 	}
 }
 

@@ -3,6 +3,7 @@
 pub mod classify_email;
 pub mod match_email;
 pub mod memory_writer;
+pub mod propose_interview;
 pub mod tidy;
 
 use std::sync::Arc;
