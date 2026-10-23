@@ -2200,6 +2200,155 @@
         }
       }
     },
+    "/postings": {
+      "get": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "`GET /postings`: sourced postings matching every given filter.",
+        "operationId": "list_postings",
+        "parameters": [
+          {
+            "name": "company",
+            "in": "query",
+            "description": "Only postings whose company contains this text, ignoring case; blank means any",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Only postings from this board provider; blank means any",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Source"
+            }
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "description": "Only postings whose raw location, city, region or country contains this text, ignoring case; blank means any",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "remote",
+            "in": "query",
+            "description": "`true` for only remote postings, `false` for only non-remote ones; blank means any",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "include_removed",
+            "in": "query",
+            "description": "`true` also returns postings the board stopped listing; absent, blank or `false` hides them",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Most postings to return; default 50, clamped to 1..=200",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only postings with an `id` below this one, for the next page",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Postings without their `description`, `id` descending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobPosting"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "422": {
+            "description": "`source` is not a known value, or `remote` or `include_removed` is not `true` or `false`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The postings could not be read"
+          }
+        }
+      }
+    },
+    "/postings/{id}": {
+      "get": {
+        "tags": [
+          "sourcing"
+        ],
+        "summary": "`GET /postings/{id}`: one posting with its description.",
+        "operationId": "get_posting",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The posting's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The posting and its plain-text description, removed or not",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobPostingDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No posting has this id"
+          },
+          "500": {
+            "description": "The posting could not be read"
+          }
+        }
+      }
+    },
     "/profile/linkedin": {
       "post": {
         "tags": [
@@ -3910,6 +4059,166 @@
           }
         }
       },
+      "JobPosting": {
+        "type": "object",
+        "description": "One `job_postings` row without its `description`.",
+        "required": [
+          "id",
+          "source",
+          "board",
+          "external_id",
+          "title",
+          "company",
+          "url",
+          "apply_url",
+          "department",
+          "employment_type",
+          "location_raw",
+          "city",
+          "region",
+          "country",
+          "remote",
+          "posted_at",
+          "first_seen_at",
+          "last_seen_at",
+          "created_at",
+          "updated_at",
+          "removed_at"
+        ],
+        "properties": {
+          "apply_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to apply, when the board gives a separate link."
+          },
+          "board": {
+            "type": "string",
+            "description": "The board's slug, as in its board URL."
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The city parsed from the location."
+          },
+          "company": {
+            "type": "string"
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The country parsed from the location."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "department": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "employment_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external_id": {
+            "type": "string",
+            "description": "The posting's id on the board."
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When Waypoint first saw the posting."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The last successful fetch that listed the posting."
+          },
+          "location_raw": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The board's location text, as given."
+          },
+          "posted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the board says the posting was published or last updated."
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The region or state parsed from the location."
+          },
+          "remote": {
+            "type": "boolean",
+            "description": "Whether the posting is remote."
+          },
+          "removed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the board stopped listing the posting; `null` while it's listed."
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source",
+            "description": "The board's provider."
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "type": "string",
+            "description": "The posting's page on the board."
+          }
+        }
+      },
+      "JobPostingDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/JobPosting"
+          },
+          {
+            "type": "object",
+            "required": [
+              "description"
+            ],
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "The posting's description as plain text; can be empty."
+              }
+            }
+          }
+        ],
+        "description": "The `GET /postings/{id}` body: the posting with its description."
+      },
       "KillSwitch": {
         "type": "object",
         "description": "The kill switch: the `GET /kill-switch` body.",
@@ -4929,6 +5238,15 @@
           "add",
           "remove",
           "replace"
+        ]
+      },
+      "Source": {
+        "type": "string",
+        "description": "A public job board this module reads.",
+        "enum": [
+          "greenhouse",
+          "lever",
+          "ashby"
         ]
       },
       "SourceBoardQueued": {

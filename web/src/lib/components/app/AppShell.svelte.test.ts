@@ -14,6 +14,7 @@ function renderAt(pathname: string) {
 	return {
 		dashboard: screen.getByRole('link', { name: 'Dashboard' }),
 		applications: screen.getByRole('link', { name: 'Applications' }),
+		postings: screen.getByRole('link', { name: 'Postings' }),
 		resumes: screen.getByRole('link', { name: 'Resumes' }),
 		memory: screen.getByRole('link', { name: 'Memory' }),
 		review: screen.getByRole('link', { name: 'Review' }),
@@ -26,6 +27,8 @@ describe('AppShell', () => {
 		['/', 'dashboard'],
 		['/applications', 'applications'],
 		['/applications/42', 'applications'],
+		['/postings', 'postings'],
+		['/postings/9', 'postings'],
 		['/resumes', 'resumes'],
 		['/resumes/7', 'resumes'],
 		['/memories', 'memory'],
@@ -39,12 +42,21 @@ describe('AppShell', () => {
 		expect(links.dashboard).toHaveAttribute('href', '/');
 		expect(links.applications).toHaveAttribute('href', '/applications');
 		expect(links.resumes).toHaveAttribute('href', '/resumes');
+		expect(links.nav).toContainElement(links.postings);
+		expect(links.postings).toHaveAttribute('href', '/postings');
 		expect(links.nav).toContainElement(links.review);
 		expect(links.review).toHaveAttribute('href', '/review');
 		expect(links.nav).toContainElement(links.memory);
 		expect(links.memory).toHaveAttribute('href', '/memories');
 
-		for (const name of ['dashboard', 'applications', 'resumes', 'memory', 'review'] as const) {
+		for (const name of [
+			'dashboard',
+			'applications',
+			'postings',
+			'resumes',
+			'memory',
+			'review'
+		] as const) {
 			if (name === section) expect(links[name]).toHaveAttribute('aria-current', 'page');
 			else expect(links[name]).not.toHaveAttribute('aria-current');
 		}
@@ -53,6 +65,11 @@ describe('AppShell', () => {
 	it('does not treat a path that only starts with the same letters as Applications', () => {
 		const links = renderAt('/applicationsx');
 		expect(links.applications).not.toHaveAttribute('aria-current');
+	});
+
+	it('does not treat a path that only starts with the same letters as Postings', () => {
+		const links = renderAt('/postingsx');
+		expect(links.postings).not.toHaveAttribute('aria-current');
 	});
 
 	it('does not treat a path that only starts with the same letters as Resumes', () => {

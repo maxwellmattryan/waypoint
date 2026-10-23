@@ -5,6 +5,7 @@
 
 pub mod boards;
 pub mod location;
+pub mod postings;
 pub mod store;
 pub mod text;
 
@@ -39,23 +40,16 @@ pub enum Source {
     Ashby,
 }
 
-impl Source {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Greenhouse => "greenhouse",
-            Self::Lever => "lever",
-            Self::Ashby => "ashby",
-        }
-    }
+crate::memories::text_enum!(Source, "source", [
+    Greenhouse => "greenhouse",
+    Lever => "lever",
+    Ashby => "ashby",
+]);
 
+impl Source {
     /// The exact lowercase name, as `as_str` gives it.
     pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "greenhouse" => Some(Self::Greenhouse),
-            "lever" => Some(Self::Lever),
-            "ashby" => Some(Self::Ashby),
-            _ => None,
-        }
+        Self::try_from(s.to_string()).ok()
     }
 }
 

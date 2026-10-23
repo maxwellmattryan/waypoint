@@ -116,6 +116,8 @@ pub fn rocket(
                 applications::timeline::add_entry,
                 capture::capture,
                 sourcing::source_board,
+                sourcing::postings::list,
+                sourcing::postings::show,
                 jobs::show,
                 runs::list,
                 runs::show,

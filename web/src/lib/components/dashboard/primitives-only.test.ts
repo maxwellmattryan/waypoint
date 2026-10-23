@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 // AGENTS.md invariants for screens: interactive elements come from the primitives (which bake in
 // cursor and state styles), and spacing stays on the 4px grid. Covers the app shell, the dashboard
-// cards, the applications, resumes, memories, runs and review components and pages, and the root
-// layout and page.
+// cards, the applications, resumes, memories, runs, review and postings components and pages, and
+// the root layout and page.
 const sources = import.meta.glob(
 	[
 		'../app/*.svelte',
@@ -13,13 +13,15 @@ const sources = import.meta.glob(
 		'../memories/*.svelte',
 		'../runs/*.svelte',
 		'../review/*.svelte',
+		'../postings/*.svelte',
 		'/src/routes/+layout.svelte',
 		'/src/routes/+page.svelte',
 		'/src/routes/applications/**/*.svelte',
 		'/src/routes/resumes/**/*.svelte',
 		'/src/routes/memories/**/*.svelte',
 		'/src/routes/runs/**/*.svelte',
-		'/src/routes/review/**/*.svelte'
+		'/src/routes/review/**/*.svelte',
+		'/src/routes/postings/**/*.svelte'
 	],
 	{ query: '?raw', import: 'default', eager: true }
 ) as Record<string, string>;
@@ -91,7 +93,14 @@ describe('primitives only', () => {
 				'/src/lib/components/review/RejectActionDialog.svelte',
 				'/src/lib/components/review/ReviewItemCard.svelte',
 				'/src/lib/components/review/RunLink.svelte',
-				'/src/routes/review/+page.svelte'
+				'/src/routes/review/+page.svelte',
+				'/src/lib/components/postings/PostingBadges.svelte',
+				'/src/lib/components/postings/PostingDetailView.svelte',
+				'/src/lib/components/postings/PostingFilters.svelte',
+				'/src/lib/components/postings/PostingListItem.svelte',
+				'/src/lib/components/postings/SourceCompanyDialog.svelte',
+				'/src/routes/postings/+page.svelte',
+				'/src/routes/postings/[id]/+page.svelte'
 			])
 		);
 		const offenders = files.flatMap((file) =>
