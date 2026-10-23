@@ -39,6 +39,7 @@ describe('primitives only', () => {
 				'/src/lib/components/dashboard/ClaudeCard.svelte',
 				'/src/lib/components/dashboard/DataCard.svelte',
 				'/src/lib/components/dashboard/DeleteAllDataDialog.svelte',
+				'/src/lib/components/dashboard/GmailSyncCard.svelte',
 				'/src/lib/components/dashboard/GoogleCard.svelte',
 				'/src/lib/components/dashboard/SystemCard.svelte',
 				'/src/lib/components/applications/ApplicationBoard.svelte',

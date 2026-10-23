@@ -42,6 +42,11 @@ fn google_config(server: &MockServer) -> google::Config {
         token_url: format!("{}/token", server.uri()),
         revoke_url: format!("{}/revoke", server.uri()),
         redirect_uri: google::config::redirect_uri(8000),
+        // Startup catch-up may sync against the mock, never the real Gmail.
+        gmail: waypoint_api::gmail::Config {
+            base_url: server.uri(),
+            ..Default::default()
+        },
     }
 }
 
@@ -129,6 +134,15 @@ fn host() -> Header<'static> {
 }
 
 async fn client(pool: &PgPool, google: google::Config) -> Client {
+    // A sync that just finished, so the worker's startup catch-up never queues a Gmail
+    // sync for the account a test seeds; `DELETE /data` must empty this table too.
+    sqlx::query(
+        "INSERT INTO gmail_sync_state (id, last_finished_at) VALUES (true, now()) \
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .execute(pool)
+    .await
+    .expect("seed the Gmail sync state");
     let rocket = waypoint_api::rocket(
         rocket::Config::figment(),
         pool.clone(),
@@ -189,6 +203,7 @@ fn spawn_worker(
         config,
         wake: wake.0.clone(),
         runtime,
+        google: Google::new(google::Config::default()),
     }
     .spawn(stopped);
     (fake, stop)

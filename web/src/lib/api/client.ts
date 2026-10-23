@@ -106,6 +106,12 @@ export type SourceKind = components['schemas']['SourceKind'];
 export type ProfileImportSummary = components['schemas']['ProfileImportSummary'];
 /** The `POST /resumes/{id}/profile` body: the import job, new or reused. */
 export type ProfileImportQueued = components['schemas']['ProfileImportQueued'];
+/** The `GET /gmail/sync` body: whether a Gmail sync is pending and the last run's outcome. */
+export type GmailSyncStatus = components['schemas']['GmailSyncStatus'];
+/** The `POST /gmail/sync` body: the sync's job, new or reused. */
+export type GmailSyncQueued = components['schemas']['GmailSyncQueued'];
+/** How a Gmail sync run reads the mailbox. */
+export type SyncMode = components['schemas']['SyncMode'];
 
 export type ApiClient = ReturnType<typeof createClient<paths>>;
 

@@ -1,13 +1,15 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { GoogleStatus, Job } from '#lib/api';
-import type { TestState } from '#lib/dashboard/dashboard.svelte.js';
+import type { GmailSyncStatus, GoogleStatus, Job } from '#lib/api';
+import type { GoogleState, TestState } from '#lib/dashboard/dashboard.svelte.js';
+import { formatDateTime } from '#lib/applications/format.js';
 import { toast } from '#lib/components/ui';
 import AgentsCard from './AgentsCard.svelte';
 import ClaudeCard from './ClaudeCard.svelte';
 import DataCard from './DataCard.svelte';
 import DeleteAllDataDialog from './DeleteAllDataDialog.svelte';
+import GmailSyncCard from './GmailSyncCard.svelte';
 import GoogleCard from './GoogleCard.svelte';
 import SystemCard from './SystemCard.svelte';
 
@@ -113,6 +115,120 @@ describe('GoogleCard', () => {
 
 		await rerender({ google: { kind: 'loading' } });
 		expect(screen.getByTestId('google-loading')).toBeInTheDocument();
+	});
+});
+
+function gmailSync(overrides: Partial<GmailSyncStatus> = {}): GmailSyncStatus {
+	return {
+		activity: 'idle',
+		next_run_at: null,
+		mode: null,
+		run_started_at: null,
+		last_finished_at: null,
+		last_error: null,
+		last_error_at: null,
+		run: { seen: 0, inserted: 0, updated: 0, oversized: 0, failed: 0, vanished: 0 },
+		emails_stored: 0,
+		...overrides
+	};
+}
+
+/** The paragraph whose whole text (child elements included) is `text`. */
+function paragraph(text: string): HTMLElement {
+	return screen.getByText(
+		(_, el) => el?.tagName === 'P' && el.textContent?.replace(/\s+/g, ' ').trim() === text
+	);
+}
+
+describe('GmailSyncCard', () => {
+	it('GmailSyncCard states', async () => {
+		const user = userEvent.setup();
+		const onsync = vi.fn();
+		const connected: GoogleState = { kind: 'loaded', status: google({ state: 'connected' }) };
+		const loaded = (overrides: Partial<GmailSyncStatus> = {}) =>
+			({ kind: 'loaded', status: gmailSync(overrides) }) as const;
+		const syncNow = () => screen.getByRole('button', { name: 'Sync now' });
+
+		const { rerender } = render(GmailSyncCard, {
+			gmailSync: { kind: 'loading' },
+			google: connected,
+			syncing: false,
+			onsync
+		});
+		expect(screen.getByTestId('gmail-loading')).toBeInTheDocument();
+		expect(screen.queryByRole('button')).toBeNull();
+
+		await rerender({ gmailSync: { kind: 'error' } });
+		expect(screen.getByText("Couldn't load the Gmail sync status.")).toBeInTheDocument();
+
+		// Not connected, not configured and reconnect required: the button is disabled.
+		for (const status of [
+			google({}),
+			google({ configured: false }),
+			google({ state: 'reconnect_required' })
+		]) {
+			await rerender({ gmailSync: loaded(), google: { kind: 'loaded', status } });
+			expect(screen.getByText('Connect Google to sync Gmail.')).toBeInTheDocument();
+			expect(syncNow()).toBeDisabled();
+		}
+
+		// Connected, never synced.
+		await rerender({ gmailSync: loaded(), google: connected });
+		expect(screen.getByText('Not synced yet.')).toBeInTheDocument();
+		await user.click(syncNow());
+		expect(onsync).toHaveBeenCalledOnce();
+		await rerender({ syncing: true });
+		expect(syncNow()).toBeDisabled();
+		await rerender({ syncing: false });
+
+		// Running: badge, mode and the counts so far.
+		const run = { seen: 9, inserted: 5, updated: 2, oversized: 1, failed: 1, vanished: 0 };
+		await rerender({ gmailSync: loaded({ activity: 'running', mode: 'backfill', run }) });
+		expect(screen.getByTestId('gmail-status')).toHaveTextContent('Syncing');
+		expect(screen.getByText('Backfilling the last 30 days')).toBeInTheDocument();
+		expect(screen.getByTestId('gmail-counts')).toHaveTextContent(/Stored\s*7/);
+		expect(screen.getByTestId('gmail-counts')).toHaveTextContent(/Skipped \(too large\)\s*1/);
+		expect(syncNow()).toBeDisabled();
+
+		await rerender({ gmailSync: loaded({ activity: 'queued', mode: 'incremental', run }) });
+		expect(screen.getByTestId('gmail-status')).toHaveTextContent('Queued');
+		expect(screen.getByText('Catching up')).toBeInTheDocument();
+		expect(screen.queryByText(/Waiting for Gmail's rate limit/)).toBeNull();
+		expect(syncNow()).toBeDisabled();
+
+		// Queued behind a rate limit.
+		const until = new Date(Date.now() + 60_000).toISOString();
+		await rerender({
+			gmailSync: loaded({ activity: 'queued', mode: 'resync', next_run_at: until, run })
+		});
+		expect(screen.getByText('Resyncing (history expired)')).toBeInTheDocument();
+		expect(
+			paragraph(`Waiting for Gmail's rate limit until ${formatDateTime(until)}`)
+		).toBeInTheDocument();
+
+		// Idle after a run, then with a last error.
+		const finished = '2026-10-22T09:30:00Z';
+		await rerender({
+			gmailSync: loaded({ mode: 'backfill', last_finished_at: finished, emails_stored: 42, run })
+		});
+		expect(screen.queryByTestId('gmail-status')).toBeNull();
+		expect(paragraph(`Last synced ${formatDateTime(finished)}`)).toBeInTheDocument();
+		expect(screen.getByTestId('gmail-counts')).toHaveTextContent(/Emails stored\s*42/);
+		expect(screen.getByTestId('gmail-counts')).toHaveTextContent(/7 stored, 1 skipped/);
+		expect(screen.queryByTestId('gmail-error')).toBeNull();
+		expect(syncNow()).toBeEnabled();
+
+		await rerender({
+			gmailSync: loaded({
+				mode: 'incremental',
+				last_finished_at: finished,
+				last_error: 'Gmail answered HTTP 500',
+				last_error_at: finished
+			})
+		});
+		expect(screen.getByTestId('gmail-error')).toHaveTextContent('Gmail answered HTTP 500');
+		await user.click(syncNow());
+		expect(onsync).toHaveBeenCalledTimes(2);
 	});
 });
 

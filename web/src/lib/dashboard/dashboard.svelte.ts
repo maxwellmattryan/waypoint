@@ -6,12 +6,16 @@ import {
 	type ApiClient,
 	type DataDeletion,
 	type Event,
+	type GmailSyncStatus,
 	type GoogleStatus,
 	type Job,
 	type KillSwitch
 } from '#lib/api';
 import { toast } from '#lib/components/ui';
 import { inFlight, newerJob, phaseOfEvent, phaseOfJob, type JobPhase } from './job';
+
+/** The job kind of each Gmail sync page. */
+const GMAIL_SYNC = 'gmail_sync';
 
 /** The live-connection state of the `/events` stream. */
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting';
@@ -28,6 +32,12 @@ export type GoogleState =
 	| { kind: 'loading' }
 	| { kind: 'error' }
 	| { kind: 'loaded'; status: GoogleStatus };
+
+/** The Gmail sync, from `GET /gmail/sync`. */
+export type GmailSyncState =
+	| { kind: 'loading' }
+	| { kind: 'error' }
+	| { kind: 'loaded'; status: GmailSyncStatus };
 
 /** The kill switch, from `GET /kill-switch`. */
 export type KillSwitchState =
@@ -54,13 +64,16 @@ export interface DashboardDeps {
 /**
  * The dashboard's state and data flow: one instance per app, shared by the shell's
  * connection badge and the dashboard page. `start()` opens the event stream; every
- * `app.connected` (re)loads health, Google, the kill switch and the tracked job, since
- * there is no replay.
+ * `app.connected` (re)loads health, Google, the Gmail sync, the kill switch and the tracked
+ * job, since there is no replay.
  */
 export class Dashboard {
 	connection = $state<ConnectionState>('connecting');
 	health = $state<HealthState>({ kind: 'loading' });
 	google = $state<GoogleState>({ kind: 'loading' });
+	gmailSync = $state<GmailSyncState>({ kind: 'loading' });
+	/** Whether a "Sync now" request is in flight. */
+	syncingGmail = $state(false);
 	killSwitch = $state<KillSwitchState>({ kind: 'loading' });
 	/** Whether a kill-switch change is in flight. */
 	savingKillSwitch = $state(false);
@@ -139,6 +152,25 @@ export class Dashboard {
 	}
 
 	/**
+	 * "Sync now" (`POST /gmail/sync`): refetches the sync status on 202, and shows an error
+	 * toast otherwise. A second call while one is in flight does nothing.
+	 */
+	async syncGmail(): Promise<void> {
+		if (this.syncingGmail) return;
+		this.syncingGmail = true;
+		try {
+			const { data, response } = await this.#deps.client.POST('/gmail/sync');
+			if (data) await this.#loadGmailSync();
+			else if (response.status === 409) toast.error('Connect Google before syncing Gmail.');
+			else toast.error("Couldn't start the Gmail sync.");
+		} catch {
+			toast.error("Couldn't start the Gmail sync.");
+		} finally {
+			this.syncingGmail = false;
+		}
+	}
+
+	/**
 	 * Deletes all data (`DELETE /data`). Resolves the body on success; on failure shows an
 	 * error toast and resolves `null`. The success toasts are the caller's.
 	 */
@@ -172,6 +204,7 @@ export class Dashboard {
 				this.connection = 'live';
 				void this.#loadHealth();
 				void this.#loadGoogle();
+				void this.#loadGmailSync();
 				void this.#loadKillSwitch();
 				void this.#refreshJob();
 				return;
@@ -183,6 +216,7 @@ export class Dashboard {
 				return;
 			case 'data.deleted':
 				void this.#loadGoogle();
+				void this.#loadGmailSync();
 				void this.#loadKillSwitch();
 				return;
 			case 'queue.paused':
@@ -198,6 +232,7 @@ export class Dashboard {
 			case 'run.updated':
 				return;
 			default:
+				if (event.job.kind === GMAIL_SYNC) void this.#loadGmailSync();
 				this.#applyJob(event.job, phaseOfEvent(event.type), true);
 		}
 	}
@@ -256,6 +291,15 @@ export class Dashboard {
 			this.killSwitch = data ? { kind: 'loaded', state: data } : { kind: 'error' };
 		} catch {
 			this.killSwitch = { kind: 'error' };
+		}
+	}
+
+	async #loadGmailSync(): Promise<void> {
+		try {
+			const { data } = await this.#deps.client.GET('/gmail/sync');
+			this.gmailSync = data ? { kind: 'loaded', status: data } : { kind: 'error' };
+		} catch {
+			this.gmailSync = { kind: 'error' };
 		}
 	}
 
