@@ -185,6 +185,44 @@
           {"step": "draft", "memory_id": "${memory_m3}"}
         ]
       }
+    },
+    {
+      "name": "draft: confirmed preference changes the draft, fact doesn't",
+      "setup": {
+        "application": {"company": "Stark", "title": "Rust Engineer"},
+        "memories": [
+          {"name": "pref", "kind": "preference", "topic": "location", "content": "Stark Rust roles: remote only"},
+          {"name": "fact", "kind": "fact", "topic": "other", "content": "Stark is in Malibu"}
+        ]
+      },
+      "input": {"application_id": "${application_id}", "note": "Applied", "message": "Following up", "confidence": 0.9},
+      "expect": {
+        "status": "awaiting_approval",
+        "pending_actions": [
+          {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Following up\n\nStark Rust roles: remote only"}}
+        ],
+        "memories": [
+          {"step": "draft", "memory_id": "${memory_pref}"},
+          {"step": "draft", "memory_id": "${memory_fact}"}
+        ]
+      }
+    },
+    {
+      "name": "draft: proposed memory leaves the draft unchanged",
+      "setup": {
+        "application": {"company": "Wayne", "title": "Data Engineer"},
+        "memories": [
+          {"name": "proposed", "kind": "preference", "topic": "location", "content": "Wayne data roles: remote only", "status": "proposed"}
+        ]
+      },
+      "input": {"application_id": "${application_id}", "note": "Applied", "message": "Checking in", "confidence": 0.9},
+      "expect": {
+        "status": "awaiting_approval",
+        "pending_actions": [
+          {"tool": "draft_follow_up", "status": "pending", "input": {"application_id": "${application_id}", "message": "Checking in"}}
+        ],
+        "memories": []
+      }
     }
   ]
 }

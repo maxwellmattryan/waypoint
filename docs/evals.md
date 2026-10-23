@@ -138,6 +138,8 @@ The guardrail cases check that a confident note (0.9, and exactly 0.8) is applie
 
 The `recall:` cases check the `draft` step's retrieval: a relevant memory is retrieved and an unrelated one isn't, a proposed memory with matching words isn't, the memory sharing more terms with the query ranks first, a memory whose only match is a tag equal to the company is retrieved, no shared term retrieves nothing, and seven matching memories give exactly five rows.
 
+The `draft:` cases check that the `draft` step appends confirmed `answer` and `preference` memories to the drafted message: a matching confirmed preference is appended to the pending `draft_follow_up` input's message while a matching confirmed fact is retrieved and recorded but left out of it, and a matching proposed preference leaves the message exactly as the run input's with nothing retrieved.
+
 ## The `memory_writer` eval set
 
 `api/evals/memory_writer.json` covers the [memory writer](memory-writer.md). Every case but the last calls the real model once, so it costs a few cents per run. Setup takes `{"memories": [...], "signals": [...]}`, both optional. It first deletes every signal, evidence row and memory, then inserts the memories as the `tidy_application` set does (returning `memory_<name>`) and then each signal, `{"name", "kind", "subject", "drafted", "approved"?, "reason"?}`, returning its id as `signal_<name>`. Signals get run id 0 and their 1-based position as their pending action or review item id. An approval's `changes` is the diff from `drafted` to `approved`, and an approval without `approved` is an unedited one (`changes: []`). `approved` on anything but an approval, or `reason` on anything but a dismissal, is a setup error.
