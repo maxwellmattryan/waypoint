@@ -159,23 +159,40 @@ pub async fn fetch(capturer: &Capturer, source: Source, board: &str) -> Result<F
             (take_array(&mut answer, "jobs")?, 1)
         }
     };
-    let (postings, skipped) = collect(source, board, &entries);
+    let fetched = entries.len();
+    // Parsing every description's HTML is CPU-bound, so it stays off the async workers.
+    let owned = board.to_string();
+    let (postings, skipped) = tokio::task::spawn_blocking(move || collect(source, &owned, entries))
+        .await
+        .map_err(|err| format!("the mapping task failed: {err}"))?;
     Ok(Fetched {
         postings,
-        fetched: entries.len(),
+        fetched,
         skipped,
         pages,
     })
 }
 
-/// Maps every entry, counting the ones that don't map, and dedupes on `external_id` with
-/// the last entry winning (in the first one's place).
-pub fn collect(source: Source, board: &str, entries: &[Value]) -> (Vec<Posting>, usize) {
+/// Removes U+0000 from every string in `value`. Postgres `text` can't hold it, so one
+/// posting carrying it would fail the whole board's save on every run.
+fn strip_nul(value: &mut Value) {
+    match value {
+        Value::String(text) if text.contains('\0') => text.retain(|ch| ch != '\0'),
+        Value::Array(items) => items.iter_mut().for_each(strip_nul),
+        Value::Object(fields) => fields.values_mut().for_each(strip_nul),
+        _ => {}
+    }
+}
+
+/// Strips U+0000 from every entry, maps it, counts the ones that don't map, and dedupes
+/// on `external_id` with the last entry winning (in the first one's place).
+pub fn collect(source: Source, board: &str, entries: Vec<Value>) -> (Vec<Posting>, usize) {
     let mut postings: Vec<Posting> = Vec::new();
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut skipped = 0;
-    for entry in entries {
-        let Some(posting) = map(source, entry, board) else {
+    for mut entry in entries {
+        strip_nul(&mut entry);
+        let Some(posting) = map(source, &entry, board) else {
             skipped += 1;
             continue;
         };
@@ -406,7 +423,7 @@ mod tests {
             "../../tests/fixtures/sourcing/ashby_board.json"
         ));
 
-        let (greenhouse, skipped) = collect(Source::Greenhouse, board, &entries(&greenhouse_board));
+        let (greenhouse, skipped) = collect(Source::Greenhouse, board, entries(&greenhouse_board));
         assert_eq!(skipped, 0);
         assert_eq!(
             greenhouse,
@@ -459,7 +476,7 @@ mod tests {
             ]
         );
 
-        let (lever, skipped) = collect(Source::Lever, board, &lever_board);
+        let (lever, skipped) = collect(Source::Lever, board, lever_board.clone());
         assert_eq!(skipped, 0);
         assert_eq!(lever.len(), 5);
         assert_eq!(
@@ -506,7 +523,7 @@ mod tests {
         );
         assert_eq!(lever[4].posted_at, at("2026-10-05T10:00:00Z"));
 
-        let (ashby, skipped) = collect(Source::Ashby, board, &entries(&ashby_board));
+        let (ashby, skipped) = collect(Source::Ashby, board, entries(&ashby_board));
         assert_eq!(skipped, 1, "the unlisted job");
         assert_eq!(
             ashby,
@@ -574,10 +591,25 @@ mod tests {
             ),
             gh[2].clone(),
         ];
-        let (deduped, skipped) = collect(Source::Greenhouse, board, &edge_cases);
+        let (deduped, skipped) = collect(Source::Greenhouse, board, edge_cases);
         assert_eq!(skipped, 5);
         let titles: Vec<&str> = deduped.iter().map(|p| p.title.as_str()).collect();
         assert_eq!(titles, ["Lead Product Designer", "Recruiter"]);
+
+        // U+0000 anywhere in an entry is dropped before mapping, so it never reaches a
+        // `text` column.
+        let nul = parse(
+            r#"{"id": "40\u000012345", "title": "Senior\u0000 Backend Engineer",
+                "company_name": "Example\u0000 Labs Inc.",
+                "absolute_url": "https://job-boards.greenhouse.io/example-labs/jobs/4012345\u0000",
+                "location": {"name": "New York,\u0000 NY"},
+                "departments": [{"name": "Engi\u0000neering"}],
+                "content": "&lt;p&gt;Build &amp;amp; ship\u0000 the platform.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Rust&lt;/li&gt;&lt;li&gt;Post\u0000gres&lt;/li&gt;&lt;/ul&gt;",
+                "first_published": "2026-09-15T13:00:00Z"}"#,
+        );
+        let (stripped, skipped) = collect(Source::Greenhouse, board, vec![nul]);
+        assert_eq!(skipped, 0);
+        assert_eq!(stripped, greenhouse[..1]);
 
         let lever_no_url = edit(&lever_board[0], "hostedUrl", Value::Null);
         assert_eq!(super::lever(&lever_no_url, board), None);

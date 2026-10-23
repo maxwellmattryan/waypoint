@@ -371,8 +371,7 @@ async fn failed_fetch_changes_nothing(pool: PgPool) {
 
     // Page 2 answers 500 on every attempt; page 3 is never asked for.
     server.reset().await;
-    let changed: Value = serde_json::from_str(LEVER_PAGES[0]).expect("fixture parses");
-    let mut changed = changed;
+    let mut changed: Value = serde_json::from_str(LEVER_PAGES[0]).expect("fixture parses");
     changed[0]["text"] = json!("Retitled");
     serve_lever_page(&server, "0", json_body(&changed.to_string()), 3).await;
     serve_lever_page(&server, "2", ResponseTemplate::new(500), 3).await;

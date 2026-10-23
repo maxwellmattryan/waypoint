@@ -65,7 +65,7 @@ The API bases are `https://boards-api.greenhouse.io`, `https://api.lever.co` and
 | `description` | `content`, which is HTML escaped once, decoded and then turned into text | `description`, then each of `lists[]` as its `text` heading line followed by its items, then `additional`, separated by blank lines | `descriptionHtml` as text, else `descriptionPlain` |
 | `posted_at` | `first_published`, else `updated_at` | `createdAt` (epoch milliseconds) | `publishedAt` |
 
-Text fields have their entities decoded and whitespace collapsed, are at most 200 characters, and are `null` when blank. `url` must be an absolute http or https URL of at most 2048 characters, or the entry is skipped. An `apply_url` that fails the same check is stored as `null`. A `posted_at` that doesn't parse is stored as `null`.
+Text fields have their entities decoded and whitespace collapsed, are at most 200 characters, and are `null` when blank. `url` must be an absolute http or https URL of at most 2048 characters, or the entry is skipped. An `apply_url` that fails the same check is stored as `null`. A `posted_at` that doesn't parse is stored as `null`. Every NUL character (U+0000) in an entry is dropped before mapping, since Postgres text can't store it.
 
 HTML descriptions become plain text: `script`, `style`, `noscript`, `template` and `svg` are dropped, paragraphs, headings, lists, tables and block quotes are separated by a blank line, `div`, `li`, `tr`, `pre` and `br` start a new line, each list item starts with `- `, whitespace inside a line collapses to one space, and entities are decoded. A description is at most 100,000 characters.
 
