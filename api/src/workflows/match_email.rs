@@ -38,14 +38,22 @@
 //! other candidate with ops goes to the review queue as `email.match`; no candidate but a
 //! company proposes an `email.new_application`; everything else is `unmatched`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sqlx::{PgConnection, PgPool};
 
-use crate::applications::ApplicationStatus;
 use crate::applications::stages::MAX_STAGES;
+use crate::applications::timeline::{self, EventKind};
+use crate::applications::{self, Application, ApplicationStatus, MAX_SHORT};
 use crate::email::heuristics;
-use crate::runs::REVIEW_THRESHOLD;
+use crate::events::Event;
+use crate::runs::approvals::DecisionError;
+use crate::runs::review::ReviewItem;
+use crate::runs::{REVIEW_THRESHOLD, StepContext, StepError, Workflow};
+use crate::tools::{Permission, Tool, ToolContext, ToolError, UndoError};
 use crate::workflows::classify_email::EmailClass;
 
 /// The workflow's name.
@@ -475,6 +483,1047 @@ pub fn route(choice: &Choice, plan: &Plan, confidence: f64, has_company: bool) -
     Route::Review(reasons)
 }
 
+/// Why an apply helper changed nothing.
+#[derive(Debug)]
+pub(crate) enum ApplyError {
+    /// The application doesn't exist.
+    Missing,
+    /// Its status isn't the one the change starts from.
+    Changed(ApplicationStatus),
+    /// It already has [`MAX_STAGES`] stages.
+    TooManyStages,
+    /// The stage name is blank or longer than 200 characters.
+    BadName,
+    Db(sqlx::Error),
+}
+
+impl From<sqlx::Error> for ApplyError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Db(err)
+    }
+}
+
+/// What `set_application_status`'s undo needs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StatusUndo {
+    application_id: i64,
+    event_id: i64,
+    from_status: ApplicationStatus,
+    to_status: ApplicationStatus,
+    previous_status_changed_at: DateTime<Utc>,
+}
+
+/// What `add_application_stage`'s undo needs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StageUndo {
+    application_id: i64,
+    stage_id: i64,
+    event_id: i64,
+}
+
+/// What [`apply_status`] did.
+#[derive(Debug)]
+pub(crate) struct StatusApplied {
+    pub event_id: i64,
+    pub changed: bool,
+    undo: Option<StatusUndo>,
+}
+
+/// What [`apply_stage`] did.
+#[derive(Debug)]
+pub(crate) struct StageApplied {
+    pub event_id: Option<i64>,
+    pub stage_id: Option<i64>,
+    pub changed: bool,
+    undo: Option<StageUndo>,
+}
+
+/// Locks application `id` for the rest of the transaction and returns its status and
+/// `status_changed_at`.
+async fn lock(
+    conn: &mut PgConnection,
+    id: i64,
+) -> Result<(ApplicationStatus, DateTime<Utc>), ApplyError> {
+    sqlx::query_as("SELECT status, status_changed_at FROM applications WHERE id = $1 FOR UPDATE")
+        .bind(id)
+        .fetch_optional(conn)
+        .await?
+        .ok_or(ApplyError::Missing)
+}
+
+/// The newest `kind` event of application `id` that email `source_email_id` caused.
+async fn sourced_event(
+    conn: &mut PgConnection,
+    id: i64,
+    kind: EventKind,
+    source_email_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT id FROM application_events WHERE application_id = $1 AND kind = $2 \
+         AND source_email_id = $3 ORDER BY id DESC LIMIT 1",
+    )
+    .bind(id)
+    .bind(kind.as_str())
+    .bind(source_email_id)
+    .fetch_optional(conn)
+    .await
+}
+
+/// Moves application `id` from `expected` to `to` because of email `source_email_id`, under
+/// the application lock: sets `status`, `status_changed_at` and `updated_at` and records a
+/// sourced `status_changed` event. When the email already caused a status change there,
+/// returns that event unchanged instead, so an email never applies twice. A status other
+/// than `expected` is [`ApplyError::Changed`]. The tool and accept both use it.
+pub(crate) async fn apply_status(
+    conn: &mut PgConnection,
+    id: i64,
+    expected: ApplicationStatus,
+    to: ApplicationStatus,
+    source_email_id: i64,
+) -> Result<StatusApplied, ApplyError> {
+    let (current, changed_at) = lock(conn, id).await?;
+    if let Some(event_id) =
+        sourced_event(conn, id, EventKind::StatusChanged, source_email_id).await?
+    {
+        return Ok(StatusApplied {
+            event_id,
+            changed: false,
+            undo: None,
+        });
+    }
+    if current != expected || expected == to {
+        return Err(ApplyError::Changed(current));
+    }
+    sqlx::query(
+        "UPDATE applications SET status = $2, status_changed_at = now(), updated_at = now() \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(to.as_str())
+    .execute(&mut *conn)
+    .await?;
+    let event = timeline::record_sourced(
+        conn,
+        id,
+        EventKind::StatusChanged,
+        Some(expected),
+        Some(to),
+        None,
+        Some(source_email_id),
+    )
+    .await?;
+    Ok(StatusApplied {
+        event_id: event.id,
+        changed: true,
+        undo: Some(StatusUndo {
+            application_id: id,
+            event_id: event.id,
+            from_status: expected,
+            to_status: to,
+            previous_status_changed_at: changed_at,
+        }),
+    })
+}
+
+/// Appends stage `name` to application `id` because of email `source_email_id`, under the
+/// application lock, and records a sourced `stage_added` event. Changes nothing (returning
+/// `changed: false`) when the email already added a stage there or a stage with that name
+/// (trimmed, any case) exists. The tool and accept both use it.
+pub(crate) async fn apply_stage(
+    conn: &mut PgConnection,
+    id: i64,
+    name: &str,
+    source_email_id: i64,
+) -> Result<StageApplied, ApplyError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > MAX_SHORT {
+        return Err(ApplyError::BadName);
+    }
+    lock(conn, id).await?;
+    let existing: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM application_stages WHERE application_id = $1 \
+         AND lower(btrim(name)) = lower($2) ORDER BY position LIMIT 1",
+    )
+    .bind(id)
+    .bind(name)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(event_id) = sourced_event(conn, id, EventKind::StageAdded, source_email_id).await? {
+        return Ok(StageApplied {
+            event_id: Some(event_id),
+            stage_id: existing,
+            changed: false,
+            undo: None,
+        });
+    }
+    if existing.is_some() {
+        return Ok(StageApplied {
+            event_id: None,
+            stage_id: existing,
+            changed: false,
+            undo: None,
+        });
+    }
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM application_stages WHERE application_id = $1")
+            .bind(id)
+            .fetch_one(&mut *conn)
+            .await?;
+    if count >= MAX_STAGES {
+        return Err(ApplyError::TooManyStages);
+    }
+    let stage_id: i64 = sqlx::query_scalar(
+        "INSERT INTO application_stages (application_id, name, position) VALUES ($1, $2, $3) \
+         RETURNING id",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(i32::try_from(count).unwrap_or(i32::MAX))
+    .fetch_one(&mut *conn)
+    .await?;
+    let event = timeline::record_sourced(
+        conn,
+        id,
+        EventKind::StageAdded,
+        None,
+        None,
+        Some(name),
+        Some(source_email_id),
+    )
+    .await?;
+    sqlx::query("UPDATE applications SET updated_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(StageApplied {
+        event_id: Some(event.id),
+        stage_id: Some(stage_id),
+        changed: true,
+        undo: Some(StageUndo {
+            application_id: id,
+            stage_id,
+            event_id: event.id,
+        }),
+    })
+}
+
+/// A tool failure for an [`ApplyError`]. A database error goes to the log rather than to
+/// the caller (its text can name tables).
+fn apply_failed(id: i64, what: &'static str) -> impl FnOnce(ApplyError) -> ToolError {
+    move |err| {
+        ToolError::Failed(match err {
+            ApplyError::Missing => format!("application {id} doesn't exist"),
+            ApplyError::Changed(status) => format!(
+                "application {id} is {} now, not the status this change starts from",
+                status.as_str()
+            ),
+            ApplyError::TooManyStages => format!("application {id} already has 50 stages"),
+            ApplyError::BadName => "the stage name must be 1 to 200 characters".into(),
+            ApplyError::Db(err) => {
+                rocket::warn!("match_email: cannot {what}: {err}");
+                format!("cannot {what}")
+            }
+        })
+    }
+}
+
+fn db_failed(what: &'static str) -> impl FnOnce(sqlx::Error) -> ToolError {
+    move |err| {
+        rocket::warn!("match_email: cannot {what}: {err}");
+        ToolError::Failed(format!("cannot {what}"))
+    }
+}
+
+fn status_schema(description: &str) -> Value {
+    let names: Vec<&str> = ApplicationStatus::ALL
+        .iter()
+        .map(|status| status.as_str())
+        .collect();
+    json!({"type": "string", "enum": names, "description": description})
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StatusInput {
+    pub application_id: i64,
+    pub status: ApplicationStatus,
+    pub expected_status: ApplicationStatus,
+    pub source_email_id: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StatusSet {
+    pub event_id: i64,
+    pub changed: bool,
+}
+
+/// `write`: moves an application to a new status because of an email. Undo restores the
+/// previous status and `status_changed_at` and deletes the event, unless the status changed
+/// since.
+pub struct SetApplicationStatus;
+
+#[rocket::async_trait]
+impl Tool for SetApplicationStatus {
+    const NAME: &'static str = "set_application_status";
+    const DESCRIPTION: &'static str =
+        "Moves an application from its expected status to a new one because of an email";
+    const PERMISSION: Permission = Permission::Write;
+    type Input = StatusInput;
+    type Output = StatusSet;
+
+    fn input_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "application_id": {"type": "integer", "description": "The application's id"},
+                "status": status_schema("The new status"),
+                "expected_status": status_schema("The status the change starts from"),
+                "source_email_id": {"type": "integer", "description": "The email that caused it"}
+            },
+            "required": ["application_id", "status", "expected_status", "source_email_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn output_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {"event_id": {"type": "integer"}, "changed": {"type": "boolean"}},
+            "required": ["event_id", "changed"],
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(
+        &self,
+        ctx: &mut ToolContext<'_>,
+        input: StatusInput,
+    ) -> Result<StatusSet, ToolError> {
+        let id = input.application_id;
+        let what = "set an application's status";
+        let mut tx = ctx.pool().begin().await.map_err(db_failed(what))?;
+        let applied = apply_status(
+            &mut tx,
+            id,
+            input.expected_status,
+            input.status,
+            input.source_email_id,
+        )
+        .await
+        .map_err(apply_failed(id, what))?;
+        tx.commit().await.map_err(db_failed(what))?;
+        if let Some(undo) = &applied.undo {
+            ctx.set_undo(json!(undo));
+        }
+        Ok(StatusSet {
+            event_id: applied.event_id,
+            changed: applied.changed,
+        })
+    }
+
+    async fn undo(&self, conn: &mut PgConnection, data: Value) -> Result<(), UndoError> {
+        let undo: StatusUndo = serde_json::from_value(data).map_err(|_| {
+            UndoError::Conflict("the undo data doesn't fit set_application_status".into())
+        })?;
+        let id = undo.application_id;
+        let current: Option<ApplicationStatus> =
+            sqlx::query_scalar("SELECT status FROM applications WHERE id = $1 FOR UPDATE")
+                .bind(id)
+                .fetch_optional(&mut *conn)
+                .await?;
+        let Some(current) = current else {
+            return Err(UndoError::Conflict(format!("application {id} is gone")));
+        };
+        if current != undo.to_status {
+            return Err(UndoError::Conflict(format!(
+                "application {id}'s status changed since"
+            )));
+        }
+        let (found, later): (bool, bool) = sqlx::query_as(
+            "SELECT EXISTS (SELECT 1 FROM application_events WHERE id = $2 \
+               AND application_id = $1 AND kind = 'status_changed'), \
+             EXISTS (SELECT 1 FROM application_events WHERE application_id = $1 \
+               AND kind = 'status_changed' AND id > $2)",
+        )
+        .bind(id)
+        .bind(undo.event_id)
+        .fetch_one(&mut *conn)
+        .await?;
+        if !found {
+            return Err(UndoError::Conflict(format!(
+                "status event {} of application {id} is gone",
+                undo.event_id
+            )));
+        }
+        if later {
+            return Err(UndoError::Conflict(format!(
+                "application {id}'s status changed again since"
+            )));
+        }
+        sqlx::query(
+            "UPDATE applications SET status = $2, status_changed_at = $3, updated_at = now() \
+             WHERE id = $1",
+        )
+        .bind(id)
+        .bind(undo.from_status.as_str())
+        .bind(undo.previous_status_changed_at)
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query("DELETE FROM application_events WHERE id = $1")
+            .bind(undo.event_id)
+            .execute(&mut *conn)
+            .await?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StageInput {
+    pub application_id: i64,
+    pub name: String,
+    pub source_email_id: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StageAdded {
+    /// The `stage_added` event; `null` when a stage with the name already existed.
+    pub event_id: Option<i64>,
+    pub stage_id: Option<i64>,
+    pub changed: bool,
+}
+
+/// `write`: appends an interview stage to an application because of an email. Undo
+/// deletes the stage and its event and closes the gap, unless the stage was completed.
+pub struct AddApplicationStage;
+
+#[rocket::async_trait]
+impl Tool for AddApplicationStage {
+    const NAME: &'static str = "add_application_stage";
+    const DESCRIPTION: &'static str =
+        "Appends an interview stage to an application because of an email";
+    const PERMISSION: Permission = Permission::Write;
+    type Input = StageInput;
+    type Output = StageAdded;
+
+    fn input_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "application_id": {"type": "integer", "description": "The application's id"},
+                "name": {"type": "string", "description": "The stage's name"},
+                "source_email_id": {"type": "integer", "description": "The email that caused it"}
+            },
+            "required": ["application_id", "name", "source_email_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn output_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "event_id": {"type": ["integer", "null"]},
+                "stage_id": {"type": ["integer", "null"]},
+                "changed": {"type": "boolean"}
+            },
+            "required": ["event_id", "stage_id", "changed"],
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(
+        &self,
+        ctx: &mut ToolContext<'_>,
+        input: StageInput,
+    ) -> Result<StageAdded, ToolError> {
+        let id = input.application_id;
+        let what = "add a stage";
+        let mut tx = ctx.pool().begin().await.map_err(db_failed(what))?;
+        let applied = apply_stage(&mut tx, id, &input.name, input.source_email_id)
+            .await
+            .map_err(apply_failed(id, what))?;
+        tx.commit().await.map_err(db_failed(what))?;
+        if let Some(undo) = &applied.undo {
+            ctx.set_undo(json!(undo));
+        }
+        Ok(StageAdded {
+            event_id: applied.event_id,
+            stage_id: applied.stage_id,
+            changed: applied.changed,
+        })
+    }
+
+    async fn undo(&self, conn: &mut PgConnection, data: Value) -> Result<(), UndoError> {
+        let undo: StageUndo = serde_json::from_value(data).map_err(|_| {
+            UndoError::Conflict("the undo data doesn't fit add_application_stage".into())
+        })?;
+        let id = undo.application_id;
+        let found: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM applications WHERE id = $1 FOR UPDATE")
+                .bind(id)
+                .fetch_optional(&mut *conn)
+                .await?;
+        if found.is_none() {
+            return Err(UndoError::Conflict(format!("application {id} is gone")));
+        }
+        let position: Option<i32> = sqlx::query_scalar(
+            "DELETE FROM application_stages WHERE id = $1 AND application_id = $2 \
+             AND completed_at IS NULL RETURNING position",
+        )
+        .bind(undo.stage_id)
+        .bind(id)
+        .fetch_optional(&mut *conn)
+        .await?;
+        let Some(position) = position else {
+            return Err(UndoError::Conflict(format!(
+                "stage {} of application {id} is gone or completed",
+                undo.stage_id
+            )));
+        };
+        sqlx::query(
+            "UPDATE application_stages SET position = position - 1 \
+             WHERE application_id = $1 AND position > $2",
+        )
+        .bind(id)
+        .bind(position)
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query(
+            "DELETE FROM application_events WHERE id = $1 AND application_id = $2 \
+             AND kind = 'stage_added'",
+        )
+        .bind(undo.event_id)
+        .bind(id)
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query("UPDATE applications SET updated_at = now() WHERE id = $1")
+            .bind(id)
+            .execute(&mut *conn)
+            .await?;
+        Ok(())
+    }
+}
+
+/// The run output, and what a finished match row reads back as. Every key is always
+/// present.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+struct Outcome {
+    email_id: Option<i64>,
+    classification_id: i64,
+    status: String,
+    /// The linked (or applied) application.
+    application_id: Option<i64>,
+    /// The top candidate's score.
+    confidence: Option<f64>,
+    reasons: Value,
+    /// The applied ops for `applied`, else the planned ones.
+    ops: Value,
+    review_item_id: Option<i64>,
+    review_kind: Option<String>,
+}
+
+impl Outcome {
+    fn skipped(classification_id: i64, email_id: Option<i64>) -> Self {
+        Self {
+            email_id,
+            classification_id,
+            status: "skipped".into(),
+            application_id: None,
+            confidence: None,
+            reasons: json!([]),
+            ops: json!([]),
+            review_item_id: None,
+            review_kind: None,
+        }
+    }
+
+    fn json(&self) -> Value {
+        json!(self)
+    }
+}
+
+/// Classification `classification_id`'s match row, as an [`Outcome`].
+async fn stored(pool: &PgPool, classification_id: i64) -> Result<Option<Outcome>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT m.email_id, m.classification_id, m.status, m.application_id, m.confidence, \
+         m.reasons, m.ops, m.review_item_id, r.kind AS review_kind \
+         FROM email_matches m LEFT JOIN review_items r ON r.id = m.review_item_id \
+         WHERE m.classification_id = $1",
+    )
+    .bind(classification_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// The classification and email columns the step reads.
+#[derive(Debug, sqlx::FromRow)]
+struct Classified {
+    id: i64,
+    email_id: i64,
+    status: String,
+    class: Option<String>,
+    confidence: Option<f64>,
+    company: Option<String>,
+    role: Option<String>,
+    stage: Option<String>,
+    thread_id: i64,
+    subject: String,
+    from_name: Option<String>,
+    from_address: Option<String>,
+    sent_at: Option<DateTime<Utc>>,
+    ats: Option<String>,
+    /// The email's newest `classified` row.
+    newest: Option<i64>,
+}
+
+impl Classified {
+    fn email(&self) -> Value {
+        json!({
+            "subject": self.subject,
+            "from_name": self.from_name,
+            "from_address": self.from_address,
+            "sent_at": self.sent_at,
+        })
+    }
+}
+
+fn db(what: &'static str) -> impl FnOnce(sqlx::Error) -> StepError {
+    move |err| StepError::Retry(format!("cannot {what}: {err}"))
+}
+
+/// The run's input.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunInput {
+    classification_id: i64,
+}
+
+/// What earlier links say about each application, for an email of `thread_id`.
+async fn histories(
+    pool: &PgPool,
+    email_id: i64,
+    thread_id: i64,
+) -> Result<HashMap<i64, History>, sqlx::Error> {
+    let links: Vec<(i64, i64, Option<String>)> = sqlx::query_as(
+        "SELECT m.application_id, e.thread_id, e.from_address FROM email_matches m \
+         JOIN emails e ON e.id = m.email_id \
+         WHERE m.status IN ('applied', 'no_action') AND m.application_id IS NOT NULL \
+         AND m.email_id <> $1",
+    )
+    .bind(email_id)
+    .fetch_all(pool)
+    .await?;
+    let mut by_application: HashMap<i64, History> = HashMap::new();
+    for (application_id, thread, from_address) in links {
+        let history = by_application.entry(application_id).or_default();
+        history.thread |= thread == thread_id;
+        if let Some(domain) = from_address.as_deref().and_then(heuristics::domain) {
+            history.domains.insert(domain.trim().to_lowercase());
+        }
+    }
+    Ok(by_application)
+}
+
+/// The `match` step; see the module docs.
+async fn match_step(ctx: &mut StepContext<'_>, input: Value) -> Result<Value, StepError> {
+    let input = RunInput::deserialize(&input)
+        .map_err(|err| StepError::Fail(format!("invalid input: {err}")))?;
+    let pool = ctx.pool().clone();
+    let classification_id = input.classification_id;
+    let found: Option<Classified> = sqlx::query_as(
+        "SELECT c.id, c.email_id, c.status, c.class, c.confidence, c.company, c.role, c.stage, \
+         e.thread_id, e.subject, e.from_name, e.from_address, e.sent_at, e.ats, \
+         (SELECT max(n.id) FROM email_classifications n \
+           WHERE n.email_id = c.email_id AND n.status = 'classified') AS newest \
+         FROM email_classifications c JOIN emails e ON e.id = c.email_id WHERE c.id = $1",
+    )
+    .bind(classification_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(db("read the classification"))?;
+    let Some(source) = found else {
+        return Ok(Outcome::skipped(classification_id, None).json());
+    };
+    let class = source.class.as_deref().and_then(EmailClass::parse);
+    let (Some(class), Some(confidence)) = (class, source.confidence) else {
+        return Ok(Outcome::skipped(classification_id, Some(source.email_id)).json());
+    };
+    if source.status != "classified" || source.newest != Some(source.id) {
+        return Ok(Outcome::skipped(classification_id, Some(source.email_id)).json());
+    }
+
+    sqlx::query(
+        "INSERT INTO email_matches (classification_id, email_id, run_id) VALUES ($1, $2, $3) \
+         ON CONFLICT (classification_id) DO NOTHING",
+    )
+    .bind(classification_id)
+    .bind(source.email_id)
+    .bind(ctx.run_id())
+    .execute(&pool)
+    .await
+    .map_err(db("store the match"))?;
+    let row = stored(&pool, classification_id)
+        .await
+        .map_err(db("read the match"))?
+        .ok_or_else(|| StepError::Retry("the match row is gone".into()))?;
+    if row.status != "pending" {
+        return Ok(row.json());
+    }
+
+    let apps: Vec<(i64, String, String, ApplicationStatus)> =
+        sqlx::query_as("SELECT id, company, title, status FROM applications ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .map_err(db("read the applications"))?;
+    let stage_rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT application_id, name FROM application_stages ORDER BY application_id, position",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(db("read the stages"))?;
+    let mut stages: HashMap<i64, Vec<String>> = HashMap::new();
+    for (application_id, name) in stage_rows {
+        stages.entry(application_id).or_default().push(name);
+    }
+    let histories = histories(&pool, source.email_id, source.thread_id)
+        .await
+        .map_err(db("read earlier matches"))?;
+
+    let facts = EmailFacts {
+        company: source.company.as_deref(),
+        role: source.role.as_deref(),
+        from_name: source.from_name.as_deref(),
+        from_address: source.from_address.as_deref(),
+    };
+    let none = History::default();
+    let scored = apps
+        .into_iter()
+        .map(|(id, company, title, status)| {
+            let app = AppFacts {
+                id,
+                company,
+                title,
+                status,
+            };
+            let scored = score(&facts, &app, histories.get(&id).unwrap_or(&none));
+            (app, scored)
+        })
+        .collect();
+    let choice = choose(scored);
+    let plan = choice
+        .top()
+        .map(|top| {
+            let names = stages
+                .get(&top.application_id)
+                .map_or(&[][..], Vec::as_slice);
+            plan(class, top.status, names, source.stage.as_deref())
+        })
+        .unwrap_or_default();
+    let routed = route(&choice, &plan, confidence, source.company.is_some());
+
+    let top = choice.top();
+    let mut outcome = Outcome {
+        email_id: Some(source.email_id),
+        classification_id,
+        status: String::new(),
+        application_id: top.filter(|_| choice.linked).map(|top| top.application_id),
+        confidence: top.map(|top| top.score),
+        reasons: json!(top.map(|top| top.reasons.clone()).unwrap_or_default()),
+        ops: json!(plan.ops),
+        review_item_id: None,
+        review_kind: None,
+    };
+    let review = |err: sqlx::Error| StepError::Retry(format!("cannot store a review item: {err}"));
+    match (&routed, top) {
+        (Route::Apply, Some(top)) => {
+            for op in &plan.ops {
+                let (tool, input) = match op {
+                    Op::SetStatus { from, to } => (
+                        SetApplicationStatus::NAME,
+                        json!({"application_id": top.application_id, "status": to,
+                               "expected_status": from, "source_email_id": source.email_id}),
+                    ),
+                    Op::AddStage { name } => (
+                        AddApplicationStage::NAME,
+                        json!({"application_id": top.application_id, "name": name,
+                               "source_email_id": source.email_id}),
+                    ),
+                };
+                ctx.tool(tool, input).await?;
+            }
+            outcome.status = "applied".into();
+        }
+        (Route::NoAction, _) => outcome.status = "no_action".into(),
+        (Route::Review(review_reasons), Some(top)) => {
+            let payload = json!({
+                "email_id": source.email_id,
+                "classification_id": classification_id,
+                "class": class,
+                "email": source.email(),
+                "application_id": top.application_id,
+                "company": top.company,
+                "title": top.title,
+                "ops": plan.ops,
+                "reasons": top.reasons,
+                "review_reasons": review_reasons,
+                "candidates": choice.candidates,
+            });
+            let item_confidence = confidence.min(top.score);
+            let id = ctx
+                .review(MATCH_REVIEW_KIND, item_confidence, payload)
+                .await
+                .map_err(review)?;
+            outcome.status = "review".into();
+            outcome.review_item_id = Some(id);
+            outcome.review_kind = Some(MATCH_REVIEW_KIND.into());
+        }
+        (Route::NewApplication, _) => {
+            let company = source.company.as_deref().unwrap_or_default();
+            let proposed = proposal(class, company, source.role.as_deref(), source.ats.is_some());
+            let payload = json!({
+                "email_id": source.email_id,
+                "classification_id": classification_id,
+                "class": class,
+                "email": source.email(),
+                "application": proposed,
+            });
+            let id = ctx
+                .review(NEW_APPLICATION_REVIEW_KIND, confidence, payload)
+                .await
+                .map_err(review)?;
+            outcome.status = "review".into();
+            outcome.review_item_id = Some(id);
+            outcome.review_kind = Some(NEW_APPLICATION_REVIEW_KIND.into());
+        }
+        _ => outcome.status = "unmatched".into(),
+    }
+
+    let updated = sqlx::query(
+        "UPDATE email_matches SET status = $2, application_id = $3, confidence = $4, \
+         reasons = $5, candidates = $6, ops = $7, review_item_id = $8, run_id = $9, \
+         updated_at = now() WHERE classification_id = $1 AND status = 'pending'",
+    )
+    .bind(classification_id)
+    .bind(&outcome.status)
+    .bind(outcome.application_id)
+    .bind(outcome.confidence)
+    .bind(&outcome.reasons)
+    .bind(json!(choice.candidates))
+    .bind(&outcome.ops)
+    .bind(outcome.review_item_id)
+    .bind(ctx.run_id())
+    .execute(&pool)
+    .await
+    .map_err(db("store the match"))?;
+    if updated.rows_affected() == 0 {
+        // Another attempt or an accept finished it first.
+        if let Some(row) = stored(&pool, classification_id)
+            .await
+            .map_err(db("read the match"))?
+        {
+            return Ok(row.json());
+        }
+    }
+
+    if routed == Route::Apply
+        && let Some(id) = outcome.application_id
+    {
+        publish_updated(ctx, &pool, id).await;
+    }
+    Ok(outcome.json())
+}
+
+/// Publishes `application.updated` with application `id`'s current row. Best effort.
+async fn publish_updated(ctx: &StepContext<'_>, pool: &PgPool, id: i64) {
+    let found = sqlx::query_as::<_, Application>(&format!(
+        "SELECT {} FROM applications WHERE id = $1",
+        applications::COLUMNS
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await;
+    match found {
+        Ok(Some(application)) => ctx.bus().publish(Event::ApplicationUpdated { application }),
+        Ok(None) => {}
+        Err(err) => rocket::warn!("match_email: cannot publish application {id}: {err}"),
+    }
+}
+
+/// The workflow. Its input is `{"classification_id"}`.
+pub struct MatchEmail;
+
+#[rocket::async_trait]
+impl Workflow for MatchEmail {
+    fn name(&self) -> &'static str {
+        WORKFLOW
+    }
+
+    fn steps(&self) -> &'static [&'static str] {
+        &[STEP]
+    }
+
+    async fn run_step(
+        &self,
+        ctx: &mut StepContext<'_>,
+        step: &str,
+        input: Value,
+    ) -> Result<Value, StepError> {
+        match step {
+            STEP => match_step(ctx, input).await,
+            other => Err(StepError::Fail(format!("no step is named {other:?}"))),
+        }
+    }
+}
+
+/// The parts of an `email.match` payload accepting reads.
+#[derive(Debug, Deserialize)]
+struct MatchPayload {
+    email_id: i64,
+    classification_id: i64,
+    application_id: i64,
+    ops: Vec<Op>,
+}
+
+/// The parts of an `email.new_application` payload accepting reads.
+#[derive(Debug, Deserialize)]
+struct NewApplicationPayload {
+    email_id: i64,
+    classification_id: i64,
+    application: Proposal,
+}
+
+/// What accepting an email review item changed.
+#[derive(Debug)]
+pub(crate) struct Accepted {
+    pub application: Application,
+    /// The application is new (`email.new_application`).
+    pub created: bool,
+}
+
+fn accept_conflict(err: ApplyError) -> DecisionError {
+    match err {
+        ApplyError::Db(err) => DecisionError::Db(err),
+        ApplyError::Missing => DecisionError::Conflict("the application is gone".into()),
+        ApplyError::Changed(status) => DecisionError::Conflict(format!(
+            "the application is {} now, not the status the change starts from",
+            status.as_str()
+        )),
+        ApplyError::TooManyStages => {
+            DecisionError::Conflict("the application already has 50 stages".into())
+        }
+        ApplyError::BadName => DecisionError::Conflict("the stage name is invalid".into()),
+    }
+}
+
+/// Marks classification `classification_id`'s match `applied` to `application_id`.
+async fn link(
+    conn: &mut PgConnection,
+    classification_id: i64,
+    application_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE email_matches SET status = 'applied', application_id = $2, updated_at = now() \
+         WHERE classification_id = $1",
+    )
+    .bind(classification_id)
+    .bind(application_id)
+    .execute(conn)
+    .await
+    .map(|_| ())
+}
+
+/// Applies a pending `email.match` or `email.new_application` item inside the caller's
+/// transaction, as the user's own change (no action, no undo): the match's ops with the
+/// email as their source, or the proposed application with a sourced `created` event. Its
+/// match row becomes `applied`. Any refusal is a [`DecisionError::Conflict`], and the
+/// caller rolls back.
+pub(crate) async fn accept(
+    conn: &mut PgConnection,
+    item: &ReviewItem,
+) -> Result<Accepted, DecisionError> {
+    let unreadable = |_| DecisionError::Conflict(format!("review item {} doesn't parse", item.id));
+    match item.kind.as_str() {
+        MATCH_REVIEW_KIND => {
+            let payload = MatchPayload::deserialize(&item.payload).map_err(unreadable)?;
+            let id = payload.application_id;
+            lock(conn, id).await.map_err(accept_conflict)?;
+            for op in &payload.ops {
+                match op {
+                    Op::SetStatus { from, to } => {
+                        apply_status(conn, id, *from, *to, payload.email_id)
+                            .await
+                            .map_err(accept_conflict)?;
+                    }
+                    Op::AddStage { name } => {
+                        apply_stage(conn, id, name, payload.email_id)
+                            .await
+                            .map_err(accept_conflict)?;
+                    }
+                }
+            }
+            link(conn, payload.classification_id, id).await?;
+            let application = sqlx::query_as(&format!(
+                "SELECT {} FROM applications WHERE id = $1",
+                applications::COLUMNS
+            ))
+            .bind(id)
+            .fetch_one(&mut *conn)
+            .await?;
+            Ok(Accepted {
+                application,
+                created: false,
+            })
+        }
+        NEW_APPLICATION_REVIEW_KIND => {
+            let payload = NewApplicationPayload::deserialize(&item.payload).map_err(unreadable)?;
+            let Proposal {
+                company,
+                title,
+                status,
+            } = payload.application;
+            let fits = |text: &str| {
+                let text = text.trim();
+                !text.is_empty() && text.chars().count() <= MAX_SHORT
+            };
+            if !fits(&company) || !fits(&title) {
+                return Err(DecisionError::Conflict(format!(
+                    "review item {} proposes an invalid application",
+                    item.id
+                )));
+            }
+            let application: Application = sqlx::query_as(&format!(
+                "INSERT INTO applications (company, title, status, source) \
+                 VALUES ($1, $2, $3, 'email') RETURNING {}",
+                applications::COLUMNS
+            ))
+            .bind(company.trim())
+            .bind(title.trim())
+            .bind(status.as_str())
+            .fetch_one(&mut *conn)
+            .await?;
+            timeline::record_sourced(
+                conn,
+                application.id,
+                EventKind::Created,
+                None,
+                Some(status),
+                None,
+                Some(payload.email_id),
+            )
+            .await?;
+            link(conn, payload.classification_id, application.id).await?;
+            Ok(Accepted {
+                application,
+                created: true,
+            })
+        }
+        other => Err(DecisionError::Conflict(format!(
+            "review items of kind {other:?} can't be accepted"
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -742,8 +1791,9 @@ mod tests {
 
     #[test]
     fn choose_cases() {
-        // (case, scored, candidate ids, ambiguous, linked)
-        let cases: Vec<(&str, Vec<(AppFacts, Scored)>, Vec<i64>, bool, bool)> = vec![
+        /// (case, scored, candidate ids, ambiguous, linked)
+        type Case = (&'static str, Vec<(AppFacts, Scored)>, Vec<i64>, bool, bool);
+        let cases: Vec<Case> = vec![
             ("nothing scored", vec![], vec![], false, false),
             (
                 "under 0.5 is no candidate",
@@ -902,14 +1952,16 @@ mod tests {
         let onsite = vec!["Recruiter call".to_owned(), " ONSITE ".to_owned()];
         let full: Vec<String> = (0..50).map(|i| format!("Stage {i}")).collect();
         let almost: Vec<String> = (0..49).map(|i| format!("Stage {i}")).collect();
-        let stage_cases: Vec<(
-            &str,
+        /// (case, class, status, stages, stated stage, ops)
+        type StageCase<'a> = (
+            &'a str,
             EmailClass,
             ApplicationStatus,
-            &[String],
-            Option<&str>,
+            &'a [String],
+            Option<&'a str>,
             Vec<Op>,
-        )> = vec![
+        );
+        let stage_cases: Vec<StageCase> = vec![
             (
                 "a new stage with the status change",
                 InterviewInvite,

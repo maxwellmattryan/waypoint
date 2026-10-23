@@ -328,9 +328,19 @@ impl StepContext<'_> {
         if confidence.is_finite() && confidence >= super::REVIEW_THRESHOLD {
             return Ok(None);
         }
-        super::review::insert(self.pool, self.step_id, kind, confidence, &payload)
-            .await
-            .map(Some)
+        self.review(kind, confidence, payload).await.map(Some)
+    }
+
+    /// Stores a `pending` review item for `kind` and `payload` whatever the confidence
+    /// (once per step, kind and payload; a rerun gets the same id) and returns its id, for
+    /// steps that decide themselves what needs review. The step must not apply the result.
+    pub async fn review(
+        &self,
+        kind: &str,
+        confidence: f64,
+        payload: Value,
+    ) -> Result<i64, sqlx::Error> {
+        super::review::insert(self.pool, self.step_id, kind, confidence, &payload).await
     }
 
     /// Retrieves confirmed memories for `query` ([`retrieval::search`]) and records them

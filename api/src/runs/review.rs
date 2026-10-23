@@ -1,7 +1,8 @@
 //! Review items: results a step wasn't confident enough to apply (see
-//! [`super::StepContext::review_if_unsure`]). They are stored, listed and dismissed (each
-//! dismissal records a learning signal, [`crate::memory_signals`]); accepting one (applying
-//! its result) comes later, per workflow.
+//! [`super::StepContext::review_if_unsure`] and [`super::StepContext::review`]). They are
+//! stored, listed and dismissed (each dismissal records a learning signal,
+//! [`crate::memory_signals`]). Accepting one applies its result, per workflow: today the
+//! `email.match` and `email.new_application` kinds ([`crate::workflows::match_email`]).
 
 use chrono::{DateTime, Utc};
 use rocket::State;
@@ -15,6 +16,7 @@ use crate::applications::{ApiError, JsonContent, ValidationErrors, internal, par
 use crate::events::{Event, EventBus};
 use crate::host::{LocalHost, NotCrossSite};
 use crate::memory_signals;
+use crate::workflows::match_email;
 
 /// Most review items one `GET /review-items` returns.
 pub const MAX_ITEMS: i64 = 200;
@@ -30,6 +32,11 @@ pub struct DismissReviewItem {
     #[serde(default)]
     pub reason: Option<String>,
 }
+
+/// The `POST /review-items/{id}/accept` body: `{}`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AcceptReviewItem {}
 
 /// Where a review item is.
 #[derive(
@@ -155,6 +162,54 @@ pub async fn dismiss(
     }
 }
 
+/// Accepts `pending` item `id`: applies its result as the user's own change, in one
+/// transaction that locks the item, then its application, and marks it `accepted` with
+/// `resolved_at` set. Only the `email.match` and `email.new_application` kinds can be
+/// accepted; a refusal changes nothing. Publishes `application.created` or
+/// `application.updated` after the commit.
+pub async fn accept(pool: &PgPool, bus: &EventBus, id: i64) -> Result<ReviewItem, DecisionError> {
+    let mut tx = pool.begin().await?;
+    let item: ReviewItem = sqlx::query_as(&format!(
+        "SELECT {ITEM_COLUMNS} FROM review_items WHERE id = $1 FOR UPDATE"
+    ))
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(DecisionError::NotFound)?;
+    if item.status != ReviewItemStatus::Pending {
+        return Err(DecisionError::Conflict(format!(
+            "review item {id} is not pending"
+        )));
+    }
+    if ![
+        match_email::MATCH_REVIEW_KIND,
+        match_email::NEW_APPLICATION_REVIEW_KIND,
+    ]
+    .contains(&item.kind.as_str())
+    {
+        return Err(DecisionError::Conflict(format!(
+            "review items of kind {:?} can't be accepted",
+            item.kind
+        )));
+    }
+    let accepted = match_email::accept(&mut tx, &item).await?;
+    let item: ReviewItem = sqlx::query_as(&format!(
+        "UPDATE review_items SET status = 'accepted', resolved_at = now() WHERE id = $1 \
+         RETURNING {ITEM_COLUMNS}"
+    ))
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    let application = accepted.application;
+    bus.publish(if accepted.created {
+        Event::ApplicationCreated { application }
+    } else {
+        Event::ApplicationUpdated { application }
+    });
+    Ok(item)
+}
+
 /// `GET /review-items`: results waiting for the user's review.
 #[utoipa::path(
     get,
@@ -217,4 +272,39 @@ pub async fn dismiss_route(
         .await
         .map(Json)
         .map_err(|err| err.into_api("dismiss a review item"))
+}
+
+/// `POST /review-items/{id}/accept`: applies an email review item's result.
+#[utoipa::path(
+    post,
+    path = "/review-items/{id}/accept",
+    tag = "runs",
+    operation_id = "accept_review_item",
+    params(("id" = i64, Path, description = "The review item's id")),
+    request_body = AcceptReviewItem,
+    responses(
+        (status = 200, description = "The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created", body = ReviewItem),
+        (status = 400, description = "The body is not valid JSON for this route", body = ValidationErrors),
+        (status = 403, description = "The `Host` header is not a local address, or the request came from another site or as an HTML form"),
+        (status = 404, description = "No review item has this id"),
+        (status = 409, description = "Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, or its payload doesn't parse"),
+        (status = 415, description = "The body is not `application/json`"),
+        (status = 500, description = "The change could not be stored"),
+    )
+)]
+#[rocket::post("/review-items/<id>/accept", data = "<body>")]
+pub async fn accept_route(
+    _host: LocalHost,
+    _site: NotCrossSite,
+    _json: JsonContent,
+    id: i64,
+    pool: &State<PgPool>,
+    bus: &State<EventBus>,
+    body: Result<Json<AcceptReviewItem>, json::Error<'_>>,
+) -> Result<Json<ReviewItem>, ApiError> {
+    let AcceptReviewItem {} = parsed(body)?;
+    accept(pool, bus, id)
+        .await
+        .map(Json)
+        .map_err(|err| err.into_api("accept a review item"))
 }

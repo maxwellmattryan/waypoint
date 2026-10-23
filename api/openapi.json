@@ -2513,6 +2513,74 @@
         }
       }
     },
+    "/review-items/{id}/accept": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`POST /review-items/{id}/accept`: applies an email review item's result.",
+        "operationId": "accept_review_item",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The review item's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptReviewItem"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON for this route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrors"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "404": {
+            "description": "No review item has this id"
+          },
+          "409": {
+            "description": "Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, or its payload doesn't parse"
+          },
+          "415": {
+            "description": "The body is not `application/json`"
+          },
+          "500": {
+            "description": "The change could not be stored"
+          }
+        }
+      }
+    },
     "/review-items/{id}/dismiss": {
       "post": {
         "tags": [
@@ -2688,6 +2756,11 @@
   },
   "components": {
     "schemas": {
+      "AcceptReviewItem": {
+        "type": "object",
+        "description": "The `POST /review-items/{id}/accept` body: `{}`.",
+        "additionalProperties": false
+      },
       "AgentAction": {
         "type": "object",
         "description": "One `agent_actions` row: a `write` tool call that changed Waypoint's data.",

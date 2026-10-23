@@ -654,6 +654,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/review-items/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /review-items/{id}/accept`: applies an email review item's result. */
+        post: operations["accept_review_item"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/review-items/{id}/dismiss": {
         parameters: {
             query?: never;
@@ -709,6 +726,8 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description The `POST /review-items/{id}/accept` body: `{}`. */
+        AcceptReviewItem: Record<string, never>;
         /** @description One `agent_actions` row: a `write` tool call that changed Waypoint's data. */
         AgentAction: {
             /** Format: date-time */
@@ -4051,6 +4070,77 @@ export interface operations {
                 content?: never;
             };
             /** @description The review items could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    accept_review_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The review item's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptReviewItem"];
+            };
+        };
+        responses: {
+            /** @description The accepted item, with `resolved_at` set. An `email.match` item's changes were made to its application (each event naming the email); an `email.new_application` item's application was created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewItem"];
+                };
+            };
+            /** @description The body is not valid JSON for this route */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No review item has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nothing changed: the item is not `pending`, its kind can't be accepted, its application is gone or its status changed since, or its payload doesn't parse */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/json` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The change could not be stored */
             500: {
                 headers: {
                     [name: string]: unknown;

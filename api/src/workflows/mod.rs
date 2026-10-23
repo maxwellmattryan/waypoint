@@ -18,8 +18,9 @@ use crate::memories::{
 use crate::runs::Runtime;
 use crate::tools::Registry;
 
-/// The production runtime: the `tidy_application` sample workflow and its tools, and the
-/// `memory_writer` and `classify_email` workflows (no tools).
+/// The production runtime: the `tidy_application` sample workflow and its tools, the
+/// `memory_writer` and `classify_email` workflows (no tools), and `match_email` with its
+/// two `write` tools.
 pub fn runtime() -> Runtime {
     let mut tools = Registry::default();
     tools
@@ -29,11 +30,18 @@ pub fn runtime() -> Runtime {
     tools
         .register(tidy::DraftFollowUp)
         .expect("draft_follow_up registers");
+    tools
+        .register(match_email::SetApplicationStatus)
+        .expect("set_application_status registers");
+    tools
+        .register(match_email::AddApplicationStage)
+        .expect("add_application_stage registers");
     Runtime::new(
         vec![
             Arc::new(tidy::TidyApplication),
             Arc::new(memory_writer::MemoryWriter),
             Arc::new(classify_email::ClassifyEmail),
+            Arc::new(match_email::MatchEmail),
         ],
         tools,
     )
@@ -133,6 +141,10 @@ mod tests {
             .workflow("classify_email")
             .expect("classify_email is registered");
         assert_eq!(classifier.steps(), ["classify"]);
+        let matcher = runtime
+            .workflow("match_email")
+            .expect("match_email is registered");
+        assert_eq!(matcher.steps(), ["match"]);
         let suites: Vec<&str> = eval_suites().iter().map(|suite| suite.workflow()).collect();
         assert_eq!(
             suites,
@@ -148,9 +160,11 @@ mod tests {
         assert_eq!(
             tools,
             [
+                ("add_application_stage", Permission::Write),
                 ("add_note", Permission::Write),
                 ("draft_follow_up", Permission::External),
                 ("get_application", Permission::Read),
+                ("set_application_status", Permission::Write),
             ]
         );
     }
