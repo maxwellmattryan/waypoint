@@ -759,6 +759,10 @@ async fn no_sync_without_google(pool: PgPool) {
                 response.into_string().await.as_deref(),
                 Some("Connect Google before syncing Gmail.")
             );
+            // Shut its worker down for real. Dropping the client only drops the stop
+            // sender, and a worker that sees that late can still claim one job from the
+            // shared queue (here, the harness's sync below) and then abort it.
+            client.terminate().await;
         }
     };
 
@@ -771,30 +775,62 @@ async fn no_sync_without_google(pool: PgPool) {
     refused(&configured).await;
     assert_eq!(count(&pool, "SELECT count(*) FROM jobs").await, 0);
 
-    // The account is removed mid-run: the next page stops with no successor.
+    // The account is removed mid-run: the next page stops with no successor. The
+    // successor is parked an hour out and released only after the delete, so it can't
+    // start first.
     execute(&pool, "DELETE FROM google_accounts").await;
     mark_fresh(&pool).await;
     seed_account(&pool, &fake("access"), "connected").await;
     let config = gmail::Config {
         page_size: 2,
-        page_delay: Duration::from_millis(300),
+        page_delay: Duration::from_secs(3600),
         ..gmail_config(&server)
     };
     let (harness, mut subscriber) = Harness::start(&pool, google_config(&server, config));
     harness.request().await.expect("request");
-    let first = common::events(
+    let first = common::events_until(
         &mut subscriber,
         TIMEOUT,
+        "page 1 of the gmail_sync run to succeed",
         |event| matches!(event, Event::JobSucceeded { job } if job.kind == jobs::GMAIL_SYNC),
     )
     .await;
-    assert!(page_results(&first)[0]["next_job_id"].is_i64());
+    let Some(Event::JobSucceeded { job: page_one }) = first.last() else {
+        panic!("page 1 didn't succeed: {first:?}");
+    };
+    let next = page_one
+        .result
+        .as_ref()
+        .and_then(|result| result["next_job_id"].as_i64())
+        .unwrap_or_else(|| panic!("page 1 queued no successor: {page_one:?}"));
     execute(&pool, "DELETE FROM google_accounts").await;
-    let rest = common::events(&mut subscriber, TIMEOUT, ends_run).await;
-    let stopped = page_results(&rest);
+    let released =
+        sqlx::query("UPDATE jobs SET run_at = now() WHERE id = $1 AND status = 'queued'")
+            .bind(next)
+            .execute(&pool)
+            .await
+            .expect("release the successor");
     assert_eq!(
-        stopped.last().unwrap()["stopped"],
-        "no Google account is connected"
+        released.rows_affected(),
+        1,
+        "the successor {next} wasn't waiting in the queue"
+    );
+    harness.wake.0.notify_one();
+    let rest = common::events_until(
+        &mut subscriber,
+        TIMEOUT,
+        "the gmail_sync run to end",
+        ends_run,
+    )
+    .await;
+    let Some(Event::JobSucceeded { job: last }) = rest.last() else {
+        panic!("the run didn't end with a successful page: {rest:?}");
+    };
+    assert_eq!(last.id, next, "the run ended on another job: {last:?}");
+    assert_eq!(
+        last.result.as_ref().map(|result| &result["stopped"]),
+        Some(&json!("no Google account is connected")),
+        "{last:?}"
     );
     assert_eq!(pending_syncs(&pool).await, 0);
     let (_, history_id, _, last_error) = state(&pool).await;
