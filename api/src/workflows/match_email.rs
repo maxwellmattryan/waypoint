@@ -1524,10 +1524,268 @@ pub(crate) async fn accept(
     }
 }
 
+/// A `match_email` eval case's `setup`: the applications, then the emails to ingest in
+/// order with their stored classifications. The last email is the one the case matches.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalSetup {
+    #[serde(default)]
+    applications: Vec<EvalApplication>,
+    emails: Vec<EvalEmail>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalApplication {
+    /// Its id is the variable `application_<name>`.
+    name: String,
+    company: String,
+    title: String,
+    status: ApplicationStatus,
+    #[serde(default)]
+    stages: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalEmail {
+    /// Relative to `api/fixtures/`.
+    file: String,
+    classification: EvalClassification,
+    /// An application name: the email is stored as already matched (`applied`) to it.
+    #[serde(default)]
+    matched_to: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalClassification {
+    class: String,
+    confidence: f64,
+    #[serde(default)]
+    company: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    stage: Option<String>,
+}
+
+impl EvalSetup {
+    /// Refuses a setup the seeding can't honour, before anything is written.
+    fn check(&self) -> Result<(), String> {
+        if self.emails.is_empty() {
+            return Err("the setup lists no emails".into());
+        }
+        let mut names = BTreeSet::new();
+        for app in &self.applications {
+            if app.name.trim().is_empty() || !names.insert(app.name.as_str()) {
+                return Err(format!(
+                    "application name {:?} is blank or repeated",
+                    app.name
+                ));
+            }
+        }
+        for email in &self.emails {
+            crate::workflows::classify_email::check_eval_path(&email.file)?;
+            let classification = &email.classification;
+            if EmailClass::parse(&classification.class).is_none() {
+                return Err(format!("{}: unknown class", email.file));
+            }
+            if !(0.0..=1.0).contains(&classification.confidence) {
+                return Err(format!("{}: confidence must be 0 to 1", email.file));
+            }
+            if let Some(name) = &email.matched_to
+                && !names.contains(name.as_str())
+            {
+                return Err(format!("{}: no application is named {name:?}", email.file));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The eval suite for `match_email` (dataset `api/evals/match_email.json`). Setup clears
+/// matches, classifications, emails, threads and applications; inserts the case's
+/// applications with their stages and `created` events; ingests each email without queuing
+/// a run and stores a `classified` row for it (plus an `applied` match row for
+/// `matched_to`). It makes no model call. Variables: `application_<name>` per application,
+/// and `email_id` and `classification_id` of the last email.
+pub struct MatchEmailEval;
+
+#[rocket::async_trait]
+impl crate::evals::Suite for MatchEmailEval {
+    fn workflow(&self) -> &'static str {
+        WORKFLOW
+    }
+
+    async fn setup(
+        &self,
+        pool: &PgPool,
+        setup: &Value,
+    ) -> Result<serde_json::Map<String, Value>, String> {
+        use crate::workflows::classify_email::{
+            CLASSIFIER_VERSION, current_key, ingest_eval_fixture,
+        };
+        let setup = EvalSetup::deserialize(setup).map_err(|err| format!("invalid setup: {err}"))?;
+        setup.check()?;
+        for table in [
+            "email_matches",
+            "email_classifications",
+            "emails",
+            "email_threads",
+            "application_events",
+            "application_stages",
+            "applications",
+        ] {
+            sqlx::query(&format!("DELETE FROM {table}"))
+                .execute(pool)
+                .await
+                .map_err(|err| format!("cannot clear {table}: {err}"))?;
+        }
+
+        let mut vars = serde_json::Map::new();
+        let mut ids = HashMap::new();
+        for app in &setup.applications {
+            let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+            let id: i64 = sqlx::query_scalar(
+                "INSERT INTO applications (company, title, status) VALUES ($1, $2, $3) \
+                 RETURNING id",
+            )
+            .bind(&app.company)
+            .bind(&app.title)
+            .bind(app.status.as_str())
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|err| format!("cannot insert application {:?}: {err}", app.name))?;
+            timeline::record(
+                &mut tx,
+                id,
+                EventKind::Created,
+                None,
+                Some(app.status),
+                None,
+                None,
+            )
+            .await
+            .map_err(|err| format!("cannot record application {:?}: {err}", app.name))?;
+            for (position, name) in app.stages.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO application_stages (application_id, name, position) \
+                     VALUES ($1, $2, $3)",
+                )
+                .bind(id)
+                .bind(name)
+                .bind(i32::try_from(position).unwrap_or(i32::MAX))
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| format!("cannot insert stage {name:?}: {err}"))?;
+            }
+            tx.commit().await.map_err(|err| err.to_string())?;
+            ids.insert(app.name.as_str(), id);
+            vars.insert(format!("application_{}", app.name), json!(id));
+        }
+
+        let mut last = None;
+        for email in &setup.emails {
+            let email_id = ingest_eval_fixture(pool, &email.file).await?;
+            let key = current_key(pool, email_id)
+                .await
+                .map_err(|err| format!("cannot read {}: {err}", email.file))?;
+            let answer = &email.classification;
+            let classification_id: i64 = sqlx::query_scalar(
+                "INSERT INTO email_classifications (email_id, input_key, classifier_version, \
+                 status, class, confidence, company, role, stage) \
+                 VALUES ($1, $2, $3, 'classified', $4, $5, $6, $7, $8) RETURNING id",
+            )
+            .bind(email_id)
+            .bind(&key)
+            .bind(CLASSIFIER_VERSION)
+            .bind(&answer.class)
+            .bind(answer.confidence)
+            .bind(&answer.company)
+            .bind(&answer.role)
+            .bind(&answer.stage)
+            .fetch_one(pool)
+            .await
+            .map_err(|err| format!("cannot classify {}: {err}", email.file))?;
+            if let Some(name) = &email.matched_to {
+                sqlx::query(
+                    "INSERT INTO email_matches (classification_id, email_id, status, \
+                     application_id) VALUES ($1, $2, 'applied', $3)",
+                )
+                .bind(classification_id)
+                .bind(email_id)
+                .bind(ids.get(name.as_str()))
+                .execute(pool)
+                .await
+                .map_err(|err| format!("cannot match {}: {err}", email.file))?;
+            }
+            last = Some((email_id, classification_id));
+        }
+        if let Some((email_id, classification_id)) = last {
+            vars.insert("email_id".into(), json!(email_id));
+            vars.insert("classification_id".into(), json!(classification_id));
+        }
+        Ok(vars)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::evals;
+    use crate::workflows::classify_email::EVAL_FIXTURES;
     use ApplicationStatus::{Applied, Interviewing, Offer, Rejected, Sourced};
+
+    #[test]
+    fn match_email_dataset_parses() {
+        let dataset = evals::load(&evals::default_path(WORKFLOW), WORKFLOW)
+            .expect("the shipped dataset loads");
+        assert!(dataset.cases.len() >= 15, "{}", dataset.cases.len());
+        let mut statuses = BTreeSet::new();
+        for case in &dataset.cases {
+            let setup = EvalSetup::deserialize(&case.setup)
+                .unwrap_or_else(|err| panic!("{}: invalid setup: {err}", case.name));
+            setup
+                .check()
+                .unwrap_or_else(|err| panic!("{}: {err}", case.name));
+            for email in &setup.emails {
+                assert!(
+                    std::path::Path::new(EVAL_FIXTURES)
+                        .join(&email.file)
+                        .is_file(),
+                    "{}: {} is missing",
+                    case.name,
+                    email.file
+                );
+            }
+            assert_eq!(
+                case.input,
+                json!({"classification_id": "${classification_id}"}),
+                "{}",
+                case.name
+            );
+            let output = case
+                .expect
+                .output
+                .as_ref()
+                .unwrap_or_else(|| panic!("{}: no output labels", case.name));
+            assert!(
+                output.get("application_id").is_some(),
+                "{}: no application_id label",
+                case.name
+            );
+            let status = output["status"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{}: no status label", case.name));
+            statuses.insert(status.to_owned());
+        }
+        assert_eq!(
+            statuses.into_iter().collect::<Vec<_>>(),
+            ["applied", "no_action", "review", "unmatched"],
+            "every outcome has a case"
+        );
+    }
 
     fn app(id: i64, company: &str, title: &str) -> AppFacts {
         AppFacts {

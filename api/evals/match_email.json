@@ -1,0 +1,220 @@
+{
+  "workflow": "match_email",
+  "cases": [
+    {
+      "name": "rejection-company-and-role",
+      "setup": {
+        "applications": [{"name": "vandelay", "company": "Vandelay Industries", "title": "Senior Engineer", "status": "applied"}],
+        "emails": [{"file": "emails/ashby-rejection.eml", "classification": {"class": "rejection", "confidence": 0.95, "company": "Vandelay Industries", "role": "Senior Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_vandelay}", "ops": [{"op": "set_status", "from": "applied", "to": "rejected"}]},
+        "actions": [{"tool": "set_application_status", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "ats-sender-name-and-role",
+      "setup": {
+        "applications": [{"name": "hooli", "company": "Hooli", "title": "Backend Engineer", "status": "applied"}],
+        "emails": [{"file": "emails/lever-interview-invite.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "role": "Backend Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_hooli}", "reasons": ["sender_name", "role"]},
+        "actions": [{"tool": "set_application_status", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "company-only-is-unsure",
+      "setup": {
+        "applications": [{"name": "acme", "company": "Acme Corp", "title": "Senior Backend Engineer", "status": "applied"}],
+        "emails": [{"file": "emails/greenhouse-application-received.eml", "classification": {"class": "rejection", "confidence": 0.9, "company": "Acme Corp"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "review", "application_id": null, "review_kind": "email.match", "confidence": 0.5},
+        "actions": [],
+        "review_items": [{"kind": "email.match", "confidence": 0.5, "payload": {"application_id": "${application_acme}", "review_reasons": ["low_confidence"]}}]
+      }
+    },
+    {
+      "name": "role-mismatch-proposes-new",
+      "setup": {
+        "applications": [{"name": "globex", "company": "Globex", "title": "Infrastructure Engineer", "status": "applied"}],
+        "emails": [{"file": "emails/greenhouse-second-company.eml", "classification": {"class": "other", "confidence": 0.9, "company": "Globex", "role": "Product Designer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "review", "application_id": null, "review_kind": "email.new_application"},
+        "actions": [],
+        "review_items": [{"kind": "email.new_application", "payload": {"application": {"company": "Globex", "title": "Product Designer", "status": "applied"}}}]
+      }
+    },
+    {
+      "name": "ambiguous-same-company",
+      "setup": {
+        "applications": [
+          {"name": "backend", "company": "Hooli", "title": "Backend Engineer", "status": "applied"},
+          {"name": "data", "company": "Hooli", "title": "Data Engineer", "status": "applied"}
+        ],
+        "emails": [{"file": "emails/lever-interview-invite.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "company": "Hooli"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "review", "application_id": null, "review_kind": "email.match"},
+        "actions": [],
+        "review_items": [{"kind": "email.match", "payload": {"review_reasons": ["low_confidence", "ambiguous"], "candidates": [{"application_id": "${application_backend}"}, {"application_id": "${application_data}"}]}}]
+      }
+    },
+    {
+      "name": "invite-adds-stage",
+      "setup": {
+        "applications": [{"name": "hooli", "company": "Hooli", "title": "Backend Engineer", "status": "applied"}],
+        "emails": [{"file": "emails/lever-interview-invite.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "company": "Hooli", "role": "Backend Engineer", "stage": "Technical interview"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_hooli}", "ops": [{"op": "set_status", "from": "applied", "to": "interviewing"}, {"op": "add_stage", "name": "Technical interview"}]},
+        "actions": [{"tool": "set_application_status", "undone": false}, {"tool": "add_application_stage", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "existing-stage-no-action",
+      "setup": {
+        "applications": [{"name": "hooli", "company": "Hooli", "title": "Backend Engineer", "status": "interviewing", "stages": ["Recruiter call", "Technical Interview"]}],
+        "emails": [{"file": "emails/lever-interview-invite.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "company": "Hooli", "role": "Backend Engineer", "stage": "technical interview"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "no_action", "application_id": "${application_hooli}", "ops": []},
+        "actions": [],
+        "review_items": []
+      }
+    },
+    {
+      "name": "sender-domain-and-company",
+      "setup": {
+        "applications": [{"name": "soylent", "company": "Soylent", "title": "Staff Engineer", "status": "applied"}],
+        "emails": [{"file": "emails/recruiter-outreach.eml", "classification": {"class": "availability_request", "confidence": 0.86, "company": "Soylent", "stage": "Recruiter call"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_soylent}", "reasons": ["company", "sender_domain"]},
+        "actions": [{"tool": "set_application_status", "undone": false}, {"tool": "add_application_stage", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "thread-history",
+      "setup": {
+        "applications": [{"name": "soylent", "company": "Soylent", "title": "Staff Engineer", "status": "interviewing", "stages": ["Recruiter call"]}],
+        "emails": [
+          {"file": "emails/recruiter-outreach.eml", "classification": {"class": "availability_request", "confidence": 0.86, "company": "Soylent", "stage": "Recruiter call"}, "matched_to": "soylent"},
+          {"file": "emails/recruiter-outlook-reply.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "stage": "Onsite"}}
+        ]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_soylent}", "reasons": ["thread", "sender_domain"], "ops": [{"op": "add_stage", "name": "Onsite"}]},
+        "actions": [{"tool": "add_application_stage", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "offer",
+      "setup": {
+        "applications": [{"name": "wayne", "company": "Wayne Enterprises", "title": "Staff Engineer", "status": "interviewing"}],
+        "emails": [{"file": "classify/offer.eml", "classification": {"class": "offer", "confidence": 0.95, "company": "Wayne Enterprises", "role": "Staff Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "applied", "application_id": "${application_wayne}", "ops": [{"op": "set_status", "from": "interviewing", "to": "offer"}]},
+        "actions": [{"tool": "set_application_status", "undone": false}],
+        "review_items": []
+      }
+    },
+    {
+      "name": "invite-on-rejected-is-unexpected",
+      "setup": {
+        "applications": [{"name": "stark", "company": "Stark Industries", "title": "Software Engineer", "status": "rejected"}],
+        "emails": [{"file": "emails/interview-invite-ics.eml", "classification": {"class": "interview_invite", "confidence": 0.9, "company": "Stark Industries", "role": "Software Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "review", "application_id": "${application_stark}", "review_kind": "email.match"},
+        "actions": [],
+        "review_items": [{"kind": "email.match", "confidence": 0.8, "payload": {"review_reasons": ["unexpected_status"], "ops": [{"op": "set_status", "from": "rejected", "to": "interviewing"}]}}]
+      }
+    },
+    {
+      "name": "low-classification-confidence",
+      "setup": {
+        "applications": [{"name": "vandelay", "company": "Vandelay Industries", "title": "Senior Engineer", "status": "applied"}],
+        "emails": [{"file": "emails/ashby-rejection.eml", "classification": {"class": "rejection", "confidence": 0.6, "company": "Vandelay Industries", "role": "Senior Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "review", "application_id": "${application_vandelay}", "review_kind": "email.match"},
+        "actions": [],
+        "review_items": [{"kind": "email.match", "confidence": 0.6, "payload": {"review_reasons": ["low_confidence"]}}]
+      }
+    },
+    {
+      "name": "new-application-from-ats",
+      "setup": {
+        "emails": [{"file": "emails/greenhouse-second-company.eml", "classification": {"class": "other", "confidence": 0.9, "company": "Globex", "role": "Infrastructure Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "review", "application_id": null, "review_kind": "email.new_application"},
+        "actions": [],
+        "review_items": [{"kind": "email.new_application", "confidence": 0.9, "payload": {"class": "other", "application": {"company": "Globex", "title": "Infrastructure Engineer", "status": "applied"}}}]
+      }
+    },
+    {
+      "name": "no-company-unmatched",
+      "setup": {
+        "applications": [{"name": "wonka", "company": "Wonka", "title": "Backend Engineer", "status": "applied"}],
+        "emails": [{"file": "emails/forwarded-thread.eml", "classification": {"class": "availability_request", "confidence": 0.85}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "unmatched", "application_id": null, "review_item_id": null},
+        "actions": [],
+        "review_items": []
+      }
+    },
+    {
+      "name": "confident-other-links",
+      "setup": {
+        "applications": [{"name": "initech", "company": "Initech", "title": "Platform Engineer", "status": "applied"}],
+        "emails": [{"file": "emails/greenhouse-company-domain.eml", "classification": {"class": "other", "confidence": 0.9, "company": "Initech", "role": "Platform Engineer"}}]
+      },
+      "input": {"classification_id": "${classification_id}"},
+      "expect": {
+        "status": "succeeded",
+        "output": {"status": "no_action", "application_id": "${application_initech}", "confidence": 1.0, "ops": []},
+        "actions": [],
+        "review_items": []
+      }
+    }
+  ]
+}

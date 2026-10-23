@@ -54,6 +54,7 @@ pub fn eval_suites() -> Vec<Arc<dyn Suite>> {
         Arc::new(tidy::TidyEval),
         Arc::new(memory_writer::MemoryWriterEval),
         Arc::new(classify_email::ClassifyEmailEval),
+        Arc::new(match_email::MatchEmailEval),
     ]
 }
 
@@ -148,7 +149,12 @@ mod tests {
         let suites: Vec<&str> = eval_suites().iter().map(|suite| suite.workflow()).collect();
         assert_eq!(
             suites,
-            ["tidy_application", "memory_writer", "classify_email"]
+            [
+                "tidy_application",
+                "memory_writer",
+                "classify_email",
+                "match_email"
+            ]
         );
 
         let tools: Vec<(&str, Permission)> = runtime

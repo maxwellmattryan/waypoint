@@ -1031,7 +1031,53 @@ impl Workflow for ClassifyEmail {
 }
 
 /// Where eval setups' email paths are relative to: `api/fixtures/`.
-const EVAL_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures");
+pub(crate) const EVAL_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures");
+
+/// Refuses an eval setup path that isn't a plain path relative to `api/fixtures/`.
+pub(crate) fn check_eval_path(path: &str) -> Result<(), String> {
+    let relative = Path::new(path)
+        .components()
+        .all(|part| matches!(part, Component::Normal(_)));
+    if path.is_empty() || path.starts_with('/') || path.contains("..") || !relative {
+        return Err(format!("{path:?} is not a path relative to api/fixtures/"));
+    }
+    Ok(())
+}
+
+/// Ingests eval fixture `path` (checked with [`check_eval_path`]) without queuing a run:
+/// `source = fixture`, the file stem as the provider id, no known companies. Returns the
+/// email's id.
+pub(crate) async fn ingest_eval_fixture(pool: &PgPool, path: &str) -> Result<i64, String> {
+    let file = Path::new(EVAL_FIXTURES).join(path);
+    let raw = std::fs::read(&file).map_err(|err| format!("cannot read {path}: {err}"))?;
+    let stem = file
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let new = NewEmail {
+        source: Source::Fixture,
+        provider_message_id: stem,
+        provider_thread_id: None,
+        labels: Vec::new(),
+        raw,
+    };
+    email::store::ingest_unqueued(pool, new, &KnownCompanies::default())
+        .await
+        .map(|ingested| ingested.id)
+        .map_err(|err| format!("cannot ingest {path}: {err}"))
+}
+
+/// Email `email_id`'s current [`input_key`].
+pub(crate) async fn current_key(pool: &PgPool, email_id: i64) -> sqlx::Result<String> {
+    let email: StoredEmail = sqlx::query_as(
+        "SELECT id, thread_id, subject, from_address, from_name, sent_at, body_text, \
+         signature, ats, headers FROM emails WHERE id = $1",
+    )
+    .bind(email_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(input_key(&email.key_input()))
+}
 
 /// A `classify_email` eval case's `setup`: the files to ingest, in order, relative to
 /// `api/fixtures/`. The last one is the email the case classifies.
@@ -1059,12 +1105,7 @@ impl Suite for ClassifyEmailEval {
             return Err("the setup lists no emails".into());
         }
         for path in &setup.emails {
-            let relative = Path::new(path)
-                .components()
-                .all(|part| matches!(part, Component::Normal(_)));
-            if path.is_empty() || path.starts_with('/') || path.contains("..") || !relative {
-                return Err(format!("{path:?} is not a path relative to api/fixtures/"));
-            }
+            check_eval_path(path)?;
         }
         for table in ["email_classifications", "emails", "email_threads"] {
             sqlx::query(&format!("DELETE FROM {table}"))
@@ -1072,26 +1113,9 @@ impl Suite for ClassifyEmailEval {
                 .await
                 .map_err(|err| format!("cannot clear {table}: {err}"))?;
         }
-        let known = KnownCompanies::default();
         let mut last = None;
         for path in &setup.emails {
-            let file = Path::new(EVAL_FIXTURES).join(path);
-            let raw = std::fs::read(&file).map_err(|err| format!("cannot read {path}: {err}"))?;
-            let stem = file
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let new = NewEmail {
-                source: Source::Fixture,
-                provider_message_id: stem,
-                provider_thread_id: None,
-                labels: Vec::new(),
-                raw,
-            };
-            let ingested = email::store::ingest_unqueued(pool, new, &known)
-                .await
-                .map_err(|err| format!("cannot ingest {path}: {err}"))?;
-            last = Some(ingested.id);
+            last = Some(ingest_eval_fixture(pool, path).await?);
         }
         let mut vars = Map::new();
         vars.insert("email_id".into(), json!(last));
