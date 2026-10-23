@@ -1,0 +1,27 @@
+From: Aperture Science <no-reply@us.greenhouse-mail.io>
+To: Alex Doe <me@home.example>
+Subject: Aperture Science - Test Infrastructure Engineer
+Date: Mon, 19 Oct 2026 16:20:00 +0000
+Message-ID: <gh-aperture-1@us.greenhouse-mail.io>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="gh-aperture"
+
+--gh-aperture
+Content-Type: text/plain; charset=utf-8
+
+Hi Alex,
+
+Thanks again for applying to the Test Infrastructure Engineer role at
+Aperture Science. We wanted to let you know that the position has been
+filled, so we won't be moving forward with your application.
+
+We appreciate your interest and wish you the best of luck.
+
+Aperture Science Recruiting
+
+--gh-aperture
+Content-Type: text/html; charset=utf-8
+
+<p>Hi Alex,</p><p>Thanks again for applying to the Test Infrastructure Engineer role at Aperture Science. We wanted to let you know that the position has been filled, so we won't be moving forward with your application.</p><p>We appreciate your interest and wish you the best of luck.</p><p>Aperture Science Recruiting</p>
+
+--gh-aperture--

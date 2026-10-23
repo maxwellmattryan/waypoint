@@ -1,0 +1,37 @@
+From: Hannah Kim <hannah@gringotts.example>
+To: Alex Doe <me@home.example>
+Subject: Onsite interview at Gringotts
+Date: Mon, 19 Oct 2026 14:00:00 +0000
+Message-ID: <hannah-onsite-1@gringotts.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="gringotts-onsite"
+
+--gringotts-onsite
+Content-Type: text/plain; charset=utf-8
+
+Hi Alex,
+
+Congratulations on moving to the final round for the Senior Backend
+Engineer role! Your onsite interview is scheduled for Thursday, October 29
+at 10:00 AM ET at our New York office. The calendar invite is attached.
+
+You'll meet four members of the team over three hours.
+
+Best,
+Hannah Kim
+Recruiting Coordinator, Gringotts
+
+--gringotts-onsite
+Content-Type: text/calendar; charset=utf-8; method=REQUEST
+
+BEGIN:VCALENDAR
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:onsite-1@gringotts.example
+DTSTART;TZID=America/New_York:20261029T100000
+DTEND;TZID=America/New_York:20261029T130000
+SUMMARY:Onsite interview - Gringotts
+END:VEVENT
+END:VCALENDAR
+--gringotts-onsite--

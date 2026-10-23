@@ -1,0 +1,27 @@
+From: Oliver Hughes <oliver@ollivanders.example>
+To: Alex Doe <me@home.example>
+Subject: Next steps with Ollivanders
+Date: Mon, 19 Oct 2026 12:00:00 +0100
+Message-ID: <oliver-1@ollivanders.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="olli-alt"
+
+--olli-alt
+Content-Type: text/plain; charset=utf-8
+
+Hi Alex,
+
+Thanks for your application for the Senior Engineer role at Ollivanders.
+I'd love to arrange a first conversation. Could you do Friday 23 October
+at 10:00 UK time, or Monday 26 October at 10:00 UK time?
+
+Cheers,
+Oliver Hughes
+Recruiter, Ollivanders
+
+--olli-alt
+Content-Type: text/html; charset=utf-8
+
+<p>Hi Alex,</p><p>Thanks for your application for the Senior Engineer role at Ollivanders. I'd love to arrange a first conversation. Could you do <b>Friday 23 October at 10:00 UK time</b>, or <b>Monday 26 October at 10:00 UK time</b>?</p><p>Cheers,<br>Oliver Hughes<br>Recruiter, Ollivanders</p>
+
+--olli-alt--

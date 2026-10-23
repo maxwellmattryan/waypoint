@@ -1,0 +1,25 @@
+From: Globo Gym <globogym@myworkday.com>
+To: me@home.example
+Subject: Thank you for applying
+Date: Tue, 20 Oct 2026 14:10:00 +0000
+Message-ID: <wd-globogym-1@myworkday.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="wd-globo"
+
+--wd-globo
+Content-Type: text/plain; charset=utf-8
+
+Hi Alex,
+
+Thank you for applying to Site Reliability Engineer at Globo Gym. Your
+application has been received and is under review. You can check its status
+at any time from your candidate account.
+
+Globo Gym
+
+--wd-globo
+Content-Type: text/html; charset=utf-8
+
+<p>Hi Alex,</p><p>Thank you for applying to <b>Site Reliability Engineer</b> at Globo Gym. Your application has been received and is under review. You can check its status at any time from your candidate account.</p><p>Globo Gym</p>
+
+--wd-globo--

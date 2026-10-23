@@ -1741,7 +1741,7 @@ mod tests {
     fn match_email_dataset_parses() {
         let dataset = evals::load(&evals::default_path(WORKFLOW), WORKFLOW)
             .expect("the shipped dataset loads");
-        assert!(dataset.cases.len() >= 15, "{}", dataset.cases.len());
+        assert!(dataset.cases.len() >= 25, "{}", dataset.cases.len());
         let mut statuses = BTreeSet::new();
         for case in &dataset.cases {
             let setup = EvalSetup::deserialize(&case.setup)

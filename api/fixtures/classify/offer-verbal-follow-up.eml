@@ -1,0 +1,30 @@
+From: Rachel Green <rachel@duff.example>
+To: Alex Doe <me@home.example>
+Subject: Following up on our call
+Date: Tue, 20 Oct 2026 23:15:00 +0000
+Message-ID: <rachel-offer-1@duff.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="duff-alt"
+
+--duff-alt
+Content-Type: text/plain; charset=utf-8
+
+Hi Alex,
+
+It was great speaking with you this afternoon! As I mentioned on the call,
+the team would love to have you join Duff as a Senior Backend Engineer, and
+we're extending you a verbal offer.
+
+The written offer letter with the full compensation details will follow in
+the next day or two. In the meantime, let me know if you have any
+questions.
+
+Rachel Green
+Recruiter, Duff
+
+--duff-alt
+Content-Type: text/html; charset=utf-8
+
+<p>Hi Alex,</p><p>It was great speaking with you this afternoon! As I mentioned on the call, the team would love to have you join Duff as a Senior Backend Engineer, and we're extending you a verbal offer.</p><p>The written offer letter with the full compensation details will follow in the next day or two. In the meantime, let me know if you have any questions.</p><p>Rachel Green<br>Recruiter, Duff</p>
+
+--duff-alt--
