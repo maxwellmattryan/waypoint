@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use tokio::sync::watch;
 use waypoint_api::events::{Event, EventBus, Subscriber};
+use waypoint_api::google;
 use waypoint_api::jobs::{self, Job, Wake, Worker};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -37,6 +38,7 @@ impl Harness {
             config,
             wake: wake.0.clone(),
             runtime: Default::default(),
+            google: google::Google::new(google::Config::default()),
         }
         .spawn(stopped);
         let harness = Self {

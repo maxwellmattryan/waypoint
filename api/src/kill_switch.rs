@@ -47,6 +47,7 @@ pub const USER_TABLES: &[&str] = &[
     "email_classifications",
     "emails",
     "email_threads",
+    "gmail_sync_state",
     "claude_calls",
     "jobs",
     "google_accounts",

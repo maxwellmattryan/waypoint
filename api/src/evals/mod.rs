@@ -640,6 +640,8 @@ pub async fn run(
         config: jobs,
         wake: wake.0.clone(),
         runtime: runtime.clone(),
+        // Not configured: the scratch database never syncs Gmail.
+        google: crate::google::Google::new(crate::google::Config::default()),
     }
     .spawn(stopped);
 

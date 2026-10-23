@@ -1368,6 +1368,68 @@
         }
       }
     },
+    "/gmail/sync": {
+      "get": {
+        "tags": [
+          "gmail"
+        ],
+        "summary": "Reports the Gmail sync's status. Never calls Google or decrypts a token.",
+        "operationId": "get_gmail_sync",
+        "responses": {
+          "200": {
+            "description": "The Gmail sync's status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GmailSyncStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "500": {
+            "description": "The status could not be read"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "gmail"
+        ],
+        "summary": "\"Sync now\": starts a Gmail sync, or returns the one already queued or running (a\nqueued page waiting out a delay is pulled forward to now).",
+        "operationId": "sync_gmail",
+        "responses": {
+          "202": {
+            "description": "The first page's job: a new one, or (`reused: true`) the sync already queued or running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GmailSyncQueued"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address, or the request came from another site or as an HTML form"
+          },
+          "409": {
+            "description": "Google isn't configured, connected, or needs reconnecting",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The sync could not be queued"
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -3466,6 +3528,101 @@
           }
         }
       },
+      "GmailSyncQueued": {
+        "type": "object",
+        "description": "The `POST /gmail/sync` body.",
+        "required": [
+          "job",
+          "reused"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job",
+            "description": "The queued or running page job."
+          },
+          "reused": {
+            "type": "boolean",
+            "description": "`true` when a sync was already queued or running and nothing new was enqueued."
+          }
+        }
+      },
+      "GmailSyncStatus": {
+        "type": "object",
+        "description": "The `GET /gmail/sync` body.",
+        "required": [
+          "activity",
+          "next_run_at",
+          "mode",
+          "run_started_at",
+          "last_finished_at",
+          "last_error",
+          "last_error_at",
+          "run",
+          "emails_stored"
+        ],
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/SyncActivity"
+          },
+          "emails_stored": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Stored emails from Gmail."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last page didn't succeed; cleared when a run finishes."
+          },
+          "last_error_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a run last finished its last page."
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SyncMode",
+                "description": "The current or most recent run's mode; `null` before the first run."
+              }
+            ]
+          },
+          "next_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the queued page may start; `null` unless `activity` is `queued`."
+          },
+          "run": {
+            "$ref": "#/components/schemas/SyncCounts",
+            "description": "The current or most recent run's counts; all 0 before the first run."
+          },
+          "run_started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
       "GoogleDisconnect": {
         "type": "object",
         "description": "The `DELETE /auth/google` body.",
@@ -4740,6 +4897,67 @@
           "succeeded",
           "failed",
           "awaiting_approval"
+        ]
+      },
+      "SyncActivity": {
+        "type": "string",
+        "description": "Whether a sync is pending, from the `gmail_sync` jobs.",
+        "enum": [
+          "idle",
+          "queued",
+          "running"
+        ]
+      },
+      "SyncCounts": {
+        "type": "object",
+        "description": "What a page or a run did with the messages it listed. `seen` is the sum of the rest.",
+        "required": [
+          "seen",
+          "inserted",
+          "updated",
+          "oversized",
+          "failed",
+          "vanished"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Didn't parse or came back with another id; not stored."
+          },
+          "inserted": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Stored as new rows."
+          },
+          "oversized": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Over the size cap; not stored."
+          },
+          "seen": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "updated": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Already stored; refreshed in place."
+          },
+          "vanished": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Deleted between listing and fetching."
+          }
+        }
+      },
+      "SyncMode": {
+        "type": "string",
+        "description": "How a sync run reads the mailbox.",
+        "enum": [
+          "backfill",
+          "resync",
+          "incremental"
         ]
       },
       "TidyRequest": {

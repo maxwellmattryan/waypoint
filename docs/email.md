@@ -1,6 +1,6 @@
 # Email store, normalizer and sender heuristics
 
-Recruiter email becomes application updates in three steps: Gmail sync fetches raw messages (#65), this offline part stores them, and classify-and-extract has Claude read the ones worth reading ([below](#classify-and-extract)). The offline part makes no model calls and no network calls. It turns one raw RFC 822 message into a row with clean body text, groups rows into threads, and decides with cheap rules whether a message is worth a model call.
+Recruiter email becomes application updates in three steps: [Gmail sync](gmail-sync.md) fetches raw messages, this offline part stores them, and classify-and-extract has Claude read the ones worth reading ([below](#classify-and-extract)). The offline part makes no model calls and no network calls. It turns one raw RFC 822 message into a row with clean body text, groups rows into threads, and decides with cheap rules whether a message is worth a model call.
 
 The code is `api/src/email/`:
 
@@ -51,7 +51,7 @@ CHECK constraints refuse an unknown `source`, `body_source`, `verdict` or `ats`,
 4. moves the thread's `last_message_at` to the greatest `sent_at`,
 5. for a `candidate`, queues a `classify_email` run unless the email already has a classification row for its input key ([the trigger](#trigger-and-input-key)); `classify_run_id` is that run.
 
-After the commit it publishes the queued run and wakes the worker. Bytes the parser can't read at all (no header) are `IngestError::Parse`, and nothing is written. `ingest` puts no size limit on `raw`, which is fine for the fixtures. A caller feeding it real mail (Gmail sync) must cap the message size before calling it: Gmail allows 25 MB and more, and the HTML parser's cost grows with the square of the nesting depth. The HTML-to-text walk itself uses an explicit stack, so deep nesting can't overflow the thread's stack. `known_companies(pool)` loads the company keys for the `known_company` rule; load it once per import. `list(pool, verdict, limit)` returns the newest emails first, optionally only one verdict.
+After the commit it publishes the queued run and wakes the worker. Bytes the parser can't read at all (no header) are `IngestError::Parse`, and nothing is written. `ingest` puts no size limit on `raw`, so its caller caps the size: Gmail allows 25 MB and more, and the HTML parser's cost grows with the square of the nesting depth. [Gmail sync](gmail-sync.md#size-cap) refuses any message over 5 MiB before it reaches `ingest`. The HTML-to-text walk itself uses an explicit stack, so deep nesting can't overflow the thread's stack. `known_companies(pool)` loads the company keys for the `known_company` rule; load it once per import. `list(pool, verdict, limit)` returns the newest emails first, optionally only one verdict.
 
 ## Normalizer
 

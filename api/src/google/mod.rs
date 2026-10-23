@@ -101,6 +101,11 @@ impl Google {
             .expect("the HTTP client builds");
         Self { config, http }
     }
+
+    /// The HTTP client shared by every call to Google (no redirects, a 10 s timeout).
+    pub fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
 }
 
 /// Why [`access_token`] has no token to give. Messages never contain secrets.
@@ -669,6 +674,17 @@ where
         "UPDATE google_accounts SET status = 'reconnect_required', updated_at = now() WHERE id",
     )
     .execute(executor)
+    .await
+    .map(|_| ())
+}
+
+/// Marks the stored access token expired, so the next [`access_token`] refreshes it.
+/// Called when Google refused the token (HTTP 401).
+pub async fn expire_access_token(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE google_accounts SET access_token_expires_at = now(), updated_at = now() WHERE id",
+    )
+    .execute(pool)
     .await
     .map(|_| ())
 }

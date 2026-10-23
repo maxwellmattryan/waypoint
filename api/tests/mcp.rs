@@ -245,6 +245,7 @@ impl Harness {
             config: common::fast_config(),
             wake: wake.0.clone(),
             runtime: runtime.clone(),
+            google: waypoint_api::google::Google::new(Default::default()),
         }
         .spawn(stopped);
         let harness = Self {

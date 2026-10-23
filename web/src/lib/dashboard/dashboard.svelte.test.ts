@@ -4,6 +4,7 @@ import {
 	createApiClient,
 	startTestPrompt,
 	type EventSourceLike,
+	type GmailSyncStatus,
 	type GoogleStatus,
 	type Job,
 	type KillSwitch
@@ -274,6 +275,110 @@ describe('Dashboard', () => {
 		source.emit('app.connected');
 		await settle();
 		expect(dashboard.google).toEqual({ kind: 'error' });
+	});
+
+	it('gmail sync: load, job events, sync now, failures', async () => {
+		const idle: GmailSyncStatus = {
+			activity: 'idle',
+			next_run_at: null,
+			mode: null,
+			run_started_at: null,
+			last_finished_at: null,
+			last_error: null,
+			last_error_at: null,
+			run: { seen: 0, inserted: 0, updated: 0, oversized: 0, failed: 0, vanished: 0 },
+			emails_stored: 0
+		};
+		const syncing: GmailSyncStatus = { ...idle, activity: 'running', mode: 'backfill' };
+		let status = idle;
+		let loadFails = false;
+		let post: () => Response | Promise<Response> = () =>
+			json({ job: job({ kind: 'gmail_sync' }), reused: false }, 202);
+		const { dashboard, source, fetch } = setup({
+			'/health': () => json({ status: 'ok', db: 'ok' }),
+			'/gmail/sync': (request) =>
+				request.method === 'POST'
+					? post()
+					: loadFails
+						? new Response(null, { status: 500 })
+						: json(status)
+		});
+		const loads = () =>
+			requests(fetch).filter((r) => r.method === 'GET' && r.url === 'http://api.test/gmail/sync')
+				.length;
+		const posts = () => requests(fetch).filter((r) => r.method === 'POST').length;
+		expect(dashboard.gmailSync).toEqual({ kind: 'loading' });
+
+		source.emit('app.connected');
+		await settle();
+		expect(dashboard.gmailSync).toEqual({ kind: 'loaded', status: idle });
+		expect(loads()).toBe(1);
+
+		// gmail_sync job events refetch; other kinds don't.
+		status = syncing;
+		source.emit('job.started', { job: job({ id: 9, kind: 'gmail_sync', status: 'running' }) });
+		await settle();
+		expect(loads()).toBe(2);
+		expect(dashboard.gmailSync).toEqual({ kind: 'loaded', status: syncing });
+		source.emit('job.started', { job: job({ id: 10, kind: 'test_prompt', status: 'running' }) });
+		await settle();
+		expect(loads()).toBe(2);
+
+		// data.deleted refetches.
+		status = idle;
+		source.emit('data.deleted');
+		await settle();
+		expect(loads()).toBe(3);
+		expect(dashboard.gmailSync).toEqual({ kind: 'loaded', status: idle });
+
+		// Sync now: one POST while in flight, then a refetch on 202.
+		let release!: () => void;
+		post = () =>
+			new Promise((resolve) => {
+				release = () => resolve(json({ job: job({ kind: 'gmail_sync' }), reused: false }, 202));
+			});
+		status = syncing;
+		const first = dashboard.syncGmail();
+		expect(dashboard.syncingGmail).toBe(true);
+		await dashboard.syncGmail();
+		await settle();
+		expect(posts()).toBe(1);
+		release();
+		await first;
+		expect(dashboard.syncingGmail).toBe(false);
+		expect(requests(fetch).find((r) => r.method === 'POST')?.url).toBe(
+			'http://api.test/gmail/sync'
+		);
+		expect(loads()).toBe(4);
+		expect(dashboard.gmailSync).toEqual({ kind: 'loaded', status: syncing });
+
+		// A 409 and any other failure show a toast and don't refetch.
+		const error = vi.spyOn(toast, 'error');
+		post = () =>
+			new Response('Connect Google before syncing Gmail.', {
+				status: 409,
+				headers: { 'content-type': 'text/plain' }
+			});
+		await dashboard.syncGmail();
+		expect(error).toHaveBeenLastCalledWith('Connect Google before syncing Gmail.');
+		post = () => new Response(null, { status: 500 });
+		await dashboard.syncGmail();
+		expect(error).toHaveBeenLastCalledWith("Couldn't start the Gmail sync.");
+		post = () => {
+			throw new TypeError('Failed to fetch');
+		};
+		await dashboard.syncGmail();
+		expect(error).toHaveBeenLastCalledWith("Couldn't start the Gmail sync.");
+		expect(error).toHaveBeenCalledTimes(3);
+		expect(posts()).toBe(4);
+		expect(loads()).toBe(4);
+		expect(dashboard.syncingGmail).toBe(false);
+
+		// A failed load shows the error state.
+		loadFails = true;
+		source.emit('app.connected');
+		await settle();
+		expect(dashboard.gmailSync).toEqual({ kind: 'error' });
 	});
 
 	it('kill switch: load, event, toggle, failure', async () => {

@@ -33,6 +33,13 @@ pub const AGENT_RUN: &str = "agent_run";
 /// one structured `claude -p` call that stores the resume's positions, skills and education
 /// as proposed memories; its `result` is a `ProfileImportSummary` (see `profile::resume`).
 pub const RESUME_PROFILE: &str = "resume_profile";
+/// The `gmail_sync` job kind: one page of a Gmail sync run (see `gmail::sync`). A start job
+/// has payload `{"trigger": "manual" | "startup"}`; each later page has
+/// `{"mode": "backfill" | "resync" | "incremental", "start_history_id": string,
+/// "page_token": string | null, "page": integer, "listed": integer}`.
+pub const GMAIL_SYNC: &str = "gmail_sync";
+/// Attempts each `gmail_sync` page gets.
+pub const GMAIL_SYNC_MAX_ATTEMPTS: i32 = 5;
 
 /// One `jobs` row. This is also the `GET /jobs/<id>` body; the payload is not echoed.
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, utoipa::ToSchema)]
@@ -61,7 +68,7 @@ pub struct Job {
     pub finished_at: Option<DateTime<Utc>>,
 }
 
-const COLUMNS: &str = "id, kind, payload, status, attempts, max_attempts, run_at, last_error, \
+pub(crate) const COLUMNS: &str = "id, kind, payload, status, attempts, max_attempts, run_at, last_error, \
                        result, created_at, updated_at, finished_at";
 
 /// Queue settings.
