@@ -1,6 +1,6 @@
 # Agent runtime
 
-Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps executed by the job queue, with each step's input, output, status, tokens and cost stored as it goes. Steps call the model through Waypoint's `claude -p` runner and call **tools**, typed Rust handlers with JSON schemas and a permission level. This page covers the shared machinery in `api/src/runs`, `api/src/tools` and `api/src/mcp`, the guardrails that enforce each tool's permission level ([approval gate](#approval-gate), [action log and undo](#action-log-and-undo), [review items](#review-items)), and the one workflow the app ships, the [`tidy_application` sample](#sample-workflow-tidy_application) in `api/src/workflows`. The app's **Review** page (`/review`) is where the user approves, edits or rejects pending actions, dismisses review items and undoes logged actions. Per-step tool allowlists build on this later.
+Every agent workflow in Waypoint runs as a **run**: a fixed sequence of steps executed by the job queue, with each step's input, output, status, tokens and cost stored as it goes. Steps call the model through Waypoint's `claude -p` runner and call **tools**, typed Rust handlers with JSON schemas and a permission level. This page covers the shared machinery in `api/src/runs`, `api/src/tools` and `api/src/mcp`, the guardrails that enforce each tool's permission level ([approval gate](#approval-gate), [action log and undo](#action-log-and-undo), [review items](#review-items)), and the workflows the app ships in `api/src/workflows`: the [`tidy_application` sample](#sample-workflow-tidy_application) and the [memory writer](memory-writer.md). The app's **Review** page (`/review`) is where the user approves, edits or rejects pending actions, dismisses review items and undoes logged actions. Per-step tool allowlists build on this later.
 
 ## Tables
 
@@ -178,11 +178,11 @@ Every succeeded `write` call inserts one `agent_actions` row with the `undo_data
 
 ## Learning signals
 
-`memory_signals` (`api/src/memory_signals.rs`) is the raw evidence a later memory writer learns from: one row per approval, rejection or dismissal, written in the same transaction as the decision, so a stored decision always has its signal and a refused one has none. The unique `pending_action_id` and `review_item_id` make one signal per decision a database fact, and a CHECK keeps each kind's columns consistent. There are no foreign keys: a signal outlives the run, action or item it came from, and only `DELETE /data` empties the table.
+`memory_signals` (`api/src/memory_signals.rs`) is the raw evidence the [memory writer](memory-writer.md) learns from: one row per approval, rejection or dismissal, written in the same transaction as the decision, so a stored decision always has its signal and a refused one has none. That transaction also schedules a `memory_writer` run 60 s out, unless one is already waiting, so a burst of decisions shares one model call; the run claims the unprocessed signals and marks them processed. The unique `pending_action_id` and `review_item_id` make one signal per decision a database fact, and a CHECK keeps each kind's columns consistent. There are no foreign keys: a signal outlives the run, action or item it came from, and only `DELETE /data` empties the table.
 
 An approval's `changes` is the diff from `drafted` (the requested input) to `approved` (`approved_input`), `[]` when the user didn't edit it. Each entry is `{op, path, before, after}`: `path` is an RFC 6901 JSON Pointer (`/message`, `/a~1b`, `""` for the root), and `op` is `add` (`before` is `null`), `remove` (`after` is `null`) or `replace`. Objects are compared key by key, recursively, in lexicographic key order, and the entries come out in that order; every other value (arrays, scalars, a change of type) is compared and replaced whole. An explicit `null` counts as present.
 
-`GET /memory-signals` lists them read-only; nothing over HTTP writes, edits or deletes one, and no model is called.
+`GET /memory-signals` lists them read-only; nothing over HTTP writes, edits or deletes one.
 
 ## Retrieval
 
@@ -259,7 +259,7 @@ Tool calls made during an agent call are recorded on the calling step. When the 
 
 ## Sample workflow: `tidy_application`
 
-The production runtime (`workflows::runtime()`) registers one workflow, which exercises every guardrail without calling a model. Its run input is `{"application_id", "note", "message", "confidence"}`, and each step passes its input through and adds to it:
+The production runtime (`workflows::runtime()`) registers two workflows: `tidy_application`, below, and the [`memory_writer`](memory-writer.md), which has one step, `write`, and no tools. `tidy_application` exercises every guardrail without calling a model. Its run input is `{"application_id", "note", "message", "confidence"}`, and each step passes its input through and adds to it:
 
 | Step | Tool (permission) | What it does |
 |---|---|---|
@@ -284,6 +284,7 @@ Every route answers only a local `Host` (403 otherwise) and answers 500 on a dat
 - `GET /review-items`: up to 200 `pending` review items, oldest first.
 - `POST /review-items/{id}/dismiss` (`{}` or `{"reason": "…"}`): see [Review items](#review-items). 200 with the `ReviewItem`; 409 when it isn't `pending`; 404 for an unknown id; 422 for a reason over 1000 characters.
 - `GET /memory-signals?kind=&limit=&before=`: [learning signals](#learning-signals) newest first; `limit` and `before` work as on `GET /runs`. `kind` is `approval`, `rejection` or `dismissal`; blank means any, and an unknown one is 422 `{"errors":[{"field":"kind","message":"Unknown kind"}]}`.
+- `POST /memories/learn` (no body): asks the [memory writer](memory-writer.md#scheduling) to learn now. 202 `{"run_id", "reused"}`: the waiting writer run (`reused: true`), pulled to start now when it's `queued`, or a new one that may start now.
 - `POST /applications/{id}/tidy` with `{"note", "message", "confidence"?}` starts [`tidy_application`](#sample-workflow-tidy_application) and answers 201 with the queued `Run`. `note` and `message` are required, trimmed and at most 20,000 characters; `confidence` defaults to 1 and must be within 0..=1; failures are 422 naming the field. An unknown application is 404, checked before the run starts.
 
 There are no generic routes to start, resume or cancel runs.

@@ -19,7 +19,7 @@ cargo run --bin eval -- <workflow> [--case <name>]... [--json] [--keep-db] [--da
 
 | Argument | Meaning |
 |---|---|
-| `<workflow>` | A registered eval suite (today only `tidy_application`). |
+| `<workflow>` | A registered eval suite: `tidy_application` or `memory_writer`. |
 | `--case <name>` | Runs only the named case. Repeat it for several. A name the dataset doesn't have is a usage error. |
 | `--json` | Prints the report as JSON on stdout instead of the text table. |
 | `--keep-db` | Keeps the scratch database and prints its name on stderr, so you can inspect the runs. |
@@ -137,6 +137,12 @@ cargo run --bin eval -- tidy_application --json | jq .totals.pass_rate
 The guardrail cases check that a confident note (0.9, and exactly 0.8) is applied as an `add_note` action, that a note below the threshold (0.79, 0.2) goes to the review queue instead, that every run parks with its `draft_follow_up` pending, that an unknown application or a missing `confidence` fails the run, and that none of them retrieves a memory. The unknown-application case retries the way the app does (3 attempts with the queue's backoff), so it takes about half a minute with the default settings.
 
 The `recall:` cases check the `draft` step's retrieval: a relevant memory is retrieved and an unrelated one isn't, a proposed memory with matching words isn't, the memory sharing more terms with the query ranks first, a memory whose only match is a tag equal to the company is retrieved, no shared term retrieves nothing, and seven matching memories give exactly five rows.
+
+## The `memory_writer` eval set
+
+`api/evals/memory_writer.json` covers the [memory writer](memory-writer.md). Every case but the last calls the real model once, so it costs a few cents per run. Setup takes `{"memories": [...], "signals": [...]}`, both optional. It first deletes every signal, evidence row and memory, then inserts the memories as the `tidy_application` set does (returning `memory_<name>`) and then each signal, `{"name", "kind", "subject", "drafted", "approved"?, "reason"?}`, returning its id as `signal_<name>`. Signals get run id 0 and their 1-based position as their pending action or review item id. An approval's `changes` is the diff from `drafted` to `approved`, and an approval without `approved` is an unedited one (`changes: []`). `approved` on anything but an approval, or `reason` on anything but a dismissal, is a setup error.
+
+The cases check that an edit from "happy to relocate to NYC" to "remote only" becomes one `preference`/`location` proposal citing that signal, that a dismissal reason ("I won't work in crypto") becomes one preference, that an unedited approval teaches nothing, that correcting "two weeks' notice" to "one month's notice" proposes a revision of the confirmed `notice_period` answer instead of a new memory, and that a run with no signals makes no call. A case whose proposal falls below the 0.8 confidence threshold goes to the review queue and so fails its `created` label; the pass rate isn't expected to be 100%.
 
 ## Adding a suite
 
