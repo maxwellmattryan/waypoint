@@ -2,6 +2,7 @@
 	import AgentsCard from '#lib/components/dashboard/AgentsCard.svelte';
 	import ClaudeCard from '#lib/components/dashboard/ClaudeCard.svelte';
 	import DataCard from '#lib/components/dashboard/DataCard.svelte';
+	import GmailSyncCard from '#lib/components/dashboard/GmailSyncCard.svelte';
 	import GoogleCard from '#lib/components/dashboard/GoogleCard.svelte';
 	import SystemCard from '#lib/components/dashboard/SystemCard.svelte';
 	import { getDashboard } from '#lib/dashboard/dashboard.svelte.js';
@@ -19,6 +20,12 @@
 	<div class="grid gap-4 lg:grid-cols-3">
 		<SystemCard health={dashboard.health} />
 		<GoogleCard google={dashboard.google} />
+		<GmailSyncCard
+			gmailSync={dashboard.gmailSync}
+			google={dashboard.google}
+			syncing={dashboard.syncingGmail}
+			onsync={() => dashboard.syncGmail()}
+		/>
 		<ClaudeCard
 			test={dashboard.test}
 			testing={dashboard.testing}
