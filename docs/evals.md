@@ -229,6 +229,71 @@ cargo run --bin eval -- match_email --json \
 
 The cases and their classifications were written to exercise each signal and outcome, so these numbers check the rules, not how often matching is right on real mail. Real-inbox numbers need your own labelled emails.
 
+## Labelling emails
+
+The shipped email sets are synthetic. To measure Waypoint on your own mail, label some of your emails in the same format and run them as a private dataset.
+
+### Where files go
+
+| What | Shipped (synthetic, committed) | Yours (redacted, never committed) |
+|---|---|---|
+| `.eml` files | `api/fixtures/classify/` (and the dev corpus in `api/fixtures/emails/`) | `api/fixtures/private/` |
+| Datasets | `api/evals/classify_email.json`, `api/evals/match_email.json` | `api/evals/private/<workflow>.json` |
+
+Both private directories are in `.gitignore`, because this repo is public. A private dataset's `workflow` must still name the suite (`classify_email` or `match_email`). Setup paths are relative to `api/fixtures/`, so a private file is `private/<file>.eml`.
+
+### One email per file
+
+Each file is one raw RFC 5322 message, as Gmail's "Download message" saves it. Name it in kebab case after what it shows, for example `2026-10-gh-acme-rejection.eml`. The file stem becomes the email's provider id, so it must be unique across every directory a dataset reads.
+
+### Classify labels
+
+One case per email, named by its file stem:
+
+```json
+{
+  "name": "2026-10-gh-acme-rejection",
+  "setup": {"emails": ["private/2026-10-gh-acme-invite.eml", "private/2026-10-gh-acme-rejection.eml"]},
+  "input": {"email_id": "${email_id}"},
+  "expect": {"status": "succeeded", "output": {
+    "class": "rejection",
+    "company": "Acme",
+    "proposed_times": [{"start_utc": "2026-10-27T21:00:00Z"}, {"start_utc": null}]
+  }},
+  "note": "Says 'not at this time', but closes the process: a rejection."
+}
+```
+
+- `setup.emails` lists the email last. A thread reply lists the messages it answers first, oldest first, so the prompt sees the thread.
+- `class` is required: `rejection`, `interview_invite`, `availability_request`, `offer` or `other`.
+- `company` only when the email names the company in exactly one form. Leave it out when it says "Acme" in one place and "Acme Corp" in another, or names no company.
+- `proposed_times` when the email proposes or confirms times: one entry per time, in the order the email gives them, with `start_utc` in RFC 3339 with `Z`, or `null` when the email states no zone. Work each instant out with a calculation, for example `TZ=America/Los_Angeles date -j -f '%Y-%m-%d %H:%M' '2026-10-27 14:00' -u +%FT%TZ` on macOS.
+- Anything you leave out is unlabelled and isn't checked. Role, stage and interviewer are free-form, so leave them out.
+- `note` is an optional one-line string: why a borderline label is what it is. Scoring and the report ignore it.
+
+### Match labels
+
+Use the `match_email` setup shape [above](#the-match_email-eval-set): your applications, then each email with the classification to store and, for a thread, `matched_to` on the earlier email. Label `expect.output.status` and `expect.output.application_id` (`"${application_<name>}"` or `null`), and `review_items` and `actions` where they matter.
+
+### Redaction rules
+
+- Replace every person's name and address, and every company's own domain, with `.example` equivalents (`dana@acme.example`). Keep a company name only if you're fine with it being in your eval set.
+- Keep ATS and job-board sender domains (`greenhouse-mail.io`, `lever.co`, `ashbyhq.com`, `myworkday.com`, `linkedin.com`, …) so the heuristics still fire.
+- Keep the `Message-ID`, `In-Reply-To` and `References` structure, but redact their domain parts.
+- Delete tracking links, unsubscribe tokens, phone numbers, postal addresses and every attachment other than an `.ics` invite.
+- Keep dates, time zones and any wording that affects the label.
+- Check that the redacted file still scores as a candidate by running its case. Setup ingests it with the real heuristics, but the eval classifies it either way, so run with `--keep-db` and check the stored verdict (`SELECT provider_message_id, verdict, verdict_reasons FROM emails` in the scratch database). A real inbox would never send a `skip` email to the model.
+
+### Running a private dataset
+
+```sh
+docker compose up -d --wait db
+cargo run --bin eval -- classify_email --dataset api/evals/private/classify_email.json
+cargo run --bin eval -- match_email --dataset api/evals/private/match_email.json
+```
+
+Add `--json` and use the accuracy commands above to get the numbers.
+
 ## Adding a suite
 
 1. Implement `waypoint_api::evals::Suite` for the workflow, next to it in `api/src/workflows/`: `workflow()` returns its name, and `setup()` seeds the rows a case's `setup` describes and returns the variables its placeholders use.
