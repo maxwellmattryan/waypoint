@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createApiClient, type Memory, type MemoryInput } from '#lib/api';
+import { createApiClient, type Memory, type MemoryInput, type MemorySignal } from '#lib/api';
 import {
 	confirmMemory,
 	createMemory,
 	deleteMemory,
 	getMemory,
 	listMemories,
+	listMemoryEvidence,
 	updateMemory,
 	type Result
 } from './api';
@@ -23,6 +24,19 @@ const memory: Memory = {
 	source_label: null,
 	created_at: '2026-10-22T00:00:00Z',
 	updated_at: '2026-10-22T00:00:00Z'
+};
+const signal: MemorySignal = {
+	id: 3,
+	kind: 'rejection',
+	run_id: 12,
+	pending_action_id: 5,
+	review_item_id: null,
+	subject: 'send_email',
+	drafted: { to: 'a@example.test' },
+	approved: null,
+	changes: null,
+	reason: null,
+	created_at: '2026-10-22T00:00:00Z'
 };
 const input: MemoryInput = {
 	kind: 'preference',
@@ -77,6 +91,14 @@ const calls: {
 		data: memory,
 		method: 'GET',
 		url: 'http://api.test/memories/7'
+	},
+	{
+		name: 'evidence',
+		call: (c) => listMemoryEvidence(c, 7),
+		ok: () => json([signal]),
+		data: [signal],
+		method: 'GET',
+		url: 'http://api.test/memories/7/evidence'
 	},
 	{
 		name: 'create',
