@@ -91,6 +91,7 @@ pub fn rocket(
                 memories::list,
                 memories::create,
                 memories::show,
+                memories::evidence,
                 memories::update,
                 memories::confirm,
                 memories::delete,

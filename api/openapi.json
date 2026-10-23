@@ -1869,6 +1869,51 @@
         }
       }
     },
+    "/memories/{id}/evidence": {
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "The learning signals behind a memory: the decisions the memory writer learned it from.",
+        "operationId": "list_memory_evidence",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The memory's id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signals linked to the memory as evidence, `id` descending; `[]` when it has none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemorySignal"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not a local address"
+          },
+          "404": {
+            "description": "No memory has this id"
+          },
+          "500": {
+            "description": "The evidence could not be read"
+          }
+        }
+      }
+    },
     "/memory-signals": {
       "get": {
         "tags": [

@@ -24,6 +24,7 @@ use crate::applications::{
     ApiError, FieldError, JsonContent, REQUIRED, ValidationErrors, internal, parsed, text,
 };
 use crate::host::{LocalHost, NotCrossSite};
+use crate::memory_signals::{self, MemorySignal};
 
 /// Most characters in `content`.
 pub const MAX_CONTENT: usize = 5_000;
@@ -573,6 +574,33 @@ pub async fn show(
     pool: &State<PgPool>,
 ) -> Result<Json<Memory>, ApiError> {
     find(pool, id).await.map(Json)
+}
+
+/// The learning signals behind a memory: the decisions the memory writer learned it from.
+#[utoipa::path(
+    get,
+    path = "/memories/{id}/evidence",
+    tag = "memories",
+    operation_id = "list_memory_evidence",
+    params(("id" = i64, Path, description = "The memory's id")),
+    responses(
+        (status = 200, description = "Signals linked to the memory as evidence, `id` descending; `[]` when it has none", body = [MemorySignal]),
+        (status = 403, description = "The `Host` header is not a local address"),
+        (status = 404, description = "No memory has this id"),
+        (status = 500, description = "The evidence could not be read"),
+    )
+)]
+#[rocket::get("/memories/<id>/evidence")]
+pub async fn evidence(
+    _host: LocalHost,
+    id: i64,
+    pool: &State<PgPool>,
+) -> Result<Json<Vec<MemorySignal>>, ApiError> {
+    find(pool, id).await?;
+    memory_signals::evidence_for(pool, id)
+        .await
+        .map(Json)
+        .map_err(internal("list memory evidence"))
 }
 
 /// Memory `id`, or a 404.
