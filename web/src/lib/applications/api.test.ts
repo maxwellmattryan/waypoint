@@ -53,6 +53,7 @@ const note: ApplicationEvent = {
 	to_status: null,
 	stage_name: null,
 	body: 'Called back',
+	source_email: null,
 	created_at: '2026-10-22T00:00:00Z'
 };
 

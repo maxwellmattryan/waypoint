@@ -10,6 +10,7 @@ const base: ApplicationEvent = {
 	to_status: null,
 	stage_name: null,
 	body: null,
+	source_email: null,
 	created_at: '2026-10-22T15:04:00Z'
 };
 

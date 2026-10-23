@@ -1,6 +1,7 @@
 //! The workflows and tools registered in the running app (see docs/agent-runtime.md).
 
 pub mod classify_email;
+pub mod match_email;
 pub mod memory_writer;
 pub mod tidy;
 

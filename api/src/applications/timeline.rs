@@ -80,12 +80,24 @@ impl TryFrom<String> for EventKind {
     }
 }
 
+/// The email that caused an event, as the timeline shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+pub struct SourceEmail {
+    pub id: i64,
+    pub subject: String,
+    #[schema(required = true)]
+    pub from_name: Option<String>,
+    #[schema(required = true)]
+    pub from_address: Option<String>,
+    #[schema(required = true)]
+    pub sent_at: Option<DateTime<Utc>>,
+}
+
 /// One `application_events` row. Which of the optional fields are set depends on `kind`.
-#[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct ApplicationEvent {
     pub id: i64,
     pub application_id: i64,
-    #[sqlx(try_from = "String")]
     pub kind: EventKind,
     // The `Option` fields are always serialized (as `null` when empty), so they are
     // required in the schema.
@@ -101,11 +113,63 @@ pub struct ApplicationEvent {
     /// The text of a `note` or `rejection_feedback`.
     #[schema(required = true)]
     pub body: Option<String>,
+    /// The email that caused the event (an email-driven status or stage change); `null`
+    /// for every other event and once the email is deleted.
+    #[schema(required = true)]
+    pub source_email: Option<SourceEmail>,
     pub created_at: DateTime<Utc>,
 }
 
-const COLUMNS: &str = "id, application_id, kind, from_status, to_status, stage_name, body, \
-                       created_at";
+/// An event joined with its source email, as one flat row.
+#[derive(sqlx::FromRow)]
+struct EventRow {
+    id: i64,
+    application_id: i64,
+    #[sqlx(try_from = "String")]
+    kind: EventKind,
+    from_status: Option<ApplicationStatus>,
+    to_status: Option<ApplicationStatus>,
+    stage_name: Option<String>,
+    body: Option<String>,
+    created_at: DateTime<Utc>,
+    source_email_id: Option<i64>,
+    source_subject: Option<String>,
+    source_from_name: Option<String>,
+    source_from_address: Option<String>,
+    source_sent_at: Option<DateTime<Utc>>,
+}
+
+impl From<EventRow> for ApplicationEvent {
+    fn from(row: EventRow) -> Self {
+        let source_email = match (row.source_email_id, row.source_subject) {
+            (Some(id), Some(subject)) => Some(SourceEmail {
+                id,
+                subject,
+                from_name: row.source_from_name,
+                from_address: row.source_from_address,
+                sent_at: row.source_sent_at,
+            }),
+            _ => None,
+        };
+        Self {
+            id: row.id,
+            application_id: row.application_id,
+            kind: row.kind,
+            from_status: row.from_status,
+            to_status: row.to_status,
+            stage_name: row.stage_name,
+            body: row.body,
+            source_email,
+            created_at: row.created_at,
+        }
+    }
+}
+
+/// The select list of an [`EventRow`] from `ev` (events) left-joined to `m` (emails).
+const SELECT: &str = "SELECT ev.id, ev.application_id, ev.kind, ev.from_status, ev.to_status, \
+                      ev.stage_name, ev.body, ev.created_at, m.id AS source_email_id, \
+                      m.subject AS source_subject, m.from_name AS source_from_name, \
+                      m.from_address AS source_from_address, m.sent_at AS source_sent_at";
 
 /// The kinds of entry the user writes directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, utoipa::ToSchema)]
@@ -145,10 +209,50 @@ pub(crate) async fn record(
     stage_name: Option<&str>,
     body: Option<&str>,
 ) -> Result<ApplicationEvent, sqlx::Error> {
-    sqlx::query_as(&format!(
-        "INSERT INTO application_events \
-         (application_id, kind, from_status, to_status, stage_name, body) \
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING {COLUMNS}"
+    insert(conn, application_id, kind, from, to, stage_name, body, None).await
+}
+
+/// [`record`] for an event an email caused: the event names `source_email_id`, or no
+/// email when that one no longer exists.
+pub(crate) async fn record_sourced(
+    conn: &mut PgConnection,
+    application_id: i64,
+    kind: EventKind,
+    from: Option<ApplicationStatus>,
+    to: Option<ApplicationStatus>,
+    stage_name: Option<&str>,
+    source_email_id: Option<i64>,
+) -> Result<ApplicationEvent, sqlx::Error> {
+    insert(
+        conn,
+        application_id,
+        kind,
+        from,
+        to,
+        stage_name,
+        None,
+        source_email_id,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert(
+    conn: &mut PgConnection,
+    application_id: i64,
+    kind: EventKind,
+    from: Option<ApplicationStatus>,
+    to: Option<ApplicationStatus>,
+    stage_name: Option<&str>,
+    body: Option<&str>,
+    source_email_id: Option<i64>,
+) -> Result<ApplicationEvent, sqlx::Error> {
+    sqlx::query_as::<_, EventRow>(&format!(
+        "WITH ev AS (INSERT INTO application_events \
+           (application_id, kind, from_status, to_status, stage_name, body, source_email_id) \
+           VALUES ($1, $2, $3, $4, $5, $6, (SELECT id FROM emails WHERE id = $7)) \
+           RETURNING *) \
+         {SELECT} FROM ev LEFT JOIN emails m ON m.id = ev.source_email_id"
     ))
     .bind(application_id)
     .bind(kind.as_str())
@@ -156,8 +260,10 @@ pub(crate) async fn record(
     .bind(to.map(ApplicationStatus::as_str))
     .bind(stage_name)
     .bind(body)
+    .bind(source_email_id)
     .fetch_one(conn)
     .await
+    .map(ApplicationEvent::from)
 }
 
 /// Locks an application's row for the rest of the transaction and returns its status, or
@@ -220,14 +326,14 @@ pub async fn list_events(
     pool: &State<PgPool>,
 ) -> Result<Json<Vec<ApplicationEvent>>, ApiError> {
     ensure_exists(pool, id).await?;
-    sqlx::query_as(&format!(
-        "SELECT {COLUMNS} FROM application_events WHERE application_id = $1 \
-         ORDER BY created_at DESC, id DESC"
+    sqlx::query_as::<_, EventRow>(&format!(
+        "{SELECT} FROM application_events ev LEFT JOIN emails m ON m.id = ev.source_email_id \
+         WHERE ev.application_id = $1 ORDER BY ev.created_at DESC, ev.id DESC"
     ))
     .bind(id)
     .fetch_all(pool.inner())
     .await
-    .map(Json)
+    .map(|rows| Json(rows.into_iter().map(ApplicationEvent::from).collect()))
     .map_err(internal("read a timeline"))
 }
 

@@ -2837,6 +2837,7 @@
           "to_status",
           "stage_name",
           "body",
+          "source_email",
           "created_at"
         ],
         "properties": {
@@ -2872,6 +2873,17 @@
           },
           "kind": {
             "$ref": "#/components/schemas/EventKind"
+          },
+          "source_email": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SourceEmail",
+                "description": "The email that caused the event (an email-driven status or stage change); `null`\nfor every other event and once the email is deleted."
+              }
+            ]
           },
           "stage_name": {
             "type": [
@@ -4627,6 +4639,45 @@
           "remove",
           "replace"
         ]
+      },
+      "SourceEmail": {
+        "type": "object",
+        "description": "The email that caused an event, as the timeline shows it.",
+        "required": [
+          "id",
+          "subject",
+          "from_name",
+          "from_address",
+          "sent_at"
+        ],
+        "properties": {
+          "from_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "from_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sent_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "subject": {
+            "type": "string"
+          }
+        }
       },
       "SourceKind": {
         "type": "string",

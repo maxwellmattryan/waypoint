@@ -5,7 +5,9 @@
 use utoipa::OpenApi;
 
 use crate::applications::stages::{self, NewStage, Stage, StageChange, StageOrder};
-use crate::applications::timeline::{self, ApplicationEvent, EntryKind, EventKind, NewEntry};
+use crate::applications::timeline::{
+    self, ApplicationEvent, EntryKind, EventKind, NewEntry, SourceEmail,
+};
 use crate::applications::{
     self, Application, ApplicationInput, ApplicationStatus, FieldError, NewApplication,
     StatusChange, ValidationErrors,
@@ -111,6 +113,7 @@ use crate::workflows::tidy::{self, TidyRequest};
         StageChange,
         StageOrder,
         ApplicationEvent,
+        SourceEmail,
         EventKind,
         NewEntry,
         EntryKind,

@@ -773,6 +773,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             kind: components["schemas"]["EventKind"];
+            source_email: null | components["schemas"]["SourceEmail"];
             /** @description The stage's name when the event was written, for the `stage_*` kinds. */
             stage_name: string | null;
             to_status: null | components["schemas"]["ApplicationStatus"];
@@ -1434,6 +1435,16 @@ export interface components {
          * @enum {string}
          */
         SignalOp: "add" | "remove" | "replace";
+        /** @description The email that caused an event, as the timeline shows it. */
+        SourceEmail: {
+            from_address: string | null;
+            from_name: string | null;
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            sent_at: string | null;
+            subject: string;
+        };
         /**
          * @description Where a memory came from.
          * @enum {string}

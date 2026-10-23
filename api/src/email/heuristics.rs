@@ -12,7 +12,7 @@ use super::{Ats, VerdictKind};
 pub const HEURISTICS_VERSION: i32 = 1;
 
 /// ATS sender domains.
-const ATS_SENDERS: [(&str, Ats); 7] = [
+pub(crate) const ATS_SENDERS: [(&str, Ats); 7] = [
     ("greenhouse.io", Ats::Greenhouse),
     ("greenhouse-mail.io", Ats::Greenhouse),
     ("lever.co", Ats::Lever),
@@ -132,7 +132,8 @@ impl KnownCompanies {
     }
 }
 
-fn company_key(s: &str) -> String {
+/// `s` lowercased with every non-alphanumeric character removed.
+pub(crate) fn company_key(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)
@@ -297,7 +298,8 @@ pub fn score(input: &HeuristicInput, known: &KnownCompanies) -> Verdict {
     }
 }
 
-fn domain(address: &str) -> Option<&str> {
+/// The part of `address` after its last `@`, unless that is empty.
+pub(crate) fn domain(address: &str) -> Option<&str> {
     address
         .rsplit_once('@')
         .map(|(_, d)| d)
@@ -305,7 +307,7 @@ fn domain(address: &str) -> Option<&str> {
 }
 
 /// `domain` is `target` or a subdomain of it.
-fn domain_matches(domain: &str, target: &str) -> bool {
+pub(crate) fn domain_matches(domain: &str, target: &str) -> bool {
     domain == target
         || domain
             .strip_suffix(target)
