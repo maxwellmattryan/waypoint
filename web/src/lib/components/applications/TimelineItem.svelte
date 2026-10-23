@@ -8,10 +8,12 @@
 
 <script lang="ts">
 	import { formatDateTime } from '#lib/applications/format.js';
-	import { describeEvent } from '#lib/applications/timeline.js';
+	import { describeEvent, describeSource } from '#lib/applications/timeline.js';
 	import { Badge } from '#lib/components/ui';
 
 	let { event }: TimelineItemProps = $props();
+
+	const source = $derived(describeSource(event));
 </script>
 
 <div class="flex flex-col gap-1">
@@ -24,6 +26,9 @@
 	<time datetime={event.created_at} class="text-xs text-fg-muted">
 		{formatDateTime(event.created_at)}
 	</time>
+	{#if source}
+		<p class="text-xs break-words text-fg-muted">{source}</p>
+	{/if}
 	{#if event.body && (event.kind === 'note' || event.kind === 'rejection_feedback')}
 		<p class="text-sm break-words whitespace-pre-wrap text-fg">{event.body}</p>
 	{/if}

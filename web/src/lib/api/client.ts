@@ -80,6 +80,8 @@ export type PendingAction = components['schemas']['PendingAction'];
 export type AgentAction = components['schemas']['AgentAction'];
 /** A result a step wasn't confident enough to apply. */
 export type ReviewItem = components['schemas']['ReviewItem'];
+/** The email that caused a timeline event. */
+export type SourceEmail = components['schemas']['SourceEmail'];
 /** One learning signal: an approval, rejection or dismissal the user made. */
 export type MemorySignal = components['schemas']['MemorySignal'];
 /** What decision a learning signal records. */

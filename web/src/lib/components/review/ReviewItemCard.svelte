@@ -3,31 +3,67 @@
 
 	export interface ReviewItemCardProps {
 		item: ReviewItem;
-		/** A dismissal is in flight; the button is disabled. */
+		/** A decision is in flight; the buttons are disabled. */
 		busy?: boolean;
 		ondismiss: () => void;
+		/** Applies the item. Only email review items with a readable payload offer it. */
+		onaccept?: () => void;
 	}
 </script>
 
 <script lang="ts">
-	import { Badge, Button, Card, JsonView } from '#lib/components/ui';
+	import { slide } from 'svelte/transition';
+	import { Badge, Button, Card, JsonView, type BadgeTone } from '#lib/components/ui';
+	import { easings, motionDuration } from '#lib/motion.js';
+	import { describeEmailReview } from '#lib/review/email.js';
+	import EmailReviewSummary from './EmailReviewSummary.svelte';
 	import ItemMeta from './ItemMeta.svelte';
 
-	let { item, busy = false, ondismiss }: ReviewItemCardProps = $props();
+	let { item, busy = false, ondismiss, onaccept }: ReviewItemCardProps = $props();
 
 	const confidence = $derived(Math.round(item.confidence * 100));
+	const summary = $derived(describeEmailReview(item));
+	const badge = $derived<{ label: string; tone: BadgeTone }>(
+		summary?.badge ?? { label: 'Low confidence', tone: 'warning' }
+	);
+	let showRaw = $state(false);
+	const rawId = $derived(`review-item-${item.id}-raw`);
 </script>
 
 <Card class="flex flex-col gap-4" data-review-item={item.id}>
 	<div class="flex flex-col gap-2">
 		<div class="flex flex-wrap items-center gap-2">
-			<Badge tone="warning">Low confidence</Badge>
+			<Badge tone={badge.tone}>{badge.label}</Badge>
 			<span class="text-xs text-fg-muted tabular-nums">{confidence}% confident</span>
 		</div>
 		<ItemMeta name={item.kind} runId={item.run_id} createdAt={item.created_at} />
 	</div>
-	<JsonView value={item.payload} label="Result for {item.kind}" />
-	<div class="flex justify-end">
+	{#if summary}
+		<EmailReviewSummary {summary} />
+		<div class="flex flex-col gap-2">
+			<Button
+				variant="ghost"
+				size="sm"
+				class="self-start"
+				aria-expanded={showRaw}
+				aria-controls={rawId}
+				onclick={() => (showRaw = !showRaw)}
+			>
+				{showRaw ? 'Hide raw payload' : 'Show raw payload'}
+			</Button>
+			{#if showRaw}
+				<div id={rawId} transition:slide={{ duration: motionDuration('base'), easing: easings.standard }}>
+					<JsonView value={item.payload} label="Result for {item.kind}" />
+				</div>
+			{/if}
+		</div>
+	{:else}
+		<JsonView value={item.payload} label="Result for {item.kind}" />
+	{/if}
+	<div class="flex justify-end gap-2">
 		<Button variant="secondary" disabled={busy} onclick={ondismiss}>Dismiss</Button>
+		{#if summary && onaccept}
+			<Button disabled={busy} onclick={onaccept}>Apply</Button>
+		{/if}
 	</div>
 </Card>

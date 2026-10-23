@@ -46,6 +46,7 @@ export type {
 	RunStepDetail,
 	SignalChange,
 	SignalKind,
+	SourceEmail,
 	SourceKind,
 	Stage,
 	StepStatus,

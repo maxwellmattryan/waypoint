@@ -1,4 +1,5 @@
 import type { ApplicationEvent, ApplicationStatus } from '#lib/api';
+import { formatDate } from './format';
 import { statusLabel } from './statuses';
 
 const label = (status: ApplicationStatus | null) => (status ? statusLabel[status] : 'unknown');
@@ -24,4 +25,29 @@ export function describeEvent(event: ApplicationEvent): string {
 		case 'rejection_feedback':
 			return 'Rejection feedback';
 	}
+}
+
+/** An email's subject as shown: trimmed, or "(no subject)" when blank. */
+export function emailSubject(subject: string): string {
+	return subject.trim() || '(no subject)';
+}
+
+/** An email's sender as shown: the display name, else the address, else null. */
+export function emailSender(fromName: string | null, fromAddress: string | null): string | null {
+	return fromName?.trim() || fromAddress?.trim() || null;
+}
+
+/**
+ * The line naming the email that caused an event, e.g.
+ * `From email: "Update on your application" · Vandelay Industries · Sep 10, 2026`, or null for
+ * an event no email caused. A missing sender or date is left out.
+ */
+export function describeSource(event: ApplicationEvent): string | null {
+	const source = event.source_email;
+	if (!source) return null;
+	const parts = [`From email: "${emailSubject(source.subject)}"`];
+	const sender = emailSender(source.from_name, source.from_address);
+	if (sender) parts.push(sender);
+	if (source.sent_at) parts.push(formatDate(source.sent_at));
+	return parts.join(' · ');
 }

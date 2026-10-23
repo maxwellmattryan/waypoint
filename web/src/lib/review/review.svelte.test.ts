@@ -103,6 +103,7 @@ function setupQueue(
 		vi.fn<(c: unknown, id: number, input?: Record<string, unknown>) => Promise<Result<PendingAction>>>();
 	const reject = vi.fn<(c: unknown, id: number) => Promise<Result<PendingAction>>>();
 	const dismiss = vi.fn<(c: unknown, id: number, reason?: string) => Promise<Result<ReviewItem>>>();
+	const accept = vi.fn<(c: unknown, id: number) => Promise<Result<ReviewItem>>>();
 	const store = new QueueStore({
 		client,
 		listPending,
@@ -110,9 +111,51 @@ function setupQueue(
 		approve,
 		reject,
 		dismiss,
+		accept,
 		paused: () => deps.paused ?? false
 	});
-	return { store, listPending, listReview, approve, reject, dismiss };
+	return { store, listPending, listReview, approve, reject, dismiss, accept };
+}
+
+const sentEmail = {
+	subject: 'Next steps',
+	from_name: 'Stark Scheduling',
+	from_address: 'calendar@stark.example',
+	sent_at: null
+};
+
+/** An `email.match` review item for Stark Industries. */
+function emailMatch(id: number): ReviewItem {
+	return review(id, {
+		kind: 'email.match',
+		payload: {
+			email_id: 3,
+			classification_id: 7,
+			class: 'rejection',
+			email: sentEmail,
+			application_id: 12,
+			company: 'Stark Industries',
+			title: 'Software Engineer',
+			ops: [{ op: 'set_status', from: 'applied', to: 'rejected' }],
+			reasons: ['company'],
+			review_reasons: ['low_confidence'],
+			candidates: []
+		}
+	});
+}
+
+/** An `email.new_application` review item for Globex. */
+function newApplication(id: number): ReviewItem {
+	return review(id, {
+		kind: 'email.new_application',
+		payload: {
+			email_id: 4,
+			classification_id: 8,
+			class: 'other',
+			email: sentEmail,
+			application: { company: 'Globex', title: 'Data Engineer', status: 'applied' }
+		}
+	});
 }
 
 const keys = (store: QueueStore) => store.items.map(queueKey);
@@ -222,6 +265,39 @@ describe('QueueStore', () => {
 			]);
 		}
 	);
+
+	it('applies an email review item and toasts', async () => {
+		const { store, accept } = setupQueue([ok([])], [ok([emailMatch(2), newApplication(3)])]);
+		await store.load();
+		accept.mockResolvedValueOnce(ok({ ...emailMatch(2), status: 'accepted' }));
+		accept.mockResolvedValueOnce(ok({ ...newApplication(3), status: 'accepted' }));
+		await store.accept(2);
+		await store.accept(3);
+		expect(accept).toHaveBeenNthCalledWith(1, client, 2);
+		expect(accept).toHaveBeenNthCalledWith(2, client, 3);
+		expect(store.items).toEqual([]);
+		expect(store.busy.size).toBe(0);
+		expect(toasts()).toEqual([
+			['success', 'Applied to Stark Industries', undefined],
+			['success', 'Added Globex', undefined]
+		]);
+	});
+
+	it('keeps the item when apply conflicts', async () => {
+		const { store, accept, listReview } = setupQueue(
+			[ok([]), ok([])],
+			[ok([emailMatch(2)]), ok([emailMatch(2)])]
+		);
+		await store.load();
+		accept.mockResolvedValueOnce({ kind: 'conflict' });
+		expect(await store.accept(2)).toEqual({ kind: 'conflict' });
+		await settle();
+		expect(listReview).toHaveBeenCalledTimes(2);
+		expect(keys(store)).toEqual(['review:2']);
+		expect(toasts()).toEqual([
+			['danger', "Couldn't apply", 'The application changed or is gone since. Nothing was changed.']
+		]);
+	});
 
 	it('keeps the item when the decision fails', async () => {
 		const { store, dismiss } = setupQueue([ok([])], [ok([review(2)])]);

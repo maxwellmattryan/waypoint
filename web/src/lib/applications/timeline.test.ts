@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { ApplicationEvent } from '#lib/api';
-import { describeEvent } from './timeline';
+import type { ApplicationEvent, SourceEmail } from '#lib/api';
+import { formatDate } from './format';
+import { describeEvent, describeSource } from './timeline';
 
 const base: ApplicationEvent = {
 	id: 1,
@@ -36,5 +37,49 @@ const cases: [Partial<ApplicationEvent>, string][] = [
 describe('describeEvent', () => {
 	it.each(cases)('%o reads "%s"', (fields, want) => {
 		expect(describeEvent({ ...base, ...fields })).toBe(want);
+	});
+});
+
+const email: SourceEmail = {
+	id: 7,
+	subject: 'Update on your application',
+	from_name: 'Vandelay Industries',
+	from_address: 'no-reply@ashbyhq.com',
+	sent_at: '2026-09-10T21:45:00Z'
+};
+const sent = formatDate(email.sent_at!);
+
+const sourceCases: [string, SourceEmail | null, string | null][] = [
+	['no source email', null, null],
+	[
+		'subject, display name and date',
+		email,
+		`From email: "Update on your application" · Vandelay Industries · ${sent}`
+	],
+	[
+		'the address without a display name',
+		{ ...email, from_name: null },
+		`From email: "Update on your application" · no-reply@ashbyhq.com · ${sent}`
+	],
+	[
+		'a blank subject',
+		{ ...email, subject: '  ' },
+		`From email: "(no subject)" · Vandelay Industries · ${sent}`
+	],
+	[
+		'no date',
+		{ ...email, sent_at: null },
+		'From email: "Update on your application" · Vandelay Industries'
+	],
+	[
+		'no sender and no date',
+		{ ...email, from_name: null, from_address: null, sent_at: null },
+		'From email: "Update on your application"'
+	]
+];
+
+describe('describeSource', () => {
+	it.each(sourceCases)('%s', (_, source_email, want) => {
+		expect(describeSource({ ...base, kind: 'status_changed', source_email })).toBe(want);
 	});
 });
