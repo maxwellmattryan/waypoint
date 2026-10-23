@@ -68,6 +68,7 @@ pub fn eval_suites() -> Vec<Arc<dyn Suite>> {
         Arc::new(memory_writer::MemoryWriterEval),
         Arc::new(classify_email::ClassifyEmailEval),
         Arc::new(match_email::MatchEmailEval),
+        Arc::new(propose_interview::ProposeInterviewEval),
     ]
 }
 
@@ -170,7 +171,8 @@ mod tests {
                 "tidy_application",
                 "memory_writer",
                 "classify_email",
-                "match_email"
+                "match_email",
+                "propose_interview"
             ]
         );
 

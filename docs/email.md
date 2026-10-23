@@ -325,3 +325,62 @@ Undo (`POST /actions/{id}/undo`) refuses rather than overwrites. A status undo i
 `fake-claude.sh` mode `classify_by_email` answers per email: it plays the fixture named on the first line of `api/tests/fixtures/claude/classify_by_email.tsv` (`<needle>TAB<file>.jsonl[TAB<seconds>]`) whose needle is in the call's stdin, else `classify_email_other.jsonl` (`other`, confidence 0.9, every field null). `api/tests/match_email.rs` imports the fixture corpus with it and checks the whole flow to application updates, review items and undo.
 
 The labelled eval set is described in [evals.md](evals.md#the-match_email-eval-set).
+
+## Calendar proposals
+
+`propose_interview` (`api/src/workflows/propose_interview.rs`) turns the interview times of a linked email into Google Calendar events. Each event is created only after you click **Add to calendar** on the Review page; until then nothing leaves Waypoint.
+
+### Triggers
+
+A classification is proposed from once it is linked to an application:
+
+- its `match_email` run ends `applied` or `no_action`, or
+- you accept its `email.match` or `email.new_application` review item.
+
+Waypoint then stores one `interview_events` row per slot and queues one `propose_interview` run per stored row, in the same transaction that links the match. Each is an ordinary `agent_run` job, so the kill switch, the concurrency limit and retries apply. Outcomes `review`, `unmatched` and `skipped` propose nothing, and neither does a dismissed review item. Classifications linked before this shipped aren't proposed.
+
+### Slots
+
+`select_slots(class, proposed_times, now)`:
+
+- Only `interview_invite` and `availability_request` have slots.
+- A time is kept when its `start_utc` is set (the zone is known) and later than now. Times without a zone and past times (a 30-day backfill has plenty) are dropped.
+- The end is `end_utc`, or 30 minutes after the start. You can edit it before approving.
+- A repeated start keeps its first time; at most 5 are kept, in email order, each numbered `i` of `n`.
+- The slot's `time_zone` is the time's zone when it is `UTC` or an IANA name, and `null` for a `±HH:MM` offset, because Google needs a name. The instant stays exact.
+
+### The request
+
+Built once, when the row is stored, and kept on it (`request`), so a rerun of the step finds the same pending action even if the application was renamed in between:
+
+```json
+{"summary": "Interview: Hooli — Technical interview",
+ "description": "Role: Backend Engineer\nStage: Technical interview\nInterviewer: Gavin Belson\nProposed time 2 of 3: \"Tue Nov 3, 2pm ET\"\nFrom email: \"Interview availability\" · Hooli Recruiting\nAdded by Waypoint after your approval.",
+ "start": "2030-11-03T19:00:00Z", "end": "2030-11-03T19:45:00Z", "time_zone": "America/New_York"}
+```
+
+- `summary`: `Interview: <company> — <stage>`, or the application's title when the stage is blank; at most 200 characters.
+- `description`: the lines above, each left out when its value is blank. `Proposed time <i> of <n>` only when there are several slots (else `Proposed time:`), `(no subject)` for a blank subject, and the sender's name, else its address. Values are trimmed with newlines turned into spaces; at most 2000 characters.
+- No attendees, location, conference data or email body.
+
+### The `create` step
+
+Run input `{"interview_event_id"}`. The step loads the row (a row deleted with its application ends the run `skipped`; a row that isn't `proposed` returns as it is), then calls `create_calendar_event` with the stored request. The first call parks the run at the [approval gate](agent-runtime.md#approval-gate) and **calls nothing**. After **Approve** (or **Edit**, which uses the edited input) the run resumes and the handler runs once. On success one transaction marks the row `created` with `google_event_id`, `html_link` and `start_at`/`end_at` as created, and records an `interview_scheduled` timeline event naming the email, with body `<summary> · 2030-11-03 14:00–14:45 America/New_York` (in UTC without a zone; both dates when it ends on another day). `application.updated` follows. When the tool fails, the row becomes `failed` with the error (at most 500 bytes, never a token or URL) and the run fails.
+
+**Reject** ends the run `rejected` and marks its row `rejected` in the same transaction. Each slot is its own run, so you can approve one time and reject the others; Waypoint doesn't withdraw the siblings of an approved slot.
+
+Run output, every key always present: `{"interview_event_id", "application_id", "status" ("created", "rejected", "failed", "proposed" or "skipped"), "google_event_id", "html_link"}`.
+
+### The `create_calendar_event` tool
+
+`external`, so it always waits for your approval; it is registered in the production runtime and offered by the MCP server. Input `{summary, description, start, end, time_zone}` → output `{event_id, html_link, start, end}` (the UTC times sent). Before any request it checks the summary (1–200 characters trimmed), the description (at most 2000), `start`/`end` (RFC 3339, end after start, at most 24 hours) and the zone (`null`, `UTC` or an IANA name), with fixed messages that quote no value. It then takes a token from the connected Google account (not configured, not connected or reconnect required fail the proposal without a request) and makes the request described in [google-oauth.md](google-oauth.md#what-the-calendar-write-sends). It reads only `id` and an `https://` `htmlLink` back. 401 refreshes the token and retries once; 403, 429, other statuses, transport errors and a reply without `id` fail with a message naming only the status or kind. As with every `external` action, it never runs twice. There is no undo: delete the event in Google Calendar.
+
+### Dedup and the table
+
+`interview_events` has one row per proposed slot: `application_id` (rows go with their application), `email_id`, `classification_id`, `run_id`, `status` (`proposed`, `created`, `rejected`, `failed`), `proposed_start`, `request`, `start_at`, `end_at`, `google_event_id`, `html_link`, `error` and timestamps. It is unique on `(application_id, proposed_start)` and inserts skip conflicts, so a later email repeating a time, or a re-ingested email, adds nothing, and a rejected or failed time isn't proposed again. `DELETE /data` empties it; events already in Google Calendar stay there.
+
+### In the app
+
+The Review page shows a calendar proposal as "Add to Google Calendar" with the event, when it is (in the event's zone, or yours when it has none), the zone and the description lines, with the raw input behind **Show raw input**. Its approve button reads **Add to calendar**. The application timeline shows "Interview added to Google Calendar" with the body under it and the email line under that.
+
+The labelled eval set is described in [evals.md](evals.md#the-propose_interview-eval-set).

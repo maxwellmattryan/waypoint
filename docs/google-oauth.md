@@ -89,6 +89,17 @@ Like connect, disconnect answers 403 to a request from another website (`Sec-Fet
 
 Waypoint asks Google to revoke the grant and deletes the stored tokens either way. When the answer is `{"revoked":false}` Google didn't confirm, so remove Waypoint by hand at <https://myaccount.google.com/permissions>.
 
+## What the Calendar write sends
+
+Waypoint writes to Google Calendar only when you approve an interview proposal on the Review page (**Add to calendar**; see [email.md](email.md#calendar-proposals)). Each approval makes one `POST /calendar/v3/calendars/primary/events?sendUpdates=none`:
+
+- on your **primary** calendar, never another one,
+- with the summary, the description, the start and end (UTC, with the time zone name when the email gave one) and your default reminders,
+- with **no attendees**, location or conference link, and none of the email's body,
+- with `sendUpdates=none`, so Google notifies nobody.
+
+A refused access token (HTTP 401) is refreshed and the request sent once more; Google didn't process the refused one, so this can't create a second event. Any other failure ends the proposal `failed` and is never retried. Waypoint never updates or deletes an event: moving or deleting it is up to you in Google Calendar. Disconnecting Google or deleting all data leaves the events Waypoint created in your calendar.
+
 ## Delete all data
 
 The dashboard's Data card wipes everything Waypoint holds about you and cuts off its Google access. You confirm by typing `delete all data`. The API route is:
@@ -103,6 +114,6 @@ The phrase must match exactly (case-sensitive, not trimmed); anything else is a 
 
 1. Agents are paused, as with the [kill switch](agent-runtime.md#kill-switch), and **stay paused** afterwards. Resume them from the Agents card when you want.
 2. If an account is connected, its refresh token is decrypted and revoked at Google while the row still exists. This is best effort: if Google doesn't answer 2xx, the token doesn't decrypt or Google isn't configured, the deletion goes ahead anyway.
-3. One `TRUNCATE … RESTART IDENTITY` empties every user table: applications and their stages and events, resume versions (PDFs included), runs, steps, tool calls, model-call logs, jobs, stored emails and threads, the Gmail sync state (`gmail_sync_state`), the Google account and pending OAuth states. Only the migration history and the kill switch remain, so the install looks fresh.
+3. One `TRUNCATE … RESTART IDENTITY` empties every user table: applications and their stages and events, resume versions (PDFs included), runs, steps, tool calls, model-call logs, jobs, stored emails and threads, interview proposals (`interview_events`), the Gmail sync state (`gmail_sync_state`), the Google account and pending OAuth states. Events already created in Google Calendar stay there. Only the migration history and the kill switch remain, so the install looks fresh.
 
 The body's `google` says what happened to the grant: `revoked`, `not_revoked` (remove Waypoint by hand at <https://myaccount.google.com/permissions>; the dashboard shows a warning that stays until dismissed) or `not_connected`. After the wipe the API publishes `data.deleted`, and open pages refetch. Nothing outside Postgres is touched: `.env` and `WAYPOINT_TOKEN_KEY` stay as they are. There is no undo.

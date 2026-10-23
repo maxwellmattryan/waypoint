@@ -21,14 +21,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{PgConnection, PgPool, Postgres, Transaction};
 
-use crate::applications::timeline;
+use crate::applications::{ApplicationStatus, timeline};
 use crate::calendar::{CalendarClient, CalendarError, NewEvent};
 use crate::claude::head;
 use crate::events::EventBus;
 use crate::google::{self, Google, GoogleError};
 use crate::runs::{self, Run, StepContext, StepError, Workflow};
 use crate::tools::{Permission, Tool, ToolCallError, ToolContext, ToolError};
-use crate::workflows::classify_email::{EmailClass, NormalizedTime, Zone, parse_zone};
+use crate::workflows::classify_email::{
+    CLASSIFIER_VERSION, EmailClass, NormalizedTime, Zone, check_eval_path, current_key,
+    ingest_eval_fixture, parse_zone,
+};
 use crate::workflows::match_email::publish_updated;
 
 /// The workflow's name.
@@ -713,6 +716,169 @@ impl Workflow for ProposeInterview {
     }
 }
 
+/// A `propose_interview` eval case's `setup`: the application, the email to ingest (relative
+/// to `api/fixtures/`), its stored classification and the 1-based slot the case runs.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalSetup {
+    application: EvalApplication,
+    email: String,
+    classification: EvalClassification,
+    /// 1 when absent.
+    #[serde(default)]
+    slot: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalApplication {
+    company: String,
+    title: String,
+    /// `interviewing` when absent.
+    #[serde(default)]
+    status: Option<ApplicationStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvalClassification {
+    class: String,
+    confidence: f64,
+    #[serde(default)]
+    stage: Option<String>,
+    #[serde(default)]
+    interviewer: Option<String>,
+    proposed_times: Vec<NormalizedTime>,
+}
+
+impl EvalSetup {
+    /// Refuses a setup the seeding can't honour, before anything is written.
+    fn check(&self) -> Result<(), String> {
+        check_eval_path(&self.email)?;
+        let app = &self.application;
+        if app.company.trim().is_empty() || app.title.trim().is_empty() {
+            return Err("the application's company and title must not be blank".into());
+        }
+        let classification = &self.classification;
+        if EmailClass::parse(&classification.class).is_none() {
+            return Err(format!("{}: unknown class", self.email));
+        }
+        if !(0.0..=1.0).contains(&classification.confidence) {
+            return Err(format!("{}: confidence must be 0 to 1", self.email));
+        }
+        if self.slot == Some(0) {
+            return Err("slot is 1-based".into());
+        }
+        Ok(())
+    }
+}
+
+/// The eval suite for `propose_interview` (dataset `api/evals/propose_interview.json`).
+/// Setup clears the proposals, matches, classifications, emails, threads and applications;
+/// inserts the case's application with its `created` event; ingests the email without
+/// queuing a run; stores its `classified` row; and stores its proposals as of now, without
+/// queuing their runs. It makes no model call. Variables: `application_id`, `email_id`,
+/// `classification_id` and `interview_event_id` (the case's slot).
+pub struct ProposeInterviewEval;
+
+#[rocket::async_trait]
+impl crate::evals::Suite for ProposeInterviewEval {
+    fn workflow(&self) -> &'static str {
+        WORKFLOW
+    }
+
+    async fn setup(
+        &self,
+        pool: &PgPool,
+        setup: &Value,
+    ) -> Result<serde_json::Map<String, Value>, String> {
+        let setup = EvalSetup::deserialize(setup).map_err(|err| format!("invalid setup: {err}"))?;
+        setup.check()?;
+        for table in [
+            "interview_events",
+            "email_matches",
+            "email_classifications",
+            "emails",
+            "email_threads",
+            "application_events",
+            "application_stages",
+            "applications",
+        ] {
+            sqlx::query(&format!("DELETE FROM {table}"))
+                .execute(pool)
+                .await
+                .map_err(|err| format!("cannot clear {table}: {err}"))?;
+        }
+
+        let app = &setup.application;
+        let status = app.status.unwrap_or(ApplicationStatus::Interviewing);
+        let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+        let application_id: i64 = sqlx::query_scalar(
+            "INSERT INTO applications (company, title, status) VALUES ($1, $2, $3) RETURNING id",
+        )
+        .bind(app.company.trim())
+        .bind(app.title.trim())
+        .bind(status.as_str())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| format!("cannot insert the application: {err}"))?;
+        timeline::record(
+            &mut tx,
+            application_id,
+            timeline::EventKind::Created,
+            None,
+            Some(status),
+            None,
+            None,
+        )
+        .await
+        .map_err(|err| format!("cannot record the application: {err}"))?;
+        tx.commit().await.map_err(|err| err.to_string())?;
+
+        let email_id = ingest_eval_fixture(pool, &setup.email).await?;
+        let key = current_key(pool, email_id)
+            .await
+            .map_err(|err| format!("cannot read {}: {err}", setup.email))?;
+        let answer = &setup.classification;
+        let classification_id: i64 = sqlx::query_scalar(
+            "INSERT INTO email_classifications (email_id, input_key, classifier_version, \
+             status, class, confidence, stage, interviewer, proposed_times) \
+             VALUES ($1, $2, $3, 'classified', $4, $5, $6, $7, $8) RETURNING id",
+        )
+        .bind(email_id)
+        .bind(&key)
+        .bind(CLASSIFIER_VERSION)
+        .bind(&answer.class)
+        .bind(answer.confidence)
+        .bind(&answer.stage)
+        .bind(&answer.interviewer)
+        .bind(json!(answer.proposed_times))
+        .fetch_one(pool)
+        .await
+        .map_err(|err| format!("cannot classify {}: {err}", setup.email))?;
+
+        let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+        let ids = store_proposals(&mut tx, classification_id, application_id, Utc::now())
+            .await
+            .map_err(|err| format!("cannot store the proposals: {err}"))?;
+        tx.commit().await.map_err(|err| err.to_string())?;
+        let slot = setup.slot.unwrap_or(1);
+        let interview_event_id = ids.get(slot - 1).ok_or_else(|| {
+            format!(
+                "the setup proposes {} slot(s), so it has no slot {slot}",
+                ids.len()
+            )
+        })?;
+
+        let mut vars = serde_json::Map::new();
+        vars.insert("application_id".into(), json!(application_id));
+        vars.insert("email_id".into(), json!(email_id));
+        vars.insert("classification_id".into(), json!(classification_id));
+        vars.insert("interview_event_id".into(), json!(interview_event_id));
+        Ok(vars)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1088,6 +1254,71 @@ mod tests {
         ];
         for (start, end, zone, expected) in cases {
             assert_eq!(timeline_body(summary, at(start), at(end), zone), expected);
+        }
+    }
+
+    #[test]
+    fn propose_interview_dataset_parses() {
+        use crate::evals;
+        use crate::runs::RunStatus;
+        use crate::workflows::classify_email::EVAL_FIXTURES;
+
+        let dataset = evals::load(&evals::default_path(WORKFLOW), WORKFLOW)
+            .expect("the shipped dataset loads");
+        let names: Vec<&str> = dataset
+            .cases
+            .iter()
+            .map(|case| case.name.as_str())
+            .collect();
+        for name in [
+            "named-zone-with-end",
+            "utc-without-end-defaults-30-min",
+            "offset-zone-drops-time-zone",
+            "stage-and-interviewer-in-summary-and-description",
+            "blank-stage-uses-title",
+            "second-of-three-slots",
+        ] {
+            assert!(names.contains(&name), "{name} is missing");
+        }
+        for case in &dataset.cases {
+            let setup = EvalSetup::deserialize(&case.setup)
+                .unwrap_or_else(|err| panic!("{}: invalid setup: {err}", case.name));
+            setup
+                .check()
+                .unwrap_or_else(|err| panic!("{}: {err}", case.name));
+            assert!(
+                std::path::Path::new(EVAL_FIXTURES)
+                    .join(&setup.email)
+                    .is_file(),
+                "{}: {} is missing",
+                case.name,
+                setup.email
+            );
+            assert_eq!(
+                case.input,
+                json!({"interview_event_id": "${interview_event_id}"}),
+                "{}",
+                case.name
+            );
+            let expect = &case.expect;
+            assert_eq!(expect.status, RunStatus::AwaitingApproval, "{}", case.name);
+            assert_eq!(expect.actions, Some(Vec::new()), "{}", case.name);
+            assert_eq!(expect.review_items, Some(Vec::new()), "{}", case.name);
+            let pending = expect.pending_actions.as_deref().unwrap_or_default();
+            assert_eq!(pending.len(), 1, "{}", case.name);
+            assert_eq!(pending[0]["tool"], TOOL, "{}", case.name);
+            assert_eq!(pending[0]["status"], "pending", "{}", case.name);
+            let request = EventRequest::deserialize(&pending[0]["input"])
+                .unwrap_or_else(|err| panic!("{}: invalid input: {err}", case.name));
+            check_request(&request).unwrap_or_else(|err| panic!("{}: {err}", case.name));
+            for time in &setup.classification.proposed_times {
+                let start = time.start_utc.as_deref().and_then(instant);
+                assert!(
+                    start.is_some_and(|start| start.format("%Y").to_string() == "2030"),
+                    "{}: every case uses 2030 dates",
+                    case.name
+                );
+            }
         }
     }
 }
