@@ -24,6 +24,7 @@ use crate::applications::{ApiError, internal};
 use crate::events::{Event, EventBus};
 use crate::host::LocalHost;
 use crate::jobs::{self, Wake};
+use crate::memories::{MemoryKind, MemoryTopic};
 use crate::tools::Permission;
 
 /// Runs listed when `GET /runs` has no `limit`.
@@ -200,12 +201,37 @@ pub struct RunStepDetail {
     pub tool_calls: Vec<ToolCall>,
 }
 
-/// The `GET /runs/{id}` body: the run with its steps in order.
+/// One `run_memories` row: a memory a step retrieved, with a snapshot of it at retrieval
+/// time.
+#[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct RunMemory {
+    pub id: i64,
+    pub run_id: i64,
+    pub run_step_id: i64,
+    /// The name of the step that retrieved it.
+    pub step: String,
+    /// The memory; `null` once it has been deleted.
+    #[schema(required = true)]
+    pub memory_id: Option<i64>,
+    /// The memory's kind when it was retrieved.
+    pub kind: MemoryKind,
+    /// The memory's topic when it was retrieved.
+    pub topic: MemoryTopic,
+    /// The memory's content when it was retrieved.
+    pub content: String,
+    /// Its full-text rank for the step's query; 0 for a tag-only query.
+    pub score: f64,
+    pub created_at: DateTime<Utc>,
+}
+
+/// The `GET /runs/{id}` body: the run with its steps in order and the memories they used.
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct RunDetail {
     #[serde(flatten)]
     pub run: Run,
     pub steps: Vec<RunStepDetail>,
+    /// Every memory the run's steps retrieved, by step `ordinal`, then `id`.
+    pub memories: Vec<RunMemory>,
 }
 
 pub(crate) const RUN_COLUMNS: &str = "id, workflow, status, input, output, error, input_tokens, \
@@ -392,7 +418,7 @@ pub async fn list_runs(
     .await
 }
 
-/// A run with its steps by ordinal and each step's tool calls by id.
+/// A run with its steps by ordinal, each step's tool calls by id, and its memories.
 pub async fn get_detail(pool: &PgPool, id: i64) -> Result<Option<RunDetail>, sqlx::Error> {
     let Some(run) = sqlx::query_as::<_, Run>(&format!(
         "SELECT {RUN_COLUMNS} FROM agent_runs WHERE id = $1"
@@ -429,7 +455,20 @@ pub async fn get_detail(pool: &PgPool, id: i64) -> Result<Option<RunDetail>, sql
             step,
         })
         .collect();
-    Ok(Some(RunDetail { run, steps }))
+    let memories = sqlx::query_as(
+        "SELECT rm.id, rm.run_id, rm.run_step_id, s.name AS step, rm.memory_id, rm.kind, \
+         rm.topic, rm.content, rm.score, rm.created_at \
+         FROM run_memories rm JOIN run_steps s ON s.id = rm.run_step_id \
+         WHERE rm.run_id = $1 ORDER BY s.ordinal, rm.id",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    Ok(Some(RunDetail {
+        run,
+        steps,
+        memories,
+    }))
 }
 
 /// `GET /runs`: runs newest first, a page at a time.
@@ -469,7 +508,7 @@ pub async fn list(
     operation_id = "get_run",
     params(("id" = i64, Path, description = "The run's id")),
     responses(
-        (status = 200, description = "The run, its steps by `ordinal` and each step's tool calls by `id`", body = RunDetail),
+        (status = 200, description = "The run, its steps by `ordinal`, each step's tool calls by `id`, and the memories its steps retrieved by step `ordinal`, then `id`", body = RunDetail),
         (status = 403, description = "The `Host` header is not a local address"),
         (status = 404, description = "No run has this id"),
         (status = 500, description = "The run could not be read"),

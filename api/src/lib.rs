@@ -18,6 +18,7 @@ pub mod mcp;
 pub mod memories;
 pub mod openapi;
 pub mod resumes;
+pub mod retrieval;
 pub mod runs;
 pub mod tools;
 pub mod workflows;

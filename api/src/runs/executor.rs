@@ -21,6 +21,7 @@ use crate::claude::{
 use crate::events::EventBus;
 use crate::jobs::Job;
 use crate::mcp::{Server, Session};
+use crate::retrieval;
 use crate::tools::{Meter, Registry, Spend, ToolCallError};
 
 /// A named, fixed sequence of steps.
@@ -320,6 +321,20 @@ impl StepContext<'_> {
         super::review::insert(self.pool, self.step_id, kind, confidence, &payload)
             .await
             .map(Some)
+    }
+
+    /// Retrieves confirmed memories for `query` ([`retrieval::search`]) and records them
+    /// on this step ([`retrieval::record`]); a rerun of the step adds only memories it
+    /// hadn't retrieved before. Publishes `run.updated` when a row was added.
+    pub async fn memories(
+        &self,
+        query: &retrieval::Query,
+    ) -> Result<Vec<retrieval::Retrieved>, sqlx::Error> {
+        let found = retrieval::search(self.pool, query).await?;
+        if retrieval::record(self.pool, self.step_id, &found).await? > 0 {
+            super::publish(self.pool, self.bus, self.run_id).await;
+        }
+        Ok(found)
     }
 }
 

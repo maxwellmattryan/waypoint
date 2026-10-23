@@ -50,10 +50,12 @@ export type CaptureQueued = components['schemas']['CaptureQueued'];
 export type CaptureFailure = components['schemas']['CaptureFailure'];
 /** One agent run, as `GET /runs` lists it and `run.updated` carries it. */
 export type Run = components['schemas']['Run'];
-/** The `GET /runs/{id}` body: the run with its steps and their tool calls. */
+/** The `GET /runs/{id}` body: the run with its steps, their tool calls and its memories. */
 export type RunDetail = components['schemas']['RunDetail'];
 /** One step of a run with its tool calls. */
 export type RunStepDetail = components['schemas']['RunStepDetail'];
+/** A memory a run's step retrieved, with a snapshot of it at retrieval time. */
+export type RunMemory = components['schemas']['RunMemory'];
 /** One tool call a step made. */
 export type ToolCall = components['schemas']['ToolCall'];
 /** Where a run is. */
