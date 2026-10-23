@@ -152,7 +152,32 @@ The stream shows `job.queued`, `job.started` and `job.succeeded` for the job. Li
 
 ## Agent runs and tools
 
-Agent workflows run as runs: each step's input, output, status, tokens and cost is stored, along with every tool call it makes, and a failed or interrupted run picks up at its first unfinished step. Tools are typed Rust handlers with JSON schemas and a permission level (`read`, `write` or `external`). `GET /runs` and `GET /runs/<id>` show what a run did, and the **Runs** page shows the same live: each run's status, duration, tokens and cost, and on a run's page every step and tool call with its permission level, input and output. No workflows or tools are registered yet. [docs/agent-runtime.md](docs/agent-runtime.md) covers the tables, the resume rules, how tokens and cost add up, the tool trait, the supported schema subset and the `run.updated` event.
+Agent workflows run as runs: each step's input, output, status, tokens and cost is stored, along with every tool call it makes, and a failed or interrupted run picks up at its first unfinished step. Tools are typed Rust handlers with JSON schemas and a permission level (`read`, `write` or `external`). `GET /runs` and `GET /runs/<id>` show what a run did, and the **Runs** page shows the same live: each run's status, duration, tokens and cost, and on a run's page every step and tool call with its permission level, input and output. [docs/agent-runtime.md](docs/agent-runtime.md) covers the tables, the resume rules, how tokens and cost add up, the tool trait, the supported schema subset and the `run.updated` event.
+
+Permission levels are enforced. An `external` call (one that would leave Waypoint) never runs until you approve it: its step parks and the run shows **Awaiting approval** until you approve (optionally with an edited input) or reject it. Every `write` call is logged with what it takes to undo it, and undo refuses rather than overwrite a record that changed since. A result a step isn't confident about goes to the review queue instead of being applied. [docs/agent-runtime.md](docs/agent-runtime.md) covers the approval gate, undo, review items and their routes.
+
+### Try the sample workflow
+
+The app ships one workflow, `tidy_application`, which needs no model call: it reads an application (`read`), adds a note to its timeline (`write`, undoable), then drafts a follow-up message (`external`), which waits for your approval. The draft is only shown, never sent. With the API running (`./scripts/dev.sh`):
+
+```sh
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"company": "Acme", "title": "Staff Engineer"}' \
+  http://127.0.0.1:8000/applications                                     # 201, note its "id" (1 here)
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"note": "Ask about the team", "message": "Thanks for your time", "confidence": 0.9}' \
+  http://127.0.0.1:8000/applications/1/tidy                              # 201, a queued run; note its "id"
+curl -s http://127.0.0.1:8000/runs/1                                     # "status": "awaiting_approval"
+curl -s http://127.0.0.1:8000/pending-actions                            # the draft_follow_up action; note its "id"
+curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+  http://127.0.0.1:8000/pending-actions/1/approve                        # or send {"input": {...}} to edit it first
+curl -s http://127.0.0.1:8000/runs/1                                     # "succeeded", "output": {"draft": "Thanks for your time (to Acme)"}
+curl -s 'http://127.0.0.1:8000/actions?run_id=1'                         # the add_note action; note its "id"
+curl -s -X POST http://127.0.0.1:8000/actions/1/undo                     # "undone_at" is set
+curl -s http://127.0.0.1:8000/applications/1/events                      # the note is gone from the timeline
+```
+
+The **Runs** page shows the run live, including while it awaits approval. `POST /pending-actions/<id>/reject` instead ends the run `rejected`. A `confidence` below 0.8 sends the note to the review queue (`GET /review-items`) instead of the timeline, and the run still stops at the draft.
 
 ## Capture from URL
 
