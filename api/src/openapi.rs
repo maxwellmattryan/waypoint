@@ -23,6 +23,9 @@ use crate::memories::{
     self, Memory, MemoryInput, MemoryKind, MemoryStatus, MemoryTopic, SourceKind,
 };
 use crate::memory_signals::{self, MemorySignal, SignalChange, SignalKind, SignalOp};
+use crate::profile::ProfileImportSummary;
+use crate::profile::linkedin;
+use crate::profile::resume::{self as resume_profile, ProfileImportQueued};
 use crate::resumes::{self, ResumeLink, ResumeVersion, ResumeVersionDetail};
 use crate::runs::actions::{self, AgentAction};
 use crate::runs::approvals::{self, ApproveAction, PendingAction, PendingActionStatus};
@@ -63,6 +66,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         memories::confirm,
         memories::delete,
         memory_signals::list,
+        linkedin::import,
+        resume_profile::start,
         stages::list,
         stages::add,
         stages::update,
@@ -127,6 +132,8 @@ use crate::workflows::tidy::{self, TidyRequest};
         SignalKind,
         SignalOp,
         SignalChange,
+        ProfileImportSummary,
+        ProfileImportQueued,
         Run,
         RunStatus,
         RunDetail,

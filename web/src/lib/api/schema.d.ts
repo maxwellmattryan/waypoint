@@ -510,6 +510,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/profile/linkedin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Imports the positions, skills and education in a LinkedIn data export as confirmed
+         *     facts. Rows whose key is already stored are counted, not stored again.
+         */
+        post: operations["import_linkedin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/resumes": {
         parameters: {
             query?: never;
@@ -557,6 +577,26 @@ export interface paths {
         get: operations["get_resume_pdf"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resumes/{id}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queues Claude to read a resume version's positions, skills and education into proposed
+         *     memories, or returns the earlier import of the same PDF bytes.
+         */
+        post: operations["import_resume_profile"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1104,6 +1144,37 @@ export interface components {
          * @enum {string}
          */
         Permission: "read" | "write" | "external";
+        /** @description The `POST /resumes/{id}/profile` body. */
+        ProfileImportQueued: {
+            /**
+             * Format: int64
+             * @description The job reading the resume; its `result` is a `ProfileImportSummary`.
+             */
+            job_id: number;
+            /** @description Whether this is an earlier import of the same PDF bytes rather than a new job. */
+            reused: boolean;
+        };
+        /**
+         * @description What an import did: the body of `POST /profile/linkedin` and the `resume_profile` job's
+         *     `result`.
+         */
+        ProfileImportSummary: {
+            /**
+             * Format: int32
+             * @description New memories stored.
+             */
+            added: number;
+            /**
+             * Format: int32
+             * @description Entries whose key was already stored, in this import or an earlier one.
+             */
+            already_known: number;
+            /**
+             * Format: int32
+             * @description Entries missing a required value.
+             */
+            skipped: number;
+        };
         /** @description The `PUT /applications/{id}/resume` body. `null` clears the link. */
         ResumeLink: {
             /** Format: int64 */
@@ -3431,6 +3502,71 @@ export interface operations {
             };
         };
     };
+    import_linkedin: {
+        parameters: {
+            query?: {
+                /** @description The uploaded file's name, at most 255 characters; stored as each memory's `source_label` */
+                filename?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The raw LinkedIn data export archive, 1 byte to 20 MiB. `Positions.csv`, `Skills.csv` and `Education.csv` are read (at any depth, any case), each up to 5 MiB inflated; every other entry is ignored */
+        requestBody: {
+            content: {
+                "application/zip": string;
+            };
+        };
+        responses: {
+            /** @description Every row is applied: new rows stored as confirmed `fact` memories with source `linkedin` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileImportSummary"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is over 20 MiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is not `application/zip` */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `file` is empty, not a zip, has none of the three CSVs, or has a CSV over 5 MiB; or `filename` is too long. Nothing is stored */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The import could not be stored; nothing is stored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_resumes: {
         parameters: {
             query?: never;
@@ -3661,6 +3797,59 @@ export interface operations {
                 content?: never;
             };
             /** @description The PDF could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    import_resume_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The resume version's id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The import job, whose `result` is a `ProfileImportSummary`: a new one, or (`reused: true`) an earlier queued, running or succeeded import of the same PDF bytes */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileImportQueued"];
+                };
+            };
+            /** @description The `Host` header is not a local address, or the request came from another site or as an HTML form */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No resume version has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The version has no text to read (field `text`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrors"];
+                };
+            };
+            /** @description The import could not be queued */
             500: {
                 headers: {
                     [name: string]: unknown;

@@ -18,6 +18,7 @@ pub mod mcp;
 pub mod memories;
 pub mod memory_signals;
 pub mod openapi;
+pub mod profile;
 pub mod resumes;
 pub mod runs;
 pub mod tools;
@@ -93,6 +94,8 @@ pub fn rocket(
                 memories::confirm,
                 memories::delete,
                 memory_signals::list,
+                profile::linkedin::import,
+                profile::resume::start,
                 applications::stages::list,
                 applications::stages::add,
                 applications::stages::update,

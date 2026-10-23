@@ -33,6 +33,8 @@ export type {
 	NewApplication,
 	PendingAction,
 	Permission,
+	ProfileImportQueued,
+	ProfileImportSummary,
 	ResumeLink,
 	ResumeVersion,
 	ResumeVersionDetail,
