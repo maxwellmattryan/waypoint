@@ -74,8 +74,9 @@ impl fmt::Debug for Config {
             .field("token_url", &self.token_url)
             .field("revoke_url", &self.revoke_url)
             .field("redirect_uri", &self.redirect_uri)
-            .field("gmail", &self.gmail)
-            .finish()
+            // Only the endpoint: the sync limits are code defaults, not settings.
+            .field("gmail_base_url", &self.gmail.base_url)
+            .finish_non_exhaustive()
     }
 }
 
