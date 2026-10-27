@@ -35,10 +35,9 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|err| format!("cannot connect to the database at DATABASE_URL: {err}"))?;
 
-    MIGRATOR
-        .run(&pool)
-        .await
-        .map_err(|err| format!("database migrations failed: {err}"))?;
+    if let Err(err) = MIGRATOR.run(&pool).await {
+        return Err(waypoint_api::migrate::explain(&pool, &MIGRATOR, &err).await);
+    }
 
     let figment = config::figment(rocket::Config::figment(), port);
     waypoint_api::rocket(
