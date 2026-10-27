@@ -23,6 +23,14 @@ Postgres keeps running after the script exits, and its data persists in the `way
 docker compose down
 ```
 
+If the API exits at startup saying a migration "was previously applied but has been modified" or is "missing", the dev database was migrated by another branch or worktree. Reset it:
+
+```sh
+scripts/db-reset.sh
+```
+
+It drops and recreates `$POSTGRES_DB` in the Compose `db` service, which **deletes all dev data**; migrations apply again on the next `./scripts/dev.sh`. It asks you to type the database name to confirm. `--yes` skips that prompt, and without a terminal it refuses unless `--yes` is given. `docker compose down -v` followed by `./scripts/dev.sh` does the same by removing the whole volume.
+
 ## Dashboard
 
 The web app opens on a dashboard inside the app shell. The top bar links to the Dashboard, [Applications](#applications), [Resumes](#resumes), [Memory](#memory), [Review](#agent-runs-and-tools) and [Runs](#agent-runs-and-tools) and shows whether the live event stream is connected (Connecting, Live, Reconnecting). The dashboard has three cards:
